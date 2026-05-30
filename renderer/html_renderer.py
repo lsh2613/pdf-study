@@ -327,12 +327,55 @@ def _chapter_body(
         ext_items = ((extension.get("questions") or {}).get("extension") or [])
         sections.append(_extension_section(ext_items))
 
+    # 챕터 끝에 명시적 완료 토글
+    sections.append(
+        '<section class="completion-control">'
+        '<button type="button" class="complete-btn" aria-pressed="false">'
+        '<span class="check" aria-hidden="true"></span>'
+        '<span class="label">이 챕터 완료로 표시</span>'
+        '</button>'
+        '</section>'
+    )
+
     return "".join(sections)
 
 
 # ---------------------------------------------------------------------------
 # 페이지 빌더
 # ---------------------------------------------------------------------------
+
+def _sidebar(
+    book_title: str,
+    chapters: list[dict[str, Any]],
+    current_id: str | None,
+) -> str:
+    """챕터 사이드바: 책 제목 + 챕터 링크 + 완료 표시 placeholder.
+
+    completed 여부는 storage.js가 GET /api/progress/{cid}로 채운다.
+    """
+    items: list[str] = []
+    for ch in chapters:
+        cid = ch["chapter_id"]
+        title = (ch.get("summary") or {}).get("title") or ch["meta"].get("title") or cid
+        active_attr = ' aria-current="page"' if cid == current_id else ""
+        active_class = " is-active" if cid == current_id else ""
+        items.append(
+            f'<a class="sidebar-link{active_class}" '
+            f'data-chapter="{_esc(cid)}" href="{_esc(cid)}.html"{active_attr}>'
+            '<span class="sidebar-check" aria-hidden="true"></span>'
+            f'<span class="sidebar-title">{_esc(title)}</span>'
+            '</a>'
+        )
+    return (
+        '<button class="sidebar-toggle" type="button" '
+        'aria-label="목차 토글" aria-controls="sidebar" aria-expanded="false">☰</button>'
+        '<aside class="sidebar" id="sidebar" aria-label="챕터 목차">'
+        f'<a class="sidebar-book" href="index.html">{_esc(book_title)}</a>'
+        '<nav class="sidebar-chapters">' + "".join(items) + "</nav>"
+        "</aside>"
+        '<div class="sidebar-scrim" hidden></div>'
+    )
+
 
 def _page_shell(
     *,
@@ -341,17 +384,20 @@ def _page_shell(
     body: str,
     page_kind: str,
     chapter_id: str | None = None,
+    sidebar_html: str = "",
 ) -> str:
     data_attrs = f'data-page="{_esc(page_kind)}"'
     if chapter_id:
         data_attrs += f' data-chapter-id="{_esc(chapter_id)}"'
+    body_class = "has-sidebar" if sidebar_html else ""
     return (
         f'<!DOCTYPE html><html lang="{_esc(lang)}"><head>'
         '<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<title>{_esc(title)}</title>'
         '<link rel="stylesheet" href="assets/style.css">'
-        '</head><body>'
+        f'</head><body class="{body_class}">'
+        f'{sidebar_html}'
         f'<main {data_attrs}>'
         f'{body}'
         '</main>'
@@ -372,11 +418,11 @@ def _index_body(book_info: dict[str, Any], chapters: list[dict[str, Any]]) -> st
         items.append(
             f'<a class="chapter-link" href="{_esc(cid)}.html" data-chapter="{_esc(cid)}">'
             '<div class="row">'
+            '<span class="chapter-check" aria-hidden="true"></span>'
             f'<span class="chapter-title">{_esc(title)}</span>'
             f'<span class="chapter-range">p.{_esc(pr[0])}–{_esc(pr[1])}</span>'
             "</div>"
-            '<div class="progress-bar"><i></i></div>'
-            '<div class="progress-text">아직 학습하지 않음</div>'
+            '<div class="status-text">아직 학습하지 않음</div>'
             '</a>'
         )
     return header + '<nav class="chapter-list">' + "".join(items) + "</nav>"
@@ -437,7 +483,7 @@ class HtmlRenderer(Renderer):
                 ),
                 encoding="utf-8",
             )
-            # 각 챕터 페이지
+            # 각 챕터 페이지 — 사이드바는 챕터 페이지에만 (index/단일챕터는 불필요)
             for i, ch in enumerate(chapters):
                 cid = ch["chapter_id"]
                 ch_title = (ch.get("summary") or {}).get("title") or ch["meta"].get("title") or cid
@@ -454,6 +500,7 @@ class HtmlRenderer(Renderer):
                         body=article_body,
                         page_kind="chapter",
                         chapter_id=cid,
+                        sidebar_html=_sidebar(str(book_title), chapters, cid),
                     ),
                     encoding="utf-8",
                 )

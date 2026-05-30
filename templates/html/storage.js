@@ -59,7 +59,6 @@
   async function initChapterPage(chapterId) {
     const state = {
       chapter_id: chapterId,
-      reading_progress: 0,
       last_position: null,
       completed: false,
       answers: {},
@@ -142,28 +141,45 @@
       }
     });
 
-    // IntersectionObserver — 현재 보이는 section id를 last_position으로
+    // last_position(섹션 자동 스크롤 복원용)은 IntersectionObserver로 추적.
+    // 진행률 자동 측정은 하지 않음 — 완료 여부는 아래의 명시적 버튼에서만 토글.
     const sections = document.querySelectorAll("article > section[id]");
     if (sections.length) {
       const visible = new Set();
+      const ordered = Array.from(sections).map((s) => s.id);
       const io = new IntersectionObserver((entries) => {
         for (const e of entries) {
           if (e.isIntersecting) visible.add(e.target.id);
           else visible.delete(e.target.id);
         }
         if (visible.size) {
-          const ordered = Array.from(sections).map((s) => s.id);
           const first = ordered.find((id) => visible.has(id));
           if (first) {
             state.last_position = first;
-            const idx = ordered.indexOf(first);
-            state.reading_progress = (idx + 1) / ordered.length;
             postChapter();
             postGlobal(first);
           }
         }
       }, { threshold: 0.3 });
       sections.forEach((s) => io.observe(s));
+    }
+
+    // 완료 토글 버튼
+    const completeBtn = document.querySelector(".complete-btn");
+    if (completeBtn) {
+      const applyCompletedUI = () => {
+        const done = !!state.completed;
+        completeBtn.setAttribute("aria-pressed", done ? "true" : "false");
+        completeBtn.querySelector(".label").textContent =
+          done ? "완료 표시됨 (다시 누르면 취소)" : "이 챕터 완료로 표시";
+        setSidebarCompleted(chapterId, done);
+      };
+      applyCompletedUI();
+      completeBtn.addEventListener("click", () => {
+        state.completed = !state.completed;
+        applyCompletedUI();
+        postChapter();
+      });
     }
 
     // 페이지 떠날 때 한 번 더 sync (best-effort)
@@ -173,6 +189,59 @@
         const blob = new Blob([JSON.stringify(state)], { type: "application/json" });
         navigator.sendBeacon(API(chapterId), blob);
       } catch (_) {}
+    });
+
+    // 사이드바 초기화: 모든 챕터 완료 여부 fetch + 자기 챕터는 현재 state로 즉시 반영
+    setSidebarCompleted(chapterId, !!state.completed);
+    refreshSidebarOthers(chapterId);
+    initSidebarToggle();
+  }
+
+  function setSidebarCompleted(chapterId, done) {
+    const link = document.querySelector(
+      `.sidebar-link[data-chapter="${chapterId}"]`
+    );
+    if (link) link.classList.toggle("is-completed", !!done);
+  }
+
+  async function refreshSidebarOthers(currentId) {
+    const others = document.querySelectorAll(
+      `.sidebar-link[data-chapter]:not([data-chapter="${currentId}"])`
+    );
+    await Promise.all(
+      Array.from(others).map(async (el) => {
+        const cid = el.dataset.chapter;
+        const p = await getJSON(cid);
+        if (!p) return;
+        setSidebarCompleted(cid, !!p.completed);
+      })
+    );
+  }
+
+  function initSidebarToggle() {
+    const sidebar = document.getElementById("sidebar");
+    const toggle = document.querySelector(".sidebar-toggle");
+    const scrim = document.querySelector(".sidebar-scrim");
+    if (!sidebar || !toggle) return;
+
+    const close = () => {
+      sidebar.classList.remove("is-open");
+      toggle.setAttribute("aria-expanded", "false");
+      if (scrim) scrim.hidden = true;
+    };
+    const open = () => {
+      sidebar.classList.add("is-open");
+      toggle.setAttribute("aria-expanded", "true");
+      if (scrim) scrim.hidden = false;
+    };
+    toggle.addEventListener("click", () => {
+      sidebar.classList.contains("is-open") ? close() : open();
+    });
+    if (scrim) scrim.addEventListener("click", close);
+    // 모바일에서 다른 챕터로 이동할 때 닫힘 상태로 — 새 페이지 로드라 자동 처리.
+    // ESC로도 닫기
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && sidebar.classList.contains("is-open")) close();
     });
   }
 
@@ -233,12 +302,11 @@
         const cid = el.dataset.chapter;
         const p = await getJSON(cid);
         if (!p) return;
-        const bar = el.querySelector(".progress-bar > i");
-        const txt = el.querySelector(".progress-text");
-        const pct = Math.round((p.reading_progress || 0) * 100);
-        if (bar) bar.style.width = pct + "%";
+        const done = !!p.completed;
+        el.classList.toggle("is-completed", done);
+        const txt = el.querySelector(".status-text");
         if (txt) {
-          let s = pct + "% 진행";
+          let s = done ? "완료" : "아직 학습하지 않음";
           if (p.mc_score && p.mc_score.total) {
             s += ` · 객관식 ${p.mc_score.correct}/${p.mc_score.total}`;
           }
