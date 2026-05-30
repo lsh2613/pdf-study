@@ -3,3 +3,8 @@ __pycache__/
 *.egg-info/
 .DS_Store
 docs/
+
+# 합성 테스트 fixture (build_fixtures로 매번 재생성 가능, 폰트 임베드로 6MB)
+tests/fixtures/*.pdf
+tests/fixtures/_assets/
+.pytest_cache/
