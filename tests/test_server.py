@@ -31,6 +31,47 @@ def test_init_work_rejects_missing_pdf(tmp_path):
     assert r["ok"] is False
 
 
+def test_init_work_default_output_dir_uses_cwd_result_pdf_basename(tmp_path, ko_short, monkeypatch):
+    """output_dir 미지정 시 <cwd>/result/<pdf_basename>/ 로 자동 생성."""
+    monkeypatch.chdir(tmp_path)
+    r = server.init_work(str(ko_short))   # output_dir 생략
+    _check_envelope(r)
+    assert r["ok"], r
+    out = r["data"]["output_dir"]
+    assert out == str(tmp_path / "result" / "ko_short")
+    assert (tmp_path / "result" / "ko_short" / ".work" / "state.json").exists()
+
+
+def test_init_work_blank_output_dir_falls_back_to_default(tmp_path, ko_short, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    r = server.init_work(str(ko_short), output_dir="   ")  # 공백만
+    assert r["ok"], r
+    assert r["data"]["output_dir"] == str(tmp_path / "result" / "ko_short")
+
+
+def test_init_work_default_dir_sanitizes_pdf_name(tmp_path, monkeypatch):
+    """공백/특수문자가 있는 PDF 파일명은 _ 로 치환."""
+    import shutil
+    src = tmp_path.parent  # fixtures가 ko_short 등이 있는 디렉토리
+    # 안전한 합성: 빈 PDF로도 sanitize만 확인하면 됨 — init_work는 PDF 존재만 본다
+    weird = tmp_path / "리팩터링 2판-페이지 1.pdf"
+    weird.write_bytes(b"%PDF-1.4")  # 진짜 PDF는 아니지만 init_work는 존재만 확인
+    monkeypatch.chdir(tmp_path)
+    r = server.init_work(str(weird))
+    assert r["ok"], r
+    # 공백 → _, 다른 문자는 한글/숫자/-/. 그대로
+    out = r["data"]["output_dir"]
+    assert out == str(tmp_path / "result" / "리팩터링_2판-페이지_1")
+
+
+def test_init_work_explicit_output_dir_used_as_is(tmp_path, ko_short):
+    target = tmp_path / "my-custom-name"
+    r = server.init_work(str(ko_short), str(target))
+    assert r["ok"], r
+    assert r["data"]["output_dir"] == str(target)
+    assert (target / ".work" / "state.json").exists()
+
+
 def test_scan_pdf_rejects_no_text_layer(tmp_path, scanned_empty):
     r0 = server.init_work(str(scanned_empty), str(tmp_path / "out"))
     assert r0["ok"]

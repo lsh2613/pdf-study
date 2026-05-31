@@ -79,8 +79,13 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _make_work_id() -> str:
+def make_work_id() -> str:
+    """work_id 발급. 외부에서도 default output_dir 작명에 쓸 수 있게 공개."""
     return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+# 하위호환 alias
+_make_work_id = make_work_id
 
 
 def _now_iso() -> str:
@@ -157,11 +162,13 @@ def create_workspace(
     options: dict[str, bool],
     user_context: str = "",
     execution_mode: str = "sequential",
+    work_id: str | None = None,
 ) -> str:
     """워크스페이스 생성 → work_id 반환.
 
     output_dir/.work/ 아래에 state.json과 하위 폴더들을 초기화한다.
     이미 .work/state.json이 있으면 새 work_id로 덮어쓴다 (재초기화).
+    work_id를 인자로 받으면(외부에서 미리 발급) 그 값으로 등록. 없으면 새로 발급.
 
     Raises:
         ValueError: pdf_path 미존재, execution_mode 잘못됨, 모든 문제 비활성.
@@ -187,7 +194,8 @@ def create_workspace(
     (work_dir / "chapters").mkdir(parents=True, exist_ok=True)
     (work_dir / "extensions").mkdir(parents=True, exist_ok=True)
 
-    work_id = _make_work_id()
+    if work_id is None:
+        work_id = make_work_id()
     register(work_id, work_dir)
 
     initial_state: dict[str, Any] = {

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,17 @@ def _ok(data: Any = None, next_action: str | None = None) -> dict[str, Any]:
 
 def _err(error: str, data: Any = None) -> dict[str, Any]:
     return {"ok": False, "error": error, "data": data, "next_action": None}
+
+
+_SAFE_NAME_RE = re.compile(r"[^\w가-힣.\-]+")  # 영숫자 / 한글 / _ . - 외엔 치환
+
+
+def _pdf_name_slug(pdf_path: str) -> str:
+    """PDF 파일명을 디렉토리 이름으로 안전하게 정규화."""
+    stem = Path(pdf_path).stem
+    safe = _SAFE_NAME_RE.sub("_", stem)
+    safe = re.sub(r"_+", "_", safe).strip("_.")
+    return safe or "study"
 
 
 def _safe(label: str):
@@ -74,7 +86,7 @@ def _safe(label: str):
 @_safe("init_work")
 def init_work(
     pdf_path: str,
-    output_dir: str,
+    output_dir: str = "",
     execution_mode: str = "sequential",
     enable_multiple_choice: bool = True,
     enable_short_answer: bool = True,
@@ -84,14 +96,23 @@ def init_work(
 ) -> dict[str, Any]:
     """워크스페이스를 생성하고 work_id를 발급합니다.
 
+    - output_dir: 학습 자료를 저장할 디렉토리. 비워두면 현재 작업 디렉토리
+      아래에 `result/<pdf_basename>/` 형태로 자동 생성됩니다 (PDF 파일명에서
+      안전하지 않은 문자는 `_`로 치환). 같은 PDF로 재실행하면 같은 폴더에
+      **덮어씌워지므로**, 이전 결과를 보존하려면 명시적으로 다른 경로를 주세요.
     - execution_mode: "sequential" (기본) | "parallel"
     - enable_*: 4가지 문제 유형 활성/비활성 (모두 False 금지)
     - user_context: 학습자 정보 (학년/배경 등). sub-agent 프롬프트에 주입.
     다음 단계: scan_pdf(work_id)
     """
-    work_id = workspace.create_workspace(
+    work_id = workspace.make_work_id()
+    resolved_dir = (output_dir or "").strip()
+    if not resolved_dir:
+        resolved_dir = str(Path.cwd() / "result" / _pdf_name_slug(pdf_path))
+
+    workspace.create_workspace(
         pdf_path=pdf_path,
-        output_dir=output_dir,
+        output_dir=resolved_dir,
         options={
             "multiple_choice": enable_multiple_choice,
             "short_answer": enable_short_answer,
@@ -100,9 +121,14 @@ def init_work(
         },
         user_context=user_context,
         execution_mode=execution_mode,
+        work_id=work_id,
     )
     return _ok(
-        {"work_id": work_id, "work_dir": str(workspace.get_work_dir(work_id))},
+        {
+            "work_id": work_id,
+            "work_dir": str(workspace.get_work_dir(work_id)),
+            "output_dir": resolved_dir,
+        },
         next_action=f'scan_pdf(work_id="{work_id}", scan_size=20)',
     )
 
