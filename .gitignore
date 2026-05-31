@@ -8,3 +8,6 @@ docs/
 tests/fixtures/*.pdf
 tests/fixtures/_assets/
 .pytest_cache/
+
+# MCP 클라이언트별 로컬 설정 (venv/Python 절대 경로 등 사용자 환경 의존)
+.gemini/
