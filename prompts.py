@@ -25,6 +25,40 @@ QUESTION_SCALES_TABLE = """
 
 
 # ---------------------------------------------------------------------------
+# 챕터 본문 분량에 따른 요약 길이 권장
+# ---------------------------------------------------------------------------
+SUMMARY_LENGTH_TABLE_KO = """
+기준선: **본문 글자수의 약 1/3**. 매우 짧으면 1/2까지, 매우 길면 1/4 수준으로 완만하게 조절.
+
+| 챕터 본문 글자 수 | 요약 권장 길이 | 비율 |
+|---|---|---|
+| < 2,000        | 800–1,200자    | ≈ 1/2 |
+| 2,000–10,000   | 1,000–3,500자  | ≈ 1/3 |
+| 10,000–25,000  | 3,000–8,000자  | ≈ 1/3 |
+| 25,000+        | 6,000–10,000자 | ≈ 1/4 |
+
+권장값이며 강제 아닙니다. 본문 성격(코드 위주·정의 위주·서사형 등)과
+독자가 다시 펼치지 않고도 요지를 잡을 수 있는지를 기준으로 조절하세요.
+""".strip()
+
+SUMMARY_LENGTH_TABLE_EN = """
+Baseline: **about 1/3 of the body length**. Up to ~1/2 for very short chapters,
+down to ~1/4 for very long ones.
+
+| Chapter body chars | Suggested summary length | Ratio |
+|---|---|---|
+| < 2,000        | 800–1,200 chars    | ≈ 1/2 |
+| 2,000–10,000   | 1,000–3,500 chars  | ≈ 1/3 |
+| 10,000–25,000  | 3,000–8,000 chars  | ≈ 1/3 |
+| 25,000+        | 6,000–10,000 chars | ≈ 1/4 |
+
+These are guidelines, not hard limits. Adjust based on the chapter's nature
+(code-heavy / definition-heavy / narrative) and whether a reader could grasp
+the key ideas without reopening the original text.
+""".strip()
+
+
+# ---------------------------------------------------------------------------
 # Summarizer 템플릿
 # ---------------------------------------------------------------------------
 
@@ -41,8 +75,11 @@ _SUMMARIZER_KO = """\
 [활성화된 문제 유형]
 {enabled_types_block}
 
-[챕터 글자 수별 권장 개수]
+[챕터 글자 수별 권장 문제 개수]
 {scales_table}
+
+[챕터 본문 분량에 따른 요약 길이 권장]
+{summary_length_table}
 
 [OCR/스캔 본문 주의]
 본문에 깨진 글자, 띄어쓰기 오류, 잘못 분리된 줄이 있을 수 있습니다.
@@ -58,7 +95,7 @@ get_chapter_content가 제공한 image_refs(절대 경로)는 챕터의 그림/�
 {{
   "chapter_id": "<주어진 chapter_id 그대로>",
   "title": "<주어진 title 그대로>",
-  "summary": "<400–800자 한국어 요약>",
+  "summary": "<위 권장 길이 표를 참고해 본문 분량에 맞춘 한국어 요약>",
   "key_points": ["...", "..."],
   "questions": {{
     "multiple_choice": [
@@ -96,8 +133,11 @@ Read the given chapter and produce ① summary, ② key points, ③ verification
 [Enabled question types]
 {enabled_types_block}
 
-[Recommended counts per chapter size]
+[Recommended question counts per chapter size]
 {scales_table}
+
+[Suggested summary length per chapter body size]
+{summary_length_table}
 
 [OCR/scan caveat]
 The text may contain broken characters, spacing errors, or split lines.
@@ -113,7 +153,7 @@ Return **exactly one JSON object** matching the schema below. No markdown fences
 {{
   "chapter_id": "<as given>",
   "title": "<as given>",
-  "summary": "<400–800 char English summary>",
+  "summary": "<English summary scaled to body size per the table above>",
   "key_points": ["...", "..."],
   "questions": {{
     "multiple_choice": [
@@ -334,7 +374,11 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     enabled_types_block = _format_enabled_types(opts, language)
 
     summ_tmpl = _SUMMARIZER_KO if language == "ko" else _SUMMARIZER_EN
+    summary_length_table = (
+        SUMMARY_LENGTH_TABLE_KO if language == "ko" else SUMMARY_LENGTH_TABLE_EN
+    )
     summarizer_prompt = summ_tmpl.format(
+        summary_length_table=summary_length_table,
         book_info_block=book_info_block,
         user_context_block=user_context_block,
         enabled_types_block=enabled_types_block,

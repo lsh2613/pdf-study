@@ -80,6 +80,29 @@ def test_chapter_ids_naturally_sorted():
     assert out["chapter_ids"] == ["ch1", "ch2", "ch10"]
 
 
+def test_summary_length_table_present_per_language():
+    """챕터 본문 분량에 따른 요약 길이 권장 표가 KO/EN 모두에 들어가야 한다."""
+    ko = prompts.build_prompts(_state(language="ko"))["summarizer_prompt"]
+    en = prompts.build_prompts(_state(language="en"))["summarizer_prompt"]
+    # KO 표 — 본문의 약 1/3 기준
+    assert "본문 글자수의 약 1/3" in ko
+    assert "800–1,200자" in ko and "6,000–10,000자" in ko
+    # EN 표
+    assert "1/3 of the body length" in en
+    assert "800–1,200 chars" in en and "6,000–10,000 chars" in en
+
+
+def test_summary_length_is_not_fixed_400_800():
+    """예전 고정 한도(400–800자)가 사용자에게 강제되지 않아야 한다."""
+    ko = prompts.build_prompts(_state(language="ko"))["summarizer_prompt"]
+    en = prompts.build_prompts(_state(language="en"))["summarizer_prompt"]
+    # JSON 스키마 안의 summary 필드 안내가 본문 분량 기반인지 확인
+    assert "400–800자 한국어 요약" not in ko
+    assert "400–800 char English summary" not in en
+    assert "본문 분량에 맞춘" in ko
+    assert "scaled to body size" in en
+
+
 def test_enabled_types_reflects_options():
     opts = {
         "multiple_choice": True, "short_answer": False,
