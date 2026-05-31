@@ -125,6 +125,16 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
     assert (out / "main.html").exists()
     assert not (out / "index.html").exists()
 
+    # next_action에 serve.py 명령 + 진도 저장 경고 + 종료 안내가 모두 있어야 한다
+    msg = r10["next_action"]
+    assert "serve.py" in msg
+    assert "http://localhost:8765" in msg
+    assert "file://" in msg           # 직접 열기 금지 안내
+    assert "Ctrl+C" in msg            # 종료 가이드
+    assert "브라우저 탭" in msg        # 탭 닫기로는 안 꺼진다는 안내
+    assert r10["data"]["serve_command"].startswith("cd ")
+    assert r10["data"]["entry_page"] == "main.html"
+
 
 def test_finalize_rejects_unknown_format(tmp_path, ko_short):
     r1 = server.init_work(str(ko_short), str(tmp_path / "out"))

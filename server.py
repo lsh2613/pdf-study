@@ -33,23 +33,36 @@ def _err(error: str, data: Any = None) -> dict[str, Any]:
 
 
 def _safe(label: str):
-    """동기 도구용 try/except 데코레이터. KeyError/ValueError/Runtime/기타."""
+    """MCP 도구의 예외를 ok=False 응답으로 변환 (sync/async 모두 지원)."""
     def deco(fn):
+        import asyncio
         from functools import wraps
 
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            try:
-                return fn(*args, **kwargs)
-            except (KeyError, ValueError, FileNotFoundError, RuntimeError) as e:
+        def _handle(e: BaseException):
+            if isinstance(e, (KeyError, ValueError, FileNotFoundError, RuntimeError)):
                 logger.warning("%s failed: %s", label, e)
                 return _err(f"{type(e).__name__}: {e}")
-            except NotImplementedError as e:
+            if isinstance(e, NotImplementedError):
                 return _err(f"NotImplemented: {e}")
+            logger.exception("%s unexpected error", label)
+            return _err(f"unexpected {type(e).__name__}: {e}")
+
+        if asyncio.iscoroutinefunction(fn):
+            @wraps(fn)
+            async def aw(*args, **kwargs):
+                try:
+                    return await fn(*args, **kwargs)
+                except Exception as e:
+                    return _handle(e)
+            return aw
+
+        @wraps(fn)
+        def sw(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
             except Exception as e:
-                logger.exception("%s unexpected error", label)
-                return _err(f"unexpected {type(e).__name__}: {e}")
-        return wrapper
+                return _handle(e)
+        return sw
     return deco
 
 
@@ -223,6 +236,7 @@ def save_extension_result(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@_safe("search_extension_context")
 async def search_extension_context(
     work_id: str,
     chapter_id: str,
@@ -230,17 +244,13 @@ async def search_extension_context(
 ) -> dict[str, Any]:
     """Exa Web Research MCP로 외부 자료 검색 (API key 불필요).
 
-    실패해도 ok=True + 빈 results로 응답하여 sub-agent가 본문 지식만으로
-    확장 문제를 만들 수 있도록 합니다. 출처 URL을 sub-agent가 sources에 기재.
+    Exa 호출 자체가 실패해도 ok=True + 빈 results로 응답하여 sub-agent가
+    본문 지식만으로 확장 문제를 만들 수 있게 한다. 알 수 없는 work_id 같은
+    클라이언트 오류만 ok=False로 변환된다.
     """
-    try:
-        # work_id 유효성만 가볍게 확인 (registry에 없으면 KeyError)
-        workspace.get_work_dir(work_id)
-    except KeyError as e:
-        return _err(f"KeyError: {e}")
-
+    # work_id 유효성 (registry에 없으면 KeyError → _safe가 처리)
+    workspace.get_work_dir(work_id)
     result = await exa_client.search(query)
-    # exa_client는 실패도 results=[]로 graceful return
     return _ok({
         "query": query,
         "chapter_id": chapter_id,
@@ -299,8 +309,9 @@ def finalize_study(
     - output_format: "html" (구현 완료) | "md_tui" (ROADMAP)
     - keep_work_dir: False면 .work/ 폴더 삭제
 
-    Phase 4 시점에는 HtmlRenderer가 미구현이라 NotImplementedError 응답이
-    나올 수 있습니다. Phase 5 완료 후 정상 동작합니다.
+    응답의 next_action에 학습 자료 서버 기동 명령(`python serve.py`)이
+    포함됩니다. **이 서버를 띄워야 답안/완료 토글이 progress/ 폴더에
+    저장**되며, 파일을 직접 열면(file://) 진도 API가 동작하지 않습니다.
     """
     renderer_cls = RENDERERS.get(output_format)
     if renderer_cls is None:
@@ -322,11 +333,32 @@ def finalize_study(
         if work_dir.exists():
             shutil.rmtree(work_dir)
 
-    return _ok({
-        "output_dir": str(output_dir),
-        "format": output_format,
-        "work_dir_kept": keep_work_dir,
-    })
+    serve_cmd = f"cd {output_dir} && python3 serve.py"
+    entry = "index.html" if (output_dir / "index.html").exists() else "main.html"
+    return _ok(
+        {
+            "output_dir": str(output_dir),
+            "format": output_format,
+            "work_dir_kept": keep_work_dir,
+            "serve_command": serve_cmd,
+            "entry_page": entry,
+            "default_url": "http://localhost:8765/" + entry,
+        },
+        next_action=(
+            f"학습 자료가 {output_dir}에 만들어졌습니다.\n"
+            f"\n[서버 시작] 진도 저장과 완료 토글이 동작하려면 다음 명령을 "
+            f"실행하세요:\n"
+            f"  {serve_cmd}\n"
+            f"기본 포트는 8765이며 브라우저가 자동으로 "
+            f"http://localhost:8765/{entry} 를 엽니다. 파일을 더블클릭"
+            f"(file://)으로 열면 /api/progress 호출이 막혀 답안이 저장되지 "
+            f"않습니다.\n"
+            f"\n[서버 종료] 서버를 실행한 터미널에서 Ctrl+C 를 누르세요. "
+            f"브라우저 탭/창을 닫는 것만으로는 서버가 꺼지지 않습니다. "
+            f"백그라운드로 띄웠다면 `lsof -i :8765` 로 PID를 찾아 `kill <pid>` "
+            f"하거나, `pkill -f \"serve.py --port 8765\"` 로 종료할 수 있습니다."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
