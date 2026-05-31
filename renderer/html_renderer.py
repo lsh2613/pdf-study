@@ -43,7 +43,9 @@ def _load_all(work_id: str) -> dict[str, Any]:
     extensions_dir = workspace.extensions_dir(work_id)
     raw_dir = workspace.chapters_raw_dir(work_id)
 
-    chapter_ids = sorted(state.get("chapters", {}).keys(), key=_chapter_sort_key)
+    all_ids = sorted(state.get("chapters", {}).keys(), key=_chapter_sort_key)
+    # skipped 챕터(찾아보기·색인 등 비본문)는 렌더 대상에서 제외
+    chapter_ids = [cid for cid in all_ids if not state["chapters"][cid].get("skip")]
     chapters: list[dict[str, Any]] = []
     for cid in chapter_ids:
         meta = state["chapters"][cid]

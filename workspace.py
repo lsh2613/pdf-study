@@ -273,19 +273,24 @@ def set_chapters_in_state(work_id: str, chapters: list[dict[str, Any]]) -> None:
     """set_chapters 도구가 결정한 챕터 구조를 state.chapters에 반영.
 
     각 chapter는 최소 {chapter_id, title, page_range} 보유.
-    char_count는 본문 추출 후 update_chapter_status로 갱신.
+    optional "skip": True → 색인/판권/찾아보기 같은 비본문 챕터.
+    이 경우 summary/extension status가 "skipped"로 초기화되고
+    raw 추출·sub-agent 디스패치·렌더링 모두에서 제외된다.
     """
     with _get_lock(work_id):
         state = load_state(work_id)
         new_chapters: dict[str, dict[str, Any]] = {}
         for ch in chapters:
             cid = ch["chapter_id"]
+            skip = bool(ch.get("skip", False))
+            status = "skipped" if skip else "pending"
             new_chapters[cid] = {
                 "title": ch["title"],
                 "page_range": list(ch["page_range"]),
                 "char_count": ch.get("char_count", 0),
-                "summary_status": "pending",
-                "extension_status": "pending",
+                "skip": skip,
+                "summary_status": status,
+                "extension_status": status,
                 "error": None,
                 "retry_count": 0,
             }
@@ -414,22 +419,27 @@ def mark_chapter_failed(
 # 조회 헬퍼
 # ---------------------------------------------------------------------------
 
+_DONE_STATUSES = ("completed", "skipped")
+
+
 def list_pending_chapters_impl(work_id: str) -> dict[str, list[str]]:
-    """summary/extension이 아직 완료되지 않은 챕터 ID 목록.
+    """summary/extension이 아직 처리되지 않은 챕터 ID 목록.
+
+    `completed`와 `skipped`(비본문 챕터)는 처리 끝난 것으로 본다.
 
     Returns:
         {
-            "summary_pending": ["ch1", "ch3"],   # pending or in_progress or failed
-            "extension_pending": ["ch1", "ch2"], # 옵션 비활성이어도 동일 키 사용 (server에서 필터)
+            "summary_pending": ["ch1", "ch3"],
+            "extension_pending": ["ch1", "ch2"],   # 옵션 비활성 필터링은 server에서
         }
     """
     state = load_state(work_id)
     summary_pending: list[str] = []
     extension_pending: list[str] = []
     for cid, entry in state.get("chapters", {}).items():
-        if entry.get("summary_status") != "completed":
+        if entry.get("summary_status") not in _DONE_STATUSES:
             summary_pending.append(cid)
-        if entry.get("extension_status") != "completed":
+        if entry.get("extension_status") not in _DONE_STATUSES:
             extension_pending.append(cid)
     return {
         "summary_pending": sorted(summary_pending),

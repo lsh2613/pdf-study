@@ -356,7 +356,13 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         else WORKFLOW_INSTRUCTIONS_SEQUENTIAL
     )
 
-    chapter_ids = sorted(state.get("chapters", {}).keys(), key=_chapter_sort_key)
+    # 비본문(skipped) 챕터는 sub-agent 디스패치 대상에서 제외
+    all_chapter_ids = sorted(state.get("chapters", {}).keys(), key=_chapter_sort_key)
+    chapter_ids = [
+        cid for cid in all_chapter_ids
+        if not state["chapters"][cid].get("skip")
+    ]
+    skipped_chapter_ids = [cid for cid in all_chapter_ids if cid not in chapter_ids]
 
     return {
         "mode": mode,
@@ -365,6 +371,7 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         "extension_prompt": extension_prompt,
         "workflow_instructions": workflow,
         "chapter_ids": chapter_ids,
+        "skipped_chapter_ids": skipped_chapter_ids,
         "enabled_types": {k: bool(opts.get(k)) for k in
                           ("multiple_choice", "short_answer", "reflection", "extension")},
     }

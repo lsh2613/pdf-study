@@ -226,8 +226,11 @@ def _validate_chapter_def(ch: dict[str, Any], page_count: int) -> dict[str, Any]
             f"chapter {ch['chapter_id']}: page_range [{start}, {end}] "
             f"invalid for {page_count}p document"
         )
-    return {"chapter_id": str(ch["chapter_id"]), "title": str(ch["title"]),
-            "page_range": [start, end]}
+    out = {"chapter_id": str(ch["chapter_id"]), "title": str(ch["title"]),
+           "page_range": [start, end]}
+    if ch.get("skip"):
+        out["skip"] = True
+    return out
 
 
 def set_chapters_impl(
@@ -289,6 +292,17 @@ def set_chapters_impl(
     try:
         for ch_def in normalized:
             cid = ch_def["chapter_id"]
+
+            # 비본문 챕터(찾아보기·색인·판권 등)는 추출도, sub-agent 디스패치도, 렌더도 안 한다
+            if ch_def.get("skip"):
+                summaries.append({
+                    "chapter_id": cid, "title": ch_def["title"],
+                    "page_range": ch_def["page_range"],
+                    "char_count": 0, "image_count": 0,
+                    "skipped": True, "error": None,
+                })
+                continue
+
             try:
                 extracted = chapter_mod.extract_chapter(doc, ch_def)
                 image_refs = images_mod.extract_chapter_images(

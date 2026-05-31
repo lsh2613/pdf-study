@@ -134,6 +134,10 @@ def set_chapters(
     """챕터 구조를 확정하고 챕터별 본문/이미지를 추출합니다.
 
     - chapters: [{"chapter_id","title","page_range":[start,end]}, ...] (1-based)
+    - 각 chapter에 optional "skip": true 를 주면 그 챕터는 본문 추출과
+      sub-agent 디스패치, 렌더링 모두에서 제외됩니다. **찾아보기·색인·
+      판권·저자 소개 같은 비본문 페이지가 목차 후보에 섞여 들어왔을 때
+      사용**하세요.
     - book_info: 메인 LLM이 scanned_text + PDF 메타로 보강한 책 정보
     다음 단계: get_subagent_prompts(work_id)
     """
