@@ -81,6 +81,31 @@ workspace.create_workspace(..., work_id=work_id)
   절대 경로(자동 default든 사용자 지정이든)
 - next_action: `scan_pdf(work_id, scan_size=20)`
 
+### Stage 1b · `resume_work` — 재시작 후 워크스페이스 재부착 (선택)
+
+`register(work_id → work_dir)`는 **메모리 레지스트리**(`workspace._registry`)에만
+존재하므로, MCP 서버 프로세스가 재시작되면 매핑이 사라진다. 이때
+`get_work_state(work_id)` 등은 `unknown work_id`로 실패한다.
+
+```
+server.resume_work(output_dir="" , pdf_path="")
+  - output_dir이 있으면 그 폴더, 없으면 pdf_path로 default 경로 추론
+        │
+        ▼
+workspace.resume_workspace(output_dir)
+   - <output_dir>/.work/state.json 읽기
+   - state["work_id"]로 register() 재호출 → 레지스트리 복구
+        │
+        ▼
+   - list_pending_chapters_impl로 남은 챕터 계산
+   - 응답: {work_id, output_dir, current_phase, execution_mode,
+            summary_pending, extension_pending}
+```
+
+- 코드: `server.py:resume_work`, `workspace.py:resume_workspace`
+- 디스크의 `completed` 챕터는 그대로 보존되므로, 메인 LLM은 pending 챕터만
+  이어서 처리한 뒤 finalize하면 된다. (Stage 5~7 재진입)
+
 ### Stage 2 · `scan_pdf` — PDF 분석 + 챕터 분리 추천
 
 ```
@@ -217,7 +242,11 @@ server.list_pending_chapters(work_id)
 ### Stage 7 · `finalize_study` — 정적 사이트 렌더링
 
 ```
-server.finalize_study(work_id, output_format="html", keep_work_dir=True)
+server.finalize_study(work_id, output_format="html", keep_work_dir=True, force=False)
+  ├─ 완료 가드: list_pending_chapters_impl로 pending 확인.
+  │    summary_pending(+extension 활성 시 extension_pending)이 남아 있고
+  │    force=False면 ok=False로 거부 + data에 pending 목록 반환.
+  │    (조용한 부분 렌더링 방지. force=True면 통과)
   ├─ RENDERERS["html"] = HtmlRenderer
   └─ HtmlRenderer.render(work_id, output_dir)
        ├─ _load_all
@@ -268,7 +297,7 @@ POST /api/progress/<chapter_id>   → 같은 규칙
 | 파일 | 단계 | 책임 |
 |---|---|---|
 | `__main__.py` | 0 | `python -m pdf_study` 진입점 |
-| `server.py` | 0–7 | FastMCP 인스턴스 + 11개 도구. 모든 응답 envelope 보장 |
+| `server.py` | 0–7 | FastMCP 인스턴스 + 12개 도구(resume_work 포함). 모든 응답 envelope 보장 |
 | `workspace.py` | 1·3·5·6 | `.work/` 폴더 + state.json + work_id별 lock + atomic write |
 | `pdf/reader.py` | 2·3 | PyMuPDF 래퍼 (메타·텍스트·품질, 1↔0-based 변환 경계) |
 | `pdf/toc_finder.py` | 2 | 본문에서 목차 후보 추출 |
@@ -334,8 +363,11 @@ init_work
            → extension sub-agent
            → save_extension_result
   → list_pending_chapters → 실패 챕터 1회 재시도
-  → finalize_study
+  → finalize_study   (pending 남아 있으면 ok=False 거부, force=True로 우회)
   → 사용자에게 serve.py 시작/종료 명령 안내 (next_action 그대로 전달)
+
+* 서버 재시작 등으로 work_id가 무효해졌으면:
+  resume_work(output_dir 또는 pdf_path) → 레지스트리 복구 후 pending만 이어서 처리
 ```
 
 각 도구의 시그니처는 [02-mcp-api.md](./02-mcp-api.md), 데이터 스키마는

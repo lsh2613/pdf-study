@@ -1,6 +1,6 @@
 # 02. MCP API
 
-## MCP 도구 (11개)
+## MCP 도구 (12개)
 
 ### 도구 시그니처
 
@@ -20,6 +20,13 @@ init_work(
 ) -> dict
 # 응답 data: {work_id, work_dir, output_dir(실제 사용된 절대 경로)}
 
+# 서버 재시작 등으로 in-memory 레지스트리(work_id→work_dir)가 사라졌을 때,
+# 디스크의 <output_dir>/.work/state.json에서 work_id를 복원해 재등록한다.
+# output_dir을 비우면 pdf_path로 init_work과 동일하게 default 경로를 추론.
+# 응답 data: {work_id, output_dir, current_phase, execution_mode,
+#             summary_pending, extension_pending}
+resume_work(output_dir: str = "", pdf_path: str = "") -> dict
+
 scan_pdf(work_id: str, scan_size: int = 20) -> dict
 
 # 각 chapter 항목 형식: {"chapter_id", "title", "page_range":[s,e], "skip"?: bool}
@@ -33,7 +40,10 @@ save_extension_result(work_id: str, chapter_id: str, data: dict) -> dict
 search_extension_context(work_id: str, chapter_id: str, query: str) -> dict
 get_work_state(work_id: str) -> dict
 list_pending_chapters(work_id: str) -> dict
-finalize_study(work_id: str, output_format: str = "html", keep_work_dir: bool = True) -> dict
+# force=False(기본)면 처리 안 된 챕터가 남아 있을 때 ok=False로 거부하고
+# data.{summary_pending, extension_pending}를 돌려준다(조용한 부분 렌더링 방지).
+# 일부 챕터가 끝내 실패해 부분 결과라도 만들려면 force=True.
+finalize_study(work_id: str, output_format: str = "html", keep_work_dir: bool = True, force: bool = False) -> dict
 ```
 
 ## 응답 형식 (모든 도구 통일)
@@ -72,7 +82,12 @@ finalize_study(work_id: str, output_format: str = "html", keep_work_dir: bool = 
    └ parallel 모드: 최대 5개 동시 디스패치, 결과 도착 순 save 호출
 7. get_work_state → 실패 챕터 1회 재시도
 8. finalize_study(work_id, output_format="html") → study_output/ 완성
+   └ pending 챕터가 남아 있으면 ok=False로 거부됨. 다 끝낸 뒤 호출하거나,
+     부분 결과라도 만들려면 force=True.
 9. 사용자에게 .work/ 보존 여부 묻기 (기본은 보존)
+
+* 서버 재시작 등으로 work_id가 무효해졌으면(unknown work_id) →
+  resume_work(output_dir 또는 pdf_path)로 복원 후 6~8을 이어서 진행.
 ```
 
 자세한 내용:

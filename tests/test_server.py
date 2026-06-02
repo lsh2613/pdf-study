@@ -201,7 +201,78 @@ def test_md_tui_renderer_is_not_implemented(tmp_path, ko_short):
         "chapter_id":"ch1","summary":"","key_points":[],
         "questions":{"multiple_choice":[],"short_answer":[],"reflection":[]}
     })
-    r = server.finalize_study(wid, output_format="md_tui")
+    r = server.finalize_study(wid, output_format="md_tui", force=True)
     _check_envelope(r)
     assert r["ok"] is False
     assert "NotImplemented" in r["error"] or "ROADMAP" in r["error"]
+
+
+def test_finalize_blocks_on_pending_then_force(tmp_path, ko_short):
+    """pending 챕터가 있으면 finalize는 ok=False로 거부하고 목록을 돌려준다.
+    force=True면 부분 결과로 강제 렌더링한다."""
+    r1 = server.init_work(str(ko_short), str(tmp_path / "out"),
+                          enable_extension=False)
+    wid = r1["data"]["work_id"]
+    server.scan_pdf(wid)
+    server.set_chapters(wid, [
+        {"chapter_id": "ch1", "title": "A", "page_range": [1, 6]},
+        {"chapter_id": "ch2", "title": "B", "page_range": [7, 12]},
+    ])
+    # ch1만 완료, ch2는 pending
+    server.save_chapter_result(wid, "ch1", {
+        "chapter_id": "ch1", "summary": "", "key_points": [],
+        "questions": {"multiple_choice": [], "short_answer": [], "reflection": []},
+    })
+
+    blocked = server.finalize_study(wid, "html")
+    _check_envelope(blocked)
+    assert blocked["ok"] is False
+    assert "ch2" in blocked["error"]
+    assert blocked["data"]["summary_pending"] == ["ch2"]
+    assert not (tmp_path / "out" / "index.html").exists()
+
+    forced = server.finalize_study(wid, "html", force=True)
+    _check_envelope(forced); assert forced["ok"], forced
+    assert (tmp_path / "out" / "index.html").exists()
+
+
+def test_resume_work_restores_registry_after_restart(tmp_path, ko_short):
+    """서버 재시작(=레지스트리 소실)을 시뮬레이션한 뒤 resume_work로 복원."""
+    out = tmp_path / "out"
+    r1 = server.init_work(str(ko_short), str(out), enable_extension=False)
+    wid = r1["data"]["work_id"]
+    server.scan_pdf(wid)
+    server.set_chapters(wid, [
+        {"chapter_id": "ch1", "title": "A", "page_range": [1, 6]},
+        {"chapter_id": "ch2", "title": "B", "page_range": [7, 12]},
+    ])
+    server.save_chapter_result(wid, "ch1", {
+        "chapter_id": "ch1", "summary": "", "key_points": [],
+        "questions": {"multiple_choice": [], "short_answer": [], "reflection": []},
+    })
+
+    # 서버 재시작 시뮬레이션: in-memory 레지스트리 초기화
+    workspace._registry.clear()
+    assert not server.get_work_state(wid)["ok"]  # 복원 전엔 unknown work_id
+
+    rr = server.resume_work(output_dir=str(out))
+    _check_envelope(rr); assert rr["ok"], rr
+    assert rr["data"]["work_id"] == wid
+    assert rr["data"]["summary_pending"] == ["ch2"]  # 남은 것만 정확히 보고
+
+    # 복원 후 정상 동작 + 이미 완료된 ch1은 보존
+    assert server.get_work_state(wid)["ok"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "completed"
+
+
+def test_resume_work_requires_output_or_pdf():
+    r = server.resume_work()
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert "output_dir" in r["error"] or "pdf_path" in r["error"]
+
+
+def test_resume_work_missing_workspace(tmp_path):
+    r = server.resume_work(output_dir=str(tmp_path / "nonexistent"))
+    _check_envelope(r)
+    assert r["ok"] is False

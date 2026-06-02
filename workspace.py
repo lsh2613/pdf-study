@@ -242,6 +242,34 @@ def save_state(work_id: str, state: dict[str, Any]) -> None:
     _atomic_write_json(state_path(work_id), state)
 
 
+def resume_workspace(output_dir: str | Path) -> dict[str, Any]:
+    """기존 <output_dir>/.work/state.json을 읽어 레지스트리를 재구성한다.
+
+    _registry는 메모리에만 존재하므로 (create_workspace에서만 register됨)
+    MCP 서버가 재시작되면 work_id → work_dir 매핑이 사라진다. 이 함수는
+    디스크에 보존된 state.json에서 work_id를 복원해 register를 다시 호출,
+    이후 모든 도구가 정상 동작하도록 한다.
+
+    Returns:
+        복원된 state dict (work_id 포함).
+
+    Raises:
+        FileNotFoundError: 해당 output_dir에 .work/state.json이 없음.
+        ValueError: state.json에 work_id가 없음 (손상).
+    """
+    work_dir = Path(output_dir).resolve() / ".work"
+    sp = work_dir / "state.json"
+    if not sp.exists():
+        raise FileNotFoundError(f"재개할 작업이 없습니다: {sp}")
+    state = _read_json(sp)
+    work_id = state.get("work_id")
+    if not work_id:
+        raise ValueError(f"state.json에 work_id가 없습니다 (손상 가능): {sp}")
+    register(work_id, work_dir)
+    logger.info("workspace resumed: work_id=%s, work_dir=%s", work_id, work_dir)
+    return state
+
+
 def update_state(work_id: str, **top_level_updates: Any) -> dict[str, Any]:
     """state.json의 top-level 필드를 patch (lock 보호 + atomic)."""
     with _get_lock(work_id):

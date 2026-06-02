@@ -1,4 +1,4 @@
-"""FastMCP 서버 — pdf-study-builder의 11개 도구 등록.
+"""FastMCP 서버 — pdf-study-builder의 12개 도구 등록.
 
 모든 도구는 {ok, error, data, next_action} 형식으로 응답하며,
 예외는 raise하지 않고 ok=False로 변환한다 (MCP 통신 안정성).
@@ -130,6 +130,58 @@ def init_work(
             "output_dir": resolved_dir,
         },
         next_action=f'scan_pdf(work_id="{work_id}", scan_size=20)',
+    )
+
+
+# ---------------------------------------------------------------------------
+# 1b. resume_work
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+@_safe("resume_work")
+def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
+    """이전에 시작했던 작업을 디스크에서 재개합니다 (서버 재시작 후 등).
+
+    work_id → work_dir 매핑은 메모리에만 있어 MCP 서버가 재시작되면
+    사라집니다. 이 도구는 <output_dir>/.work/state.json에 보존된 work_id를
+    복원해 이후 도구들이 정상 동작하도록 합니다.
+
+    - output_dir: 재개할 작업의 output_dir. 주면 그 폴더의 .work/를 사용.
+    - pdf_path: output_dir을 비우면 init_work과 동일한 규칙
+      (<cwd>/result/<pdf_basename>)으로 추론합니다.
+    둘 중 하나는 반드시 필요합니다.
+    다음 단계: 남은 챕터가 있으면 get_subagent_prompts(work_id)로 워크플로를
+    받아 pending 챕터만 처리, 없으면 바로 finalize_study(work_id).
+    """
+    resolved = (output_dir or "").strip()
+    if not resolved:
+        if not (pdf_path or "").strip():
+            return _err("output_dir 또는 pdf_path 중 하나는 필요합니다.")
+        resolved = str(Path.cwd() / "result" / _pdf_name_slug(pdf_path))
+
+    state = workspace.resume_workspace(resolved)
+    work_id = state["work_id"]
+    pending = workspace.list_pending_chapters_impl(work_id)
+    opts = state.get("question_options", {})
+    ext_pending = pending["extension_pending"] if opts.get("extension") else []
+    has_pending = bool(pending["summary_pending"] or ext_pending)
+
+    return _ok(
+        {
+            "work_id": work_id,
+            "output_dir": state.get("output_dir"),
+            "current_phase": state.get("current_phase"),
+            "execution_mode": state.get("execution_mode"),
+            "summary_pending": pending["summary_pending"],
+            "extension_pending": ext_pending,
+        },
+        next_action=(
+            f'get_subagent_prompts(work_id="{work_id}") 로 워크플로를 받아 '
+            "summary_pending/extension_pending 챕터만 처리한 뒤 "
+            "finalize_study를 호출하세요."
+            if has_pending
+            else f'남은 챕터가 없습니다. finalize_study(work_id="{work_id}")로 진행하세요.'
+        ),
     )
 
 
@@ -329,11 +381,16 @@ def finalize_study(
     work_id: str,
     output_format: str = "html",
     keep_work_dir: bool = True,
+    force: bool = False,
 ) -> dict[str, Any]:
     """학습 자료를 output_dir에 렌더링합니다.
 
     - output_format: "html" (구현 완료) | "md_tui" (ROADMAP)
     - keep_work_dir: False면 .work/ 폴더 삭제
+    - force: 아직 처리되지 않은 챕터가 남아 있어도 강제로 렌더링.
+      기본값 False면 pending 챕터가 있을 때 거부하고 목록을 돌려줍니다
+      (조용한 부분 렌더링 방지). 일부 챕터가 끝내 실패해 부분 결과라도
+      만들고 싶을 때만 force=True를 사용하세요.
 
     응답의 next_action에 학습 자료 서버 기동 명령(`python serve.py`)이
     포함됩니다. **이 서버를 띄워야 답안/완료 토글이 progress/ 폴더에
@@ -347,6 +404,23 @@ def finalize_study(
         )
 
     state = workspace.load_state(work_id)
+
+    # 완료 가드: pending 챕터가 남아 있으면 거부 (force로 우회 가능)
+    pending = workspace.list_pending_chapters_impl(work_id)
+    opts = state.get("question_options", {})
+    ext_pending = pending["extension_pending"] if opts.get("extension") else []
+    blocking = sorted(set(pending["summary_pending"]) | set(ext_pending))
+    if blocking and not force:
+        return _err(
+            f"아직 처리되지 않은 챕터가 있습니다: {blocking}. "
+            "먼저 완료하거나, 부분 결과로 강제 렌더링하려면 force=True로 "
+            "호출하세요.",
+            data={
+                "summary_pending": pending["summary_pending"],
+                "extension_pending": ext_pending,
+            },
+        )
+
     output_dir = Path(state["output_dir"])
 
     renderer = renderer_cls()
