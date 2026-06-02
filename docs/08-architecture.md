@@ -6,7 +6,7 @@
 pdf_study/
 ├── __init__.py
 ├── __main__.py             # python -m pdf_study 진입점
-├── server.py               # FastMCP 도구 11개
+├── server.py               # FastMCP 도구 12개 (resume_work 포함)
 ├── pdf/
 │   ├── __init__.py
 │   ├── reader.py           # PyMuPDF + 텍스트 추출 + 품질 평가 + book metadata
@@ -50,7 +50,8 @@ class Renderer(ABC):
 # server.py에서:
 RENDERERS = {"html": HtmlRenderer, "md_tui": MdTuiRenderer}
 
-def finalize_study(work_id, output_format="html", keep_work_dir=True):
+def finalize_study(work_id, output_format="html", keep_work_dir=True, force=False):
+    # force=False면 pending 챕터가 남아 있을 때 거부 (조용한 부분 렌더 방지)
     renderer = RENDERERS[output_format]()
     renderer.render(work_id, output_dir(work_id))
     if not keep_work_dir:

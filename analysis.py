@@ -155,21 +155,20 @@ def scan_pdf_impl(work_id: str, scan_size: int = DEFAULT_SCAN_SIZE) -> dict[str,
 
     workspace.update_phase(work_id, "scanning", "in_progress")
 
-    info = reader.get_pdf_info(pdf_path)
-    page_count = info["page_count"]
-    book_metadata = info["book_metadata"]
-
+    # PDF를 한 번만 열어 메타·페이지수·품질·텍스트를 모두 읽는다.
     doc = reader.open_pdf(pdf_path)
     try:
+        page_count = doc.page_count
+        book_metadata = reader.extract_metadata(doc)
+
         quality = reader.evaluate_text_quality(doc)
         text_quality = quality["quality"]
 
         # 첫 N페이지 텍스트 → 언어 감지 + 목차 후보용
         scan_end = min(scan_size, page_count) if page_count else 0
-        if scan_end > 0:
-            scanned_text = reader.extract_text_range(doc, 1, scan_end)
-        else:
-            scanned_text = ""
+        scanned_text = (
+            reader.extract_text_range(doc, 1, scan_end) if scan_end > 0 else ""
+        )
 
         language = lang.detect_language(scanned_text)
         toc_result = toc_finder.find_toc_candidates(scanned_text)

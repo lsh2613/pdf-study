@@ -1,4 +1,4 @@
-# 10. 내부 동작 흐름
+# 09. 내부 동작 흐름
 
 사용자가 MCP 클라이언트(Claude Desktop / Gemini CLI / Codex CLI 등)에서
 "이 PDF로 학습 자료 만들어줘"라고 했을 때 `pdf_study` MCP 서버가
@@ -19,7 +19,7 @@
         ▼
 ┌──────────────────────────────────────────────────────────────┐
 │ FastMCP 서버 (python -m pdf_study)                           │
-│   server.py에 11개 도구 등록                                  │
+│   server.py에 12개 도구 등록                                  │
 └──────────────────────────────────────────────────────────────┘
         │ 도구 호출 (init_work → scan_pdf → set_chapters → …)
         ▼
@@ -49,7 +49,7 @@
 - 클라이언트(예: Gemini)가 settings.json의 `command`/`args`로
   `python -m pdf_study`를 stdio 자식 프로세스로 spawn한다.
 - 진입점: `__main__.py` → `server.main()` → `FastMCP("pdf-study").run()`
-- 이 시점에 `server.py` 모듈이 import되며 11개 도구가 mcp 인스턴스에 등록된다.
+- 이 시점에 `server.py` 모듈이 import되며 12개 도구가 mcp 인스턴스에 등록된다.
 - 도구 응답은 모두 `_safe` 데코레이터로 감싸여 예외가 `{ok: false, error: ...}`로
   변환된다(`server.py:_safe`, sync/async 모두 지원).
 

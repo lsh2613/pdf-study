@@ -51,6 +51,18 @@ def open_pdf(pdf_path: str | Path) -> fitz.Document:
     return fitz.open(str(path))
 
 
+_METADATA_KEYS = ("title", "author", "subject", "creator", "producer")
+
+
+def extract_metadata(doc: fitz.Document) -> dict[str, str]:
+    """이미 열린 문서에서 내장 메타데이터를 정규화해 추출.
+
+    이미 doc을 들고 있는 호출자가 PDF를 재차 열지 않도록 분리한 헬퍼.
+    """
+    meta_raw = doc.metadata or {}
+    return {k: (meta_raw.get(k) or "").strip() for k in _METADATA_KEYS}
+
+
 def get_pdf_info(pdf_path: str | Path) -> dict[str, Any]:
     """PDF 기본 정보 + 내장 메타데이터 추출.
 
@@ -58,23 +70,15 @@ def get_pdf_info(pdf_path: str | Path) -> dict[str, Any]:
         {
             "pdf_path": str,
             "page_count": int,
-            "book_metadata": {title, author, subject, creator, producer, ...},
+            "book_metadata": {title, author, subject, creator, producer},
         }
     """
     doc = open_pdf(pdf_path)
     try:
-        meta_raw = doc.metadata or {}
-        book_metadata = {
-            "title": (meta_raw.get("title") or "").strip(),
-            "author": (meta_raw.get("author") or "").strip(),
-            "subject": (meta_raw.get("subject") or "").strip(),
-            "creator": (meta_raw.get("creator") or "").strip(),
-            "producer": (meta_raw.get("producer") or "").strip(),
-        }
         return {
             "pdf_path": str(pdf_path),
             "page_count": doc.page_count,
-            "book_metadata": book_metadata,
+            "book_metadata": extract_metadata(doc),
         }
     finally:
         doc.close()
