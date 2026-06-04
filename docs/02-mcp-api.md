@@ -29,7 +29,11 @@ init_work(
 #             summary_pending, extension_pending}
 resume_work(output_dir: str = "", pdf_path: str = "") -> dict
 
-scan_pdf(work_id: str, scan_size: int = 20) -> dict
+# 인코딩이 깨진(모지바케) PDF면 ok=False로 거부하고
+# data.recommendations.text_sample에 깨진 텍스트 일부(≤600자)를 담는다.
+# 이를 사용자에게 보여주고 ① 무손실 재추출(qpdf) ② OCR(ocrmypdf)
+# ③ 그대로 진행 중 선택을 받아라. ③이면 allow_garbled=True로 재호출.
+scan_pdf(work_id: str, scan_size: int = 20, allow_garbled: bool = False) -> dict
 
 # 각 chapter 항목 형식: {"chapter_id", "title", "page_range":[s,e], "skip"?: bool}
 # skip=True 인 챕터(찾아보기·색인·판권)는 본문 추출과 sub-agent 디스패치,

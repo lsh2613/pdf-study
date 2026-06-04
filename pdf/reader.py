@@ -179,7 +179,7 @@ def evaluate_text_quality(doc: fitz.Document, sample_size: int = 20) -> dict[str
 
     임계값:
         no_text_layer: avg_chars < 50  (OCR 권장)
-        garbled:       avg_mojibake > 0.15  (인코딩 깨짐 — OCR 또는 무손실 재추출)
+        garbled:       avg_mojibake > 0.06  (인코딩 깨짐 — OCR 또는 무손실 재추출)
         low:           50 <= avg_chars < 300
         medium:        300 <= avg_chars < 800
         high:          avg_chars >= 800
