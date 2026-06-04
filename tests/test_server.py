@@ -16,7 +16,7 @@ def _check_envelope(resp: dict) -> None:
 
 def test_init_work_rejects_all_disabled(tmp_path, ko_short):
     r = server.init_work(
-        str(ko_short), str(tmp_path / "out"),
+        str(ko_short), str(tmp_path / "out"), execution_mode="sequential",
         enable_multiple_choice=False, enable_short_answer=False,
         enable_reflection=False, enable_extension=False,
     )
@@ -25,8 +25,18 @@ def test_init_work_rejects_all_disabled(tmp_path, ko_short):
     assert "question type" in r["error"]
 
 
+def test_init_work_requires_execution_mode(tmp_path, ko_short):
+    """execution_mode 미지정 시 거부 + 사용자에게 물어보라는 안내."""
+    r = server.init_work(str(ko_short), str(tmp_path / "out"))  # mode 생략
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert "execution_mode" in r["error"]
+    assert r["data"]["choices"] == ["sequential", "parallel"]
+
+
 def test_init_work_rejects_missing_pdf(tmp_path):
-    r = server.init_work(str(tmp_path / "nope.pdf"), str(tmp_path / "out"))
+    r = server.init_work(str(tmp_path / "nope.pdf"), str(tmp_path / "out"),
+                         execution_mode="sequential")
     _check_envelope(r)
     assert r["ok"] is False
 
@@ -34,7 +44,7 @@ def test_init_work_rejects_missing_pdf(tmp_path):
 def test_init_work_default_output_dir_uses_cwd_result_pdf_basename(tmp_path, ko_short, monkeypatch):
     """output_dir 미지정 시 <cwd>/result/<pdf_basename>/ 로 자동 생성."""
     monkeypatch.chdir(tmp_path)
-    r = server.init_work(str(ko_short))   # output_dir 생략
+    r = server.init_work(str(ko_short), execution_mode="sequential")  # output_dir 생략
     _check_envelope(r)
     assert r["ok"], r
     out = r["data"]["output_dir"]
@@ -44,7 +54,8 @@ def test_init_work_default_output_dir_uses_cwd_result_pdf_basename(tmp_path, ko_
 
 def test_init_work_blank_output_dir_falls_back_to_default(tmp_path, ko_short, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    r = server.init_work(str(ko_short), output_dir="   ")  # 공백만
+    r = server.init_work(str(ko_short), output_dir="   ",
+                         execution_mode="sequential")  # 공백만
     assert r["ok"], r
     assert r["data"]["output_dir"] == str(tmp_path / "result" / "ko_short")
 
@@ -57,7 +68,7 @@ def test_init_work_default_dir_sanitizes_pdf_name(tmp_path, monkeypatch):
     weird = tmp_path / "리팩터링 2판-페이지 1.pdf"
     weird.write_bytes(b"%PDF-1.4")  # 진짜 PDF는 아니지만 init_work는 존재만 확인
     monkeypatch.chdir(tmp_path)
-    r = server.init_work(str(weird))
+    r = server.init_work(str(weird), execution_mode="sequential")
     assert r["ok"], r
     # 공백 → _, 다른 문자는 한글/숫자/-/. 그대로
     out = r["data"]["output_dir"]
@@ -66,14 +77,15 @@ def test_init_work_default_dir_sanitizes_pdf_name(tmp_path, monkeypatch):
 
 def test_init_work_explicit_output_dir_used_as_is(tmp_path, ko_short):
     target = tmp_path / "my-custom-name"
-    r = server.init_work(str(ko_short), str(target))
+    r = server.init_work(str(ko_short), str(target), execution_mode="sequential")
     assert r["ok"], r
     assert r["data"]["output_dir"] == str(target)
     assert (target / ".work" / "state.json").exists()
 
 
 def test_scan_pdf_rejects_no_text_layer(tmp_path, scanned_empty):
-    r0 = server.init_work(str(scanned_empty), str(tmp_path / "out"))
+    r0 = server.init_work(str(scanned_empty), str(tmp_path / "out"),
+                          execution_mode="sequential")
     assert r0["ok"]
     wid = r0["data"]["work_id"]
     r = server.scan_pdf(wid)
@@ -83,7 +95,7 @@ def test_scan_pdf_rejects_no_text_layer(tmp_path, scanned_empty):
 
 
 def test_get_chapter_content_for_unknown_chapter(tmp_path, ko_short):
-    r0 = server.init_work(str(ko_short), str(tmp_path / "out"))
+    r0 = server.init_work(str(ko_short), str(tmp_path / "out"), execution_mode="sequential")
     wid = r0["data"]["work_id"]
     r = server.get_chapter_content(wid, "ch999")
     _check_envelope(r)
@@ -99,7 +111,7 @@ def test_unknown_work_id_returns_ok_false(tmp_path):
 
 def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
     """init → scan → set → save → finalize 까지 의도된 응답 형식과 상태 전이."""
-    r1 = server.init_work(str(ko_short), str(tmp_path / "out"))
+    r1 = server.init_work(str(ko_short), str(tmp_path / "out"), execution_mode="sequential")
     _check_envelope(r1); assert r1["ok"]
     wid = r1["data"]["work_id"]
 
@@ -177,8 +189,26 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
     assert r10["data"]["entry_page"] == "main.html"
 
 
+def test_finalize_requires_output_format(tmp_path, ko_short):
+    """output_format 미지정 시 거부 + 사용자에게 물어보라는 안내."""
+    r1 = server.init_work(str(ko_short), str(tmp_path / "out"),
+                          execution_mode="sequential")
+    wid = r1["data"]["work_id"]
+    server.scan_pdf(wid)
+    server.set_chapters(wid, [{"chapter_id":"ch1","title":"전체","page_range":[1,12]}])
+    server.save_chapter_result(wid, "ch1", {
+        "chapter_id":"ch1","summary":"","key_points":[],
+        "questions":{"multiple_choice":[],"short_answer":[],"reflection":[]}
+    })
+    r = server.finalize_study(wid)  # output_format 생략
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert "output_format" in r["error"]
+    assert r["data"]["choices"] == ["html", "md_tui"]
+
+
 def test_finalize_rejects_unknown_format(tmp_path, ko_short):
-    r1 = server.init_work(str(ko_short), str(tmp_path / "out"))
+    r1 = server.init_work(str(ko_short), str(tmp_path / "out"), execution_mode="sequential")
     wid = r1["data"]["work_id"]
     server.scan_pdf(wid)
     server.set_chapters(wid, [{"chapter_id":"ch1","title":"전체","page_range":[1,12]}])
@@ -216,7 +246,7 @@ def test_finalize_blocks_on_pending_then_force(tmp_path, ko_short):
     """pending 챕터가 있으면 finalize는 ok=False로 거부하고 목록을 돌려준다.
     force=True면 부분 결과로 강제 렌더링한다."""
     r1 = server.init_work(str(ko_short), str(tmp_path / "out"),
-                          enable_extension=False)
+                          execution_mode="sequential", enable_extension=False)
     wid = r1["data"]["work_id"]
     server.scan_pdf(wid)
     server.set_chapters(wid, [
@@ -244,7 +274,8 @@ def test_finalize_blocks_on_pending_then_force(tmp_path, ko_short):
 def test_resume_work_restores_registry_after_restart(tmp_path, ko_short):
     """서버 재시작(=레지스트리 소실)을 시뮬레이션한 뒤 resume_work로 복원."""
     out = tmp_path / "out"
-    r1 = server.init_work(str(ko_short), str(out), enable_extension=False)
+    r1 = server.init_work(str(ko_short), str(out), execution_mode="sequential",
+                          enable_extension=False)
     wid = r1["data"]["work_id"]
     server.scan_pdf(wid)
     server.set_chapters(wid, [

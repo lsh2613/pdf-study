@@ -87,7 +87,7 @@ def _safe(label: str):
 def init_work(
     pdf_path: str,
     output_dir: str = "",
-    execution_mode: str = "sequential",
+    execution_mode: str = "",
     enable_multiple_choice: bool = True,
     enable_short_answer: bool = True,
     enable_reflection: bool = True,
@@ -100,11 +100,23 @@ def init_work(
       아래에 `result/<pdf_basename>/` 형태로 자동 생성됩니다 (PDF 파일명에서
       안전하지 않은 문자는 `_`로 치환). 같은 PDF로 재실행하면 같은 폴더에
       **덮어씌워지므로**, 이전 결과를 보존하려면 명시적으로 다른 경로를 주세요.
-    - execution_mode: "sequential" (기본) | "parallel"
+    - execution_mode: "sequential" | "parallel". **기본값 없음 — 임의로 정하지
+      말고 반드시 사용자에게 물어 선택을 받으세요.** 미지정 시 거부됩니다.
+        - sequential: 한 챕터씩 순차 처리 (안정적, 느림)
+        - parallel: 최대 5개 챕터 동시 처리 (빠름, sub-agent 병렬 디스패치)
     - enable_*: 4가지 문제 유형 활성/비활성 (모두 False 금지)
     - user_context: 학습자 정보 (학년/배경 등). sub-agent 프롬프트에 주입.
     다음 단계: scan_pdf(work_id)
     """
+    if execution_mode not in ("sequential", "parallel"):
+        return _err(
+            "execution_mode가 지정되지 않았습니다. 기본값을 임의로 정하지 말고, "
+            "사용자에게 '직렬(sequential): 한 챕터씩 순차 처리 / "
+            "병렬(parallel): 최대 5개 챕터 동시 처리' 중 무엇을 원하는지 물어본 뒤 "
+            "그 선택을 execution_mode로 전달해 다시 호출하세요.",
+            data={"choices": ["sequential", "parallel"]},
+        )
+
     work_id = workspace.make_work_id()
     resolved_dir = (output_dir or "").strip()
     if not resolved_dir:
@@ -390,13 +402,16 @@ def list_pending_chapters(work_id: str) -> dict[str, Any]:
 @_safe("finalize_study")
 def finalize_study(
     work_id: str,
-    output_format: str = "html",
+    output_format: str = "",
     keep_work_dir: bool = True,
     force: bool = False,
 ) -> dict[str, Any]:
     """학습 자료를 output_dir에 렌더링합니다.
 
-    - output_format: "html" (구현 완료) | "md_tui" (ROADMAP)
+    - output_format: "html" | "md_tui". **기본값 없음 — 임의로 정하지 말고
+      반드시 사용자에게 물어 선택을 받으세요.** 미지정 시 거부됩니다.
+        - html: 정적 사이트 (브라우저로 열람)
+        - md_tui: 챕터별 폴더 + summary.md + 학습 TUI
     - keep_work_dir: False면 .work/ 폴더 삭제
     - force: 아직 처리되지 않은 챕터가 남아 있어도 강제로 렌더링.
       기본값 False면 pending 챕터가 있을 때 거부하고 목록을 돌려줍니다
@@ -407,6 +422,14 @@ def finalize_study(
     포함됩니다. **이 서버를 띄워야 답안/완료 토글이 progress/ 폴더에
     저장**되며, 파일을 직접 열면(file://) 진도 API가 동작하지 않습니다.
     """
+    if not output_format:
+        return _err(
+            "output_format이 지정되지 않았습니다. 기본값을 임의로 정하지 말고, "
+            "사용자에게 'html: 정적 웹사이트로 열람 / "
+            "md_tui: 챕터별 Markdown + 학습 TUI' 중 무엇을 원하는지 물어본 뒤 "
+            "그 선택을 output_format으로 전달해 다시 호출하세요.",
+            data={"choices": list(RENDERERS)},
+        )
     renderer_cls = RENDERERS.get(output_format)
     if renderer_cls is None:
         return _err(
