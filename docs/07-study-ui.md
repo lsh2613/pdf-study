@@ -144,3 +144,32 @@ if __name__ == "__main__":
 `reading_progress` 같은 진행률 필드는 더 이상 progress 파일 스키마에 없다. 사용자가 어느 섹션까지 봤는지는 `last_position`만 남기고, 완료 여부는 명시적 boolean으로만 관리한다.
 
 progress 파일 스키마는 [05-data-schemas.md](./05-data-schemas.md#progress-학습-시-servepy가-생성관리) 참고.
+
+## md_tui 출력 (output_format="md_tui")
+
+HTML 정적 사이트 대신, 챕터별 폴더 + 요약 마크다운 + 터미널 학습 TUI를 생성한다.
+HTML과 동일한 중립 JSON(chapters/, extensions/)에서 렌더되며, 선택은
+`finalize_study(output_format="md_tui")`로만 갈린다 (서버/파이프라인 변경 없음).
+
+### 실행
+
+```
+pip install rich          # 의존성
+python study.py           # 루트: 챕터 선택 메뉴
+cd ch1 && python study.py # 특정 챕터로 바로 진입
+```
+
+`study.py`(rich 엔진)는 출력 루트에 1벌, 각 `ch*/study.py`는 그 엔진을 호출하는
+얇은 shim이다. 엔진은 `pdf_study` 패키지에 의존하지 않는 독립 스크립트다.
+
+### TUI 동작
+
+1. 챕터 진입 → `[r]` 요약 읽기(`summary.md` 렌더) / `[s]` 문제 풀기 / `[q]` 종료
+2. 문제 풀기: `quiz.json`의 활성 유형을 순회
+   - 객관식: 보기 출력 → 번호 입력 → 자동 채점 + 해설
+   - 단답/주관/확장: 답 입력(빈 줄 제출) → 모범답안·출처 공개(자기 채점)
+3. 매 문제 직후 `progress.json`에 답안 저장 → 재실행 시 이어풀기
+4. 종료 시 "이 챕터 완료로 표시" 확인 → `completed` 토글, 객관식 점수 요약
+
+진도 스키마(answers/mc_score/completed)는 HTML의 `progress/ch{N}.json`과 동일하다.
+다만 HTTP 대신 TUI가 챕터 폴더의 `progress.json`에 직접 기록한다.

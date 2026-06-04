@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""pdf-study 학습 TUI (rich 기반).
+
+- 루트에서 실행: `python study.py` → 챕터 선택 메뉴
+- 챕터 폴더에서 실행: `cd ch1 && python study.py` → 해당 챕터로 바로 진입
+
+외부 의존성은 rich 하나뿐이며, pdf_study 패키지에 의존하지 않는다
+(출력 폴더에 그대로 복사되어 독립 실행되는 스크립트).
+"""
+from __future__ import annotations
+
+import datetime as _dt
+import json
+import sys
+from pathlib import Path
+
+try:
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+    from rich.prompt import Confirm, Prompt
+except ImportError:
+    sys.stderr.write("rich가 필요합니다. 설치: pip install rich\n")
+    sys.exit(1)
+
+console = Console()
+
+_TYPE_LABELS = {
+    "multiple_choice": "객관식",
+    "short_answer": "단답형",
+    "reflection": "주관식",
+    "extension": "확장형",
+}
+_TYPE_ORDER = ("multiple_choice", "short_answer", "reflection", "extension")
+
+
+def _now() -> str:
+    return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _load_json(path: Path, default):
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def _chapter_sort_key(name: str) -> tuple[int, str]:
+    """ch1, ch2, ch10이 자연스럽게 정렬되도록."""
+    if name.startswith("ch") and name[2:].isdigit():
+        return (int(name[2:]), name)
+    return (10**9, name)
+
+
+# ---------------------------------------------------------------------------
+# 진도 (각 챕터 폴더의 progress.json)
+# ---------------------------------------------------------------------------
+
+def _load_progress(chapter_dir: Path) -> dict:
+    prog = _load_json(chapter_dir / "progress.json", {})
+    if not isinstance(prog, dict):
+        prog = {}
+    prog.setdefault("chapter_id", chapter_dir.name)
+    prog.setdefault("answers", {})
+    prog.setdefault("completed", False)
+    return prog
+
+
+def _save_progress(chapter_dir: Path, prog: dict) -> None:
+    prog["last_updated"] = _now()
+    (chapter_dir / "progress.json").write_text(
+        json.dumps(prog, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 문제 풀이
+# ---------------------------------------------------------------------------
+
+def _ask_mc(q: dict) -> dict:
+    options = q.get("options") or []
+    console.print(f"[bold]{q.get('question', '')}[/bold]")
+    for i, opt in enumerate(options):
+        console.print(f"  {i + 1}. {opt}")
+    choices = [str(i + 1) for i in range(len(options))]
+    sel_idx = int(Prompt.ask("정답 번호", choices=choices)) - 1
+    answer_idx = int(q.get("answer_index", -1))
+    correct = sel_idx == answer_idx
+    if correct:
+        console.print("[green]정답![/green]")
+    else:
+        right = options[answer_idx] if 0 <= answer_idx < len(options) else ""
+        console.print(f"[red]오답.[/red] 정답: {answer_idx + 1}. {right}")
+    if q.get("explanation"):
+        console.print(Panel(q["explanation"], title="해설", border_style="cyan"))
+    return {"selected": sel_idx, "correct": correct}
+
+
+def _ask_text(q: dict, qtype: str) -> dict:
+    console.print(f"[bold]{q.get('question', '')}[/bold]")
+    if qtype == "extension" and q.get("context"):
+        console.print(Panel(q["context"], title="참고 자료", border_style="yellow"))
+    console.print("[dim](답변 입력 후 빈 줄로 제출 — 건너뛰려면 그냥 빈 줄)[/dim]")
+    lines: list[str] = []
+    while True:
+        try:
+            line = input()
+        except EOFError:
+            break
+        if line == "":
+            break
+        lines.append(line)
+    text = "\n".join(lines)
+    model = q.get("model_answer") or ""
+    if model:
+        console.print(Panel(model, title="모범답안", border_style="green"))
+    for url in q.get("sources") or []:
+        console.print(f"  출처: {url}")
+    return {"text": text, "viewed_answer": bool(model)}
+
+
+def _run_quiz(chapter_dir: Path, quiz: dict, prog: dict) -> None:
+    questions = quiz.get("questions") or {}
+    mc_correct = mc_total = 0
+    for qtype in _TYPE_ORDER:
+        items = questions.get(qtype) or []
+        if not items:
+            continue
+        console.rule(_TYPE_LABELS.get(qtype, qtype))
+        for q in items:
+            qid = q.get("id") or ""
+            if qtype == "multiple_choice":
+                res = _ask_mc(q)
+                mc_total += 1
+                mc_correct += int(res["correct"])
+            else:
+                res = _ask_text(q, qtype)
+            prog["answers"][qid] = res
+            _save_progress(chapter_dir, prog)
+            console.print()
+    if mc_total:
+        prog["mc_score"] = {"correct": mc_correct, "total": mc_total}
+        console.print(f"[bold]객관식 결과: {mc_correct} / {mc_total}[/bold]")
+    if Confirm.ask("이 챕터를 완료로 표시할까요?", default=bool(prog.get("completed"))):
+        prog["completed"] = True
+    _save_progress(chapter_dir, prog)
+
+
+# ---------------------------------------------------------------------------
+# 화면
+# ---------------------------------------------------------------------------
+
+def run_chapter(chapter_dir) -> None:
+    chapter_dir = Path(chapter_dir).resolve()
+    quiz = _load_json(chapter_dir / "quiz.json", {}) or {}
+    summary_path = chapter_dir / "summary.md"
+    title = quiz.get("title") or chapter_dir.name
+    has_quiz = any((quiz.get("questions") or {}).values())
+
+    while True:
+        console.rule(f"[bold]{title}[/bold]")
+        console.print("[r] 요약 읽기   [s] 문제 풀기   [q] 종료")
+        choice = Prompt.ask("선택", choices=["r", "s", "q"], default="r")
+        if choice == "r":
+            if summary_path.exists():
+                console.print(Markdown(summary_path.read_text(encoding="utf-8")))
+            else:
+                console.print("[dim]요약 파일이 없습니다.[/dim]")
+        elif choice == "s":
+            if not has_quiz:
+                console.print("[dim]이 챕터에는 문제가 없습니다.[/dim]")
+                continue
+            _run_quiz(chapter_dir, quiz, _load_progress(chapter_dir))
+        else:
+            break
+
+
+def run_root(root_dir) -> None:
+    root_dir = Path(root_dir).resolve()
+    chapters = sorted(
+        (p for p in root_dir.iterdir() if p.is_dir() and (p / "quiz.json").exists()),
+        key=lambda p: _chapter_sort_key(p.name),
+    )
+    if not chapters:
+        console.print("[red]챕터를 찾을 수 없습니다.[/red]")
+        return
+
+    while True:
+        console.rule("[bold]학습 자료[/bold]")
+        for i, ch in enumerate(chapters):
+            quiz = _load_json(ch / "quiz.json", {}) or {}
+            prog = _load_json(ch / "progress.json", {}) or {}
+            mark = "✓" if prog.get("completed") else " "
+            console.print(f"  {i + 1}. [{mark}] {quiz.get('title') or ch.name}")
+        console.print("  q. 종료")
+        choices = [str(i + 1) for i in range(len(chapters))] + ["q"]
+        sel = Prompt.ask("챕터 선택", choices=choices, default="1")
+        if sel == "q":
+            break
+        run_chapter(chapters[int(sel) - 1])
+
+
+def main() -> None:
+    run_root(Path(__file__).resolve().parent)
+
+
+if __name__ == "__main__":
+    main()

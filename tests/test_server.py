@@ -192,19 +192,24 @@ def test_finalize_rejects_unknown_format(tmp_path, ko_short):
     assert "output_format" in r["error"]
 
 
-def test_md_tui_renderer_is_not_implemented(tmp_path, ko_short):
-    r1 = server.init_work(str(ko_short), str(tmp_path / "out"))
+def test_md_tui_renderer_finalizes_ok(tmp_path, ko_short):
+    r1 = server.init_work(str(ko_short), str(tmp_path / "out"), execution_mode="sequential")
     wid = r1["data"]["work_id"]
     server.scan_pdf(wid)
     server.set_chapters(wid, [{"chapter_id":"ch1","title":"전체","page_range":[1,12]}])
     server.save_chapter_result(wid, "ch1", {
-        "chapter_id":"ch1","summary":"","key_points":[],
+        "chapter_id":"ch1","summary":"본문","key_points":["p"],
         "questions":{"multiple_choice":[],"short_answer":[],"reflection":[]}
     })
     r = server.finalize_study(wid, output_format="md_tui", force=True)
     _check_envelope(r)
-    assert r["ok"] is False
-    assert "NotImplemented" in r["error"] or "ROADMAP" in r["error"]
+    assert r["ok"] is True, r
+    out = tmp_path / "out"
+    assert (out / "study.py").exists()
+    assert (out / "book.md").exists()
+    assert (out / "ch1" / "summary.md").exists()
+    assert (out / "ch1" / "quiz.json").exists()
+    assert (out / "ch1" / "study.py").exists()
 
 
 def test_finalize_blocks_on_pending_then_force(tmp_path, ko_short):

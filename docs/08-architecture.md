@@ -22,15 +22,19 @@ pdf_study/
 │   ├── __init__.py
 │   ├── base.py             # Renderer 인터페이스 (render(work_id, out_dir))
 │   ├── html_renderer.py    # 현재 구현
-│   └── md_tui_renderer.py  # 추후 (ROADMAP) — 인터페이스만 stub
+│   └── md_tui_renderer.py  # 챕터별 폴더 + summary.md + quiz.json + TUI launcher
 └── templates/
-    └── html/
-        ├── index.html      # 책 정보 + 챕터 목록 + 진도
-        ├── chapter.html    # 챕터 본문 + 4유형 문제
-        ├── style.css       # 최소 스타일
-        ├── grading.js
-        ├── storage.js
-        ├── serve.py
+    ├── html/
+    │   ├── index.html      # 책 정보 + 챕터 목록 + 진도
+    │   ├── chapter.html    # 챕터 본문 + 4유형 문제
+    │   ├── style.css       # 최소 스타일
+    │   ├── grading.js
+    │   ├── storage.js
+    │   ├── serve.py
+    │   └── README.md
+    └── md_tui/
+        ├── study.py            # rich 기반 학습 TUI 엔진 (출력 루트에 복사)
+        ├── chapter_launcher.py # 챕터별 thin shim (각 ch*/study.py로 복사)
         └── README.md
 ```
 

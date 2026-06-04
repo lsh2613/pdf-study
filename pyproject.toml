@@ -11,6 +11,7 @@ dependencies = [
     "mcp>=1.0.0",
     "pymupdf>=1.24.0",
     "pillow>=10.0.0",
+    "rich>=13.0.0",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +36,7 @@ include-package-data = true
 # 학습 자료 템플릿(css/js/serve.py)은 정적 리소스 — 패키지 데이터로 함께 배포.
 # 합성 fixture PDF/이미지는 sdist/wheel에서 제외 (build_fixtures로 재생성).
 [tool.setuptools.package-data]
-"pdf_study" = ["templates/html/*"]
+"pdf_study" = ["templates/html/*", "templates/md_tui/*"]
 
 [tool.setuptools.exclude-package-data]
 "pdf_study.tests.fixtures" = ["*.pdf", "_assets/*"]
