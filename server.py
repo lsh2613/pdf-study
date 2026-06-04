@@ -191,16 +191,27 @@ def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
 
 @mcp.tool()
 @_safe("scan_pdf")
-def scan_pdf(work_id: str, scan_size: int = 20) -> dict[str, Any]:
+def scan_pdf(
+    work_id: str,
+    scan_size: int = 20,
+    allow_garbled: bool = False,
+) -> dict[str, Any]:
     """PDF 메타 + 텍스트 품질 + 언어 + 본문 목차 후보 + 챕터 분리 추천.
 
     응답.data.recommendations.primary_mode 가 "from_toc" | "single_unit" |
     "chunks" | "ask_user" 중 하나. suggested_chapters를 그대로 set_chapters에
     넘길 수 있습니다. 추천 reason이 ocrmypdf 안내라면 텍스트 레이어가 없는
     PDF이므로 OCR 후 재시도해주세요.
+
+    인코딩이 깨진(모지바케) PDF면 거부되며, recommendations.text_sample에
+    깨진 텍스트 일부가 담깁니다. 이를 사용자에게 보여주고 ① 무손실 재추출
+    ② OCR ③ 그대로 진행 중 선택을 받으세요. 사용자가 ③을 택하면
+    allow_garbled=True 로 다시 호출하면 깨진 텍스트 그대로 진행합니다.
     다음 단계: set_chapters(work_id, chapters, book_info)
     """
-    data = analysis.scan_pdf_impl(work_id, scan_size=scan_size)
+    data = analysis.scan_pdf_impl(
+        work_id, scan_size=scan_size, allow_garbled=allow_garbled,
+    )
     rec = data.get("recommendations", {})
     if rec.get("rejected"):
         return _err(rec.get("reason") or "scan rejected", data=data)

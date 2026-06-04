@@ -8,8 +8,19 @@
   - 반복 공백 정규화
   - 페이지 번호만 있는 줄 제거
 - OCR 오류 교정은 sub-agent(LLM)가 요약 과정에서 자연 처리
-- 텍스트 품질 점수: `high` / `medium` / `low` / `no_text_layer`
+- 텍스트 품질 점수: `high` / `medium` / `low` / `no_text_layer` / `garbled`
 - `no_text_layer` (avg <50자/페이지) → 명확히 거부 + ocrmypdf 안내
+- `garbled` (모지바케; avg_mojibake >0.06) → 거부 + 삼중 안내:
+  - 글꼴 ToUnicode 매핑 손상으로 추출 텍스트가 깨진 경우.
+  - `recommendations.text_sample`에 깨진 텍스트 일부(최대 600자)를 실어
+    사용자가 직접 확인할 수 있게 한다.
+  - ① 원본 일부를 추출한 파일이면 무손실 추출(qpdf/pdftk/mutool) 권장,
+    ② 원본 자체가 깨졌으면 `ocrmypdf --force-ocr` 권장,
+    ③ 샘플 확인 후 강행하려면 `scan_pdf(work_id, allow_garbled=True)` →
+    거부를 건너뛰고 깨진 텍스트 그대로 페이지 수 기반 라우팅 진행.
+  - 판단: 페이지별 PUA·U+FFFD 비율 + 토큰 내 스크립트 혼합(한글↔라틴/기호)
+    경계 비율 + 잡기호 밀집을 합성. 숫자↔쉼표 등 정상 수치 표기는 제외해
+    표 데이터 오탐을 방지 (`reader.mojibake_score`).
 
 ### 페이지 인덱스 컨벤션
 

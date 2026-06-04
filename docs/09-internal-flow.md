@@ -122,6 +122,7 @@ server.scan_pdf(work_id, scan_size)
        │    └─ 4가지 정규식 매칭 + 단조 LIS 필터
        ├─ _build_recommendations(page_count, toc_result, text_quality)
        │    ├─ no_text_layer        → rejected + ocrmypdf 안내
+       │    ├─ garbled(모지바케)     → rejected + 무손실 재추출/OCR 이중 안내
        │    ├─ toc.is_candidate     → from_toc + suggested_chapters
        │    ├─ page_count < 50      → single_unit
        │    ├─ page_count ≥ 200     → chunks (20p 단위)

@@ -62,3 +62,51 @@ def test_evaluate_text_quality_classifies_text_layer(ko_with_toc, scanned_empty)
 def test_get_pdf_info_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         reader.get_pdf_info(tmp_path / "nope.pdf")
+
+
+# --- 모지바케(인코딩 깨짐) 감지 --------------------------------------------
+
+# ToUnicode 손상 PDF에서 실제로 추출됐던 깨진 텍스트 (일부)
+_GARBLED = (
+    "임탕테개}씩부눈빙개cJ]…TA&AcJ]…TDT "
+    "뜩압읽개正골임숫개돌퀀개,4x!7II!4SIN9A4SI7A솟숫개,4x!7II!4SS, "
+    "롤본4,9,,,A잔넓씭IxSAW간본개xNNA€A2m,[[ "
+    "狂잔넓씭개…zQzE]]QM]6QJA돌눈쓩뽑개…zQzE]]Qb…zQzE]]QM]6QJ "
+    "@]|=Jz▼_pA＜2,2xAE=A뮤섭멀이개넓빌흥 "
+    "PJzDp<FA&A|cELzU_<FAzDAH]J<TAE=A/tHz.ddHK "
+    "용석눈힎개1)(커개正딝개mvFtpD갈돌개롤넓되"
+)
+
+_CLEAN_KO = (
+    "트랜잭션은 데이터베이스의 상태를 변화시키기 위해 수행하는 작업의 단위이다. "
+    "ACID 속성은 원자성, 일관성, 고립성, 지속성을 의미한다. 분산 시스템의 합의 "
+    "알고리즘과 2단계 커밋 프로토콜을 다룬다. 인덱스는 검색 속도를 높여 준다."
+)
+
+# 영문 약어가 한글에 붙는 정상 기술 문서 — 오탐(false positive) 방지 확인용
+_CLEAN_ACRONYM = (
+    "REST API를 사용해 JSON 데이터를 받아 PDF로 변환한다. HTTP 요청은 TCP "
+    "위에서 동작하며, OAuth2 토큰을 헤더에 담아 인증한다. AWS EC2에 Docker "
+    "이미지를 배포하고 URL과 DNS를 설정한다. TLS 핸드셰이크를 HTTP2로 처리한다."
+)
+
+# 숫자·쉼표가 많은 표 형태 정상 텍스트 — 오탐 방지 확인용
+_CLEAN_TABLE = (
+    "2024년 매출은 1,234,567원이고 2025년은 2,345,678원이다. 증가율은 89.7% "
+    "이며, 비용은 12,345원에서 23,456원으로 늘었다. 순이익 3,456,789원을 "
+    "기록했고 영업이익률은 12.3%로 집계되었다. 부채는 45,678원 감소했다."
+)
+
+
+def test_mojibake_score_flags_garbled_text():
+    assert reader.mojibake_score(_GARBLED) > reader._MOJIBAKE_THRESHOLD
+
+
+@pytest.mark.parametrize("clean", [_CLEAN_KO, _CLEAN_ACRONYM, _CLEAN_TABLE])
+def test_mojibake_score_passes_clean_text(clean):
+    # 영문 약어/숫자 표가 섞여도 임계 미만이어야 한다 (오탐 금지)
+    assert reader.mojibake_score(clean) < reader._MOJIBAKE_THRESHOLD
+
+
+def test_mojibake_score_returns_zero_on_short_sample():
+    assert reader.mojibake_score("개" * 10) == 0.0

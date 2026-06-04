@@ -28,12 +28,20 @@ LARGE_PDF_THRESHOLD = 200        # 200p+ & 목차 없음 → chunks 권장 (sing
 # scan_pdf
 # ---------------------------------------------------------------------------
 
+GARBLED_SAMPLE_CHARS = 600  # 사용자에게 보여줄 깨진 텍스트 샘플 길이
+
+
 def _build_recommendations(
     page_count: int,
     toc_result: dict[str, Any],
     text_quality: str,
+    text_sample: str = "",
+    allow_garbled: bool = False,
 ) -> dict[str, Any]:
     """페이지 수 + 목차 후보 + 품질로 챕터 분리 모드 추천.
+
+    allow_garbled=True 면 모지바케 거부를 건너뛰고 깨진 텍스트 그대로
+    페이지 수 기반 라우팅을 진행한다 (사용자가 샘플 확인 후 강행 선택한 경우).
 
     Returns:
         {
@@ -43,6 +51,7 @@ def _build_recommendations(
             "primary_reason": str,
             "suggested_chapters": [...],   # primary_mode로 즉시 set_chapters 가능
             "alternatives": [str, ...],
+            "text_sample": str,            # garbled 거부 시 사용자 확인용 샘플
         }
     """
     if text_quality == "no_text_layer":
@@ -56,6 +65,36 @@ def _build_recommendations(
             "primary_reason": None,
             "suggested_chapters": [],
             "alternatives": [],
+        }
+
+    if text_quality == "garbled" and not allow_garbled:
+        sample = text_sample.strip()[:GARBLED_SAMPLE_CHARS]
+        return {
+            "rejected": True,
+            "reason": (
+                "텍스트는 추출되지만 인코딩이 깨져 있습니다(모지바케). "
+                "글꼴의 ToUnicode 매핑이 손상된 PDF입니다. "
+                "아래 text_sample을 사용자에게 그대로 보여주고 세 갈래 중 "
+                "선택을 받아 주세요.\n"
+                "① 원본에서 일부 페이지만 따로 추출한 파일이라면 — "
+                "Preview·'PDF로 인쇄' 같은 경로가 글꼴을 재인코딩하며 깨뜨린 "
+                "경우입니다. 원본에서 객체를 무손실 복사하는 도구로 다시 "
+                "추출해 주세요. 예: "
+                "`qpdf 원본.pdf --pages 원본.pdf 1-20 -- out.pdf` "
+                "(또는 `pdftk`, `mutool merge`).\n"
+                "② 원본 자체가 이렇게 깨진다면 — 정상 텍스트 레이어가 없는 "
+                "것이므로 `ocrmypdf --force-ocr -l kor+eng in.pdf out.pdf` 로 "
+                "OCR 처리 후 다시 시도해 주세요.\n"
+                "③ 샘플을 확인했는데 이대로 진행해도 괜찮다고 사용자가 "
+                "판단하면 — `scan_pdf(work_id, allow_garbled=True)` 로 다시 "
+                "호출하면 깨진 텍스트 그대로 요약을 진행합니다 (품질은 보장되지 "
+                "않음)."
+            ),
+            "primary_mode": None,
+            "primary_reason": None,
+            "suggested_chapters": [],
+            "alternatives": [],
+            "text_sample": sample,
         }
 
     if toc_result.get("is_candidate"):
@@ -144,7 +183,11 @@ def _toc_entries_to_chapters(
     return chapters
 
 
-def scan_pdf_impl(work_id: str, scan_size: int = DEFAULT_SCAN_SIZE) -> dict[str, Any]:
+def scan_pdf_impl(
+    work_id: str,
+    scan_size: int = DEFAULT_SCAN_SIZE,
+    allow_garbled: bool = False,
+) -> dict[str, Any]:
     """PDF 스캔: 메타/품질/언어/목차 후보/챕터 추천을 모두 모아 반환.
 
     state.json에 language, page_count, text_quality를 채우고
@@ -175,7 +218,10 @@ def scan_pdf_impl(work_id: str, scan_size: int = DEFAULT_SCAN_SIZE) -> dict[str,
     finally:
         doc.close()
 
-    recommendations = _build_recommendations(page_count, toc_result, text_quality)
+    recommendations = _build_recommendations(
+        page_count, toc_result, text_quality,
+        text_sample=scanned_text, allow_garbled=allow_garbled,
+    )
 
     # state 갱신
     workspace.update_state(
