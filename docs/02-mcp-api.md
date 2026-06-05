@@ -98,6 +98,12 @@ finalize_study(work_id: str, output_format: str = "", keep_work_dir: bool = True
 
 - 에러는 `raise`하지 말고 `ok=False`로 응답에 명시 (MCP 통신 안정성).
 - `next_action`은 메인 LLM이 다음 무엇을 호출해야 할지 자연어로 명시.
+  **모든 도구가 채운다** — 특히 챕터 처리 루프(get_chapter_content →
+  save_chapter_result → save_extension_result)와 list_pending_chapters까지
+  "지금 결과로 뭘 하고 다음에 뭘 호출하라"를 담아, 에이전트가 흐름에서
+  이탈(예: chapter_id에 페이지 범위 문자열 사용)하지 않게 한다.
+- 에러 메시지도 가이드다 — 예: 잘못된 chapter_id는 유효 id 목록과 "특정 페이지는
+  scan_page_images를 직접 열라"는 복구 안내를 함께 돌려준다.
 
 ## 메인 LLM 워크플로
 

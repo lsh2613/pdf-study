@@ -293,7 +293,17 @@ def set_chapters(
     다음 단계: get_subagent_prompts(work_id)
     """
     data = analysis.set_chapters_impl(work_id, chapters, book_info, language=language)
-    return _ok(data, next_action=f'get_subagent_prompts(work_id="{work_id}")')
+    n_skip = sum(1 for c in data["chapters"] if c.get("skipped"))
+    n_body = data["chapter_count"] - n_skip
+    return _ok(data, next_action=(
+        f"본문 챕터 {n_body}개 등록"
+        + (f"({n_skip}개는 skip=비본문)" if n_skip else "")
+        + f". 다음: get_subagent_prompts(work_id=\"{work_id}\")로 요약/문제 "
+        "프롬프트와 chapter_ids·workflow를 받으세요. 이후 챕터 처리는 반드시 "
+        "**등록된 chapter_id(ch1·ch2…)** 로만 get_chapter_content를 호출하세요 — "
+        "'p11-p18' 같은 페이지 범위 문자열을 chapter_id로 쓰지 마세요(특정 페이지를 "
+        "보려면 scan_page_images 경로를 직접 여세요)."
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +324,23 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
       문맥으로 복원하세요. `image_refs`(그림)는 비어 있을 수 있습니다.
     """
     raw = analysis.get_chapter_content_impl(work_id, chapter_id)
-    return _ok(raw)
+    if "page_images" in raw:  # ocr 모드
+        guide = (
+            f"이 챕터({chapter_id})의 page_images를 **순서대로** 멀티모달로 읽어 "
+            "본문을 직접 파악(OCR)하세요. 읽어낸 글자수로 문제 개수·요약 길이 "
+            "스케일을 정하고, summarizer_prompt 스키마대로 결과를 만들어 "
+        )
+    else:  # text 모드
+        guide = (
+            f"이 챕터({chapter_id})의 text(+필요 시 image_refs)를 읽고 "
+            "summarizer_prompt 스키마대로 요약·문제를 만들어 "
+        )
+    return _ok(raw, next_action=(
+        guide + f"save_chapter_result(work_id=\"{work_id}\", "
+        f"chapter_id=\"{chapter_id}\", data=...)로 저장하세요. extension이 "
+        "활성이면 같은 챕터에 대해 search_extension_context→extension→"
+        "save_extension_result도 처리한 뒤, 다음 챕터로 넘어가세요."
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -333,10 +359,14 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
     state = workspace.load_state(work_id)
     book_info = workspace.load_book_info(work_id)
     data = prompts.build_prompts(state, book_info)
+    ext_on = data["enabled_types"]["extension"]
     return _ok(data, next_action=(
-        f"Process each chapter_id by following workflow_instructions. "
-        f"For each: get_chapter_content → sub-agent → save_chapter_result"
-        f"{' + save_extension_result' if data['enabled_types']['extension'] else ''}."
+        f"workflow_instructions를 따라 chapter_ids({data['chapter_ids']})를 "
+        "순회하세요. 각 챕터: get_chapter_content(그 chapter_id) → summarizer_prompt로 "
+        "요약/문제 생성 → save_chapter_result"
+        + ("(+ extension 활성: search_extension_context→save_extension_result)" if ext_on else "")
+        + ". chapter_id는 반드시 위 목록의 값(ch1·ch2…)을 쓰고, 페이지 범위 문자열은 "
+        "쓰지 마세요. mode가 'ocr'이면 본문 대신 page_images를 직접 읽습니다."
     ))
 
 
@@ -356,7 +386,13 @@ def save_chapter_result(
     스키마는 get_subagent_prompts의 summarizer_prompt에 명시. 동시성 안전.
     """
     path = workspace.save_chapter_result(work_id, chapter_id, data)
-    return _ok({"saved_path": str(path)})
+    return _ok({"saved_path": str(path)}, next_action=(
+        f"{chapter_id} 요약/문제 저장 완료. extension이 활성이면 이 챕터의 "
+        "확장 문제도(search_extension_context→save_extension_result) 처리하세요. "
+        "그다음 남은 chapter_id로 진행하고, 전부 끝나면 "
+        f"list_pending_chapters(work_id=\"{work_id}\")로 누락이 없는지 확인 후 "
+        "finalize_study를 호출하세요."
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +408,11 @@ def save_extension_result(
 ) -> dict[str, Any]:
     """extension sub-agent의 결과 JSON을 저장합니다. 동시성 안전."""
     path = workspace.save_extension_result(work_id, chapter_id, data)
-    return _ok({"saved_path": str(path)})
+    return _ok({"saved_path": str(path)}, next_action=(
+        f"{chapter_id} 확장 문제 저장 완료. 남은 chapter_id로 진행하세요. "
+        f"모두 끝나면 list_pending_chapters(work_id=\"{work_id}\")로 확인 후 "
+        "finalize_study(output_format=…)로 마무리하세요."
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -401,7 +441,12 @@ async def search_extension_context(
         "results": result["results"],
         "exa_ok": result["ok"],
         "exa_error": result["error"],
-    })
+    }, next_action=(
+        "results(외부 자료)로 챕터와 연결된 확장 문제를 만들어 "
+        f"save_extension_result(work_id=\"{work_id}\", chapter_id=\"{chapter_id}\", "
+        "data=...)로 저장하세요. results가 비었으면 본문 지식만으로 만들고 "
+        "각 문제의 sources는 빈 배열로 두세요."
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +458,12 @@ async def search_extension_context(
 def get_work_state(work_id: str) -> dict[str, Any]:
     """state.json 전체를 반환합니다. 진행 상황/실패 챕터 확인용."""
     state = workspace.load_state(work_id)
-    return _ok(state)
+    return _ok(state, next_action=(
+        f"현재 단계: {state.get('current_phase')}. chapters[*].summary_status/"
+        "extension_status로 진행을 확인하세요. 남은 작업은 "
+        f"list_pending_chapters(work_id=\"{work_id}\")로 집계하고, 다음 호출은 그 "
+        "결과에 따르세요(남았으면 처리, 없으면 finalize_study)."
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -430,11 +480,28 @@ def list_pending_chapters(work_id: str) -> dict[str, Any]:
     state = workspace.load_state(work_id)
     pending = workspace.list_pending_chapters_impl(work_id)
     opts = state.get("question_options", {})
+    summary_pending = pending["summary_pending"]
+    ext_pending = pending["extension_pending"] if opts.get("extension") else []
+    blocking = sorted(set(summary_pending) | set(ext_pending))
+    if blocking:
+        na = (
+            f"아직 처리할 챕터: summary={summary_pending}, extension={ext_pending}. "
+            "각 챕터를 get_chapter_content→(요약/문제)→save_chapter_result"
+            "(+save_extension_result)로 끝내세요. 이미 한 번 실패한 챕터는 1회만 "
+            "재시도하고, 계속 실패하면 finalize_study(force=True)로 부분 렌더가 "
+            "가능합니다."
+        )
+    else:
+        na = (
+            "모든 챕터 처리 완료. finalize_study(work_id, output_format)로 "
+            "마무리하세요 — output_format은 사용자에게 'html(웹 사이트) / "
+            "md_tui(터미널 학습)' 중 물어보고 그 선택을 전달하세요."
+        )
     return _ok({
-        "summary_pending": pending["summary_pending"],
-        "extension_pending": pending["extension_pending"] if opts.get("extension") else [],
+        "summary_pending": summary_pending,
+        "extension_pending": ext_pending,
         "extension_enabled": bool(opts.get("extension")),
-    })
+    }, next_action=na)
 
 
 # ---------------------------------------------------------------------------

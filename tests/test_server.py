@@ -133,12 +133,17 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
     r3 = server.set_chapters(wid, chs, {"title": "T", "author": "A"})
     _check_envelope(r3); assert r3["ok"]
     assert r3["data"]["chapter_count"] == 1
+    # 가이드: 다음 호출 + chapter_id 규율 안내
+    assert "get_subagent_prompts" in r3["next_action"]
+    assert "p11-p18" in r3["next_action"]  # 페이지범위 id 금지 경고
 
     # 본문 가져오기
     r4 = server.get_chapter_content(wid, "ch1")
     _check_envelope(r4); assert r4["ok"]
     assert r4["data"]["chapter_id"] == "ch1"
     assert r4["data"]["char_count"] > 0
+    # 가이드: 읽고 save_chapter_result 하라는 안내
+    assert "save_chapter_result" in r4["next_action"]
 
     # 프롬프트
     r5 = server.get_subagent_prompts(wid)
@@ -160,12 +165,14 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
         },
     })
     _check_envelope(r6); assert r6["ok"]
+    assert r6["next_action"] and "list_pending_chapters" in r6["next_action"]
 
     # extension 결과 저장 (옵션 켜져 있다는 가정 — 기본 enable_extension=True)
     r7 = server.save_extension_result(wid, "ch1", {
         "chapter_id": "ch1", "questions": {"extension": []}
     })
     _check_envelope(r7); assert r7["ok"]
+    assert r7["next_action"] and "finalize_study" in r7["next_action"]
 
     # 상태 조회
     r8 = server.get_work_state(wid)
@@ -179,6 +186,8 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
     _check_envelope(r9); assert r9["ok"]
     assert r9["data"]["summary_pending"] == []
     assert r9["data"]["extension_enabled"] is True
+    # 모두 끝났으면 finalize 안내
+    assert "finalize_study" in r9["next_action"]
 
     # finalize
     r10 = server.finalize_study(wid, output_format="html")
