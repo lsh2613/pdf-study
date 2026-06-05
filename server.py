@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -592,32 +593,41 @@ def finalize_study(
         "쓰려면 보존)."
     )
 
+    # MCP 서버를 띄운 그 인터프리터(=의존성 rich·pymupdf가 이미 설치된 venv).
+    # 이걸로 실행하면 별도 설치 없이 바로 동작한다. 다른 python으로 실행하면
+    # study_tui.py가 rich 자동 설치/평문 폴백으로 대응한다.
+    py = sys.executable or "python3"
+
     if output_format == "md_tui":
-        # 터미널 TUI — 서버 없음. study_tui.py가 rich를 자동 설치 후 실행.
-        launch_cmd = f"cd {output_dir} && python3 study_tui.py"
+        # 터미널 TUI — 서버 없음.
+        launch_cmd = f"cd {output_dir} && {py} study_tui.py"
         data = {
             "output_dir": str(output_dir),
             "format": output_format,
             "work_dir_kept": keep_work_dir,
             "launch_command": launch_cmd,
             "entry_script": "study_tui.py",
+            "python": py,
         }
         next_action = (
             f"학습 자료(Markdown + 터미널 TUI)가 {output_dir}에 만들어졌습니다.\n"
             f"\n[학습 시작] 다음 명령을 실행하세요:\n"
             f"  {launch_cmd}\n"
-            f"루트에서 실행하면 챕터 선택 메뉴가, `cd ch1 && python3 study_tui.py`로 "
-            f"실행하면 그 챕터로 바로 진입합니다. 의존성 `rich`는 없으면 자동 설치를 "
-            f"시도하고, 설치가 불가능한 환경이면 평문 모드로 폴백하므로 **어떤 "
-            f"환경에서도 별도 준비 없이 실행**됩니다.\n"
+            f"루트에서 실행하면 챕터 선택 메뉴가, `cd ch1 && {py} study_tui.py`로 "
+            f"실행하면 그 챕터로 바로 진입합니다. 위 명령은 **MCP 서버와 같은 "
+            f"인터프리터**(의존성 rich가 이미 설치돼 있음)라 별도 설치 없이 바로 "
+            f"동작합니다. 다른 python(`python3` 등)으로 실행해도 study_tui.py가 "
+            f"rich 자동 설치를 시도하고, 안 되면 평문 모드로 폴백하므로 어디서든 "
+            f"실행됩니다.\n"
             f"진도(답안·완료·객관식 점수)는 각 챕터 폴더의 progress.json에 자동 "
             f"저장되어, 다시 실행하면 이어서 풀 수 있습니다(서버 불필요)."
             + work_cleanup
         )
         return _ok(data, next_action=next_action)
 
-    # html — 정적 사이트 + 진도 API 서버(study_html.py)
-    launch_cmd = f"cd {output_dir} && python3 study_html.py"
+    # html — 정적 사이트 + 진도 API 서버(study_html.py). stdlib만 쓰므로 어떤
+    # python으로도 동작하지만, 일관성을 위해 같은 인터프리터를 안내한다.
+    launch_cmd = f"cd {output_dir} && {py} study_html.py"
     entry = "index.html" if (output_dir / "index.html").exists() else "main.html"
     return _ok(
         {
@@ -625,6 +635,7 @@ def finalize_study(
             "format": output_format,
             "work_dir_kept": keep_work_dir,
             "launch_command": launch_cmd,
+            "python": py,
             "entry_page": entry,
             "default_url": "http://localhost:8765/" + entry,
         },

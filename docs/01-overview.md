@@ -11,7 +11,9 @@ PDF(주로 책 스캔본)를 챕터별 요약 + 4유형 검증 문제로 변환�
 ## 기술 스택
 
 - Python 3.10+
-- 의존성: `mcp`, `pymupdf`, `pillow` (총 3개)
+- 의존성: `mcp`, `pymupdf`, `pillow`, `rich` (총 4개, 모두 순수 pip 패키지)
+  - `rich`는 md_tui(터미널 TUI) 출력 전용. MCP 서버 설치 시 venv에 함께 깔리므로,
+    학습 런처를 **서버와 같은 인터프리터**로 실행하면 추가 설치가 필요 없다.
 - 시스템 의존성: 없음
 - MCP SDK: FastMCP (`from mcp.server.fastmcp import FastMCP`)
 

@@ -158,10 +158,12 @@ python study_tui.py           # 루트: 챕터 선택 메뉴
 cd ch1 && python study_tui.py # 특정 챕터로 바로 진입
 ```
 
-별도 준비 불필요 — 의존성 `rich`가 없으면 `study_tui.py`가 **자동 설치를 시도**
-(`pip install rich`)하고, 설치가 불가능한 환경(pip 부재·오프라인·권한·
-externally-managed 등)이면 **평문 모드로 폴백**해 그래도 실행된다. rich API
-표면(Console/Markdown/Panel/Prompt/Confirm)만 흉내 내는 셰임을 내장한다.
+`rich`는 MCP 서버 의존성이라 설치 시 venv에 이미 깔려 있다. `finalize_study`가
+주는 실행 명령은 **서버와 같은 인터프리터**(`sys.executable`)를 가리키므로, 그대로
+실행하면 추가 설치 없이 바로 동작한다. 다른 python(`python3` 등)으로 실행하면
+`study_tui.py`가 ① rich 자동 설치를 시도하고 ② 불가능한 환경(pip 부재·오프라인·
+권한·externally-managed 등)이면 **평문 모드로 폴백**해 그래도 실행된다(rich API
+표면만 흉내 내는 셰임 내장).
 
 `study_tui.py`(rich 엔진)는 출력 루트에 1벌, 각 `ch*/study_tui.py`는 그 엔진을
 호출하는 얇은 shim이다. 엔진은 `pdf_study` 패키지에 의존하지 않는 독립 스크립트다.
