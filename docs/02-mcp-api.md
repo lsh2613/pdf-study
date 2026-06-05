@@ -129,10 +129,12 @@ finalize_study(work_id: str, output_format: str = "", keep_work_dir: bool = True
    ├ sequential 모드: 한 챕터씩 → save_chapter_result → 다음 챕터
    └ parallel 모드: 최대 5개 동시 디스패치, 결과 도착 순 save 호출
 7. get_work_state → 실패 챕터 1회 재시도
-8. finalize_study(work_id, output_format="html") → study_output/ 완성
+8. finalize_study(work_id, output_format=...) → study_output/ 완성
+   └ output_format은 기본값 없음 — 사용자에게 html/md_tui 물어 전달.
    └ pending 챕터가 남아 있으면 ok=False로 거부됨. 다 끝낸 뒤 호출하거나,
      부분 결과라도 만들려면 force=True.
-9. 사용자에게 .work/ 보존 여부 묻기 (기본은 보존)
+   └ next_action의 launch_command(서버 인터프리터 기준)로 학습 자료 실행 안내.
+9. 사용자에게 .work/ 보존 여부 묻기 (기본은 보존; 삭제 원하면 keep_work_dir=False)
 
 * 서버 재시작 등으로 work_id가 무효해졌으면(unknown work_id) →
   resume_work(output_dir 또는 pdf_path)로 복원 후 6~8을 이어서 진행.

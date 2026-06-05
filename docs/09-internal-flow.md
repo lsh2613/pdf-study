@@ -259,16 +259,19 @@ server.list_pending_chapters(work_id)
 - 실패 챕터는 `workspace.mark_chapter_failed`로 retry_count++ 가 누적되어,
   메인 LLM이 1회 재시도 후 포기하기 좋게 신호한다.
 
-### Stage 7 · `finalize_study` — 정적 사이트 렌더링
+### Stage 7 · `finalize_study` — 학습 자료 렌더링 (html | md_tui)
+
+`output_format`은 기본값 없음 — 미지정 시 사용자에게 물으라며 거부.
 
 ```
-server.finalize_study(work_id, output_format="html", keep_work_dir=True, force=False)
+server.finalize_study(work_id, output_format="", keep_work_dir=True, force=False)
+  ├─ output_format 미지정 → ok=False (html/md_tui 중 사용자에게 물어볼 것)
   ├─ 완료 가드: list_pending_chapters_impl로 pending 확인.
   │    summary_pending(+extension 활성 시 extension_pending)이 남아 있고
   │    force=False면 ok=False로 거부 + data에 pending 목록 반환.
   │    (조용한 부분 렌더링 방지. force=True면 통과)
-  ├─ RENDERERS["html"] = HtmlRenderer
-  └─ HtmlRenderer.render(work_id, output_dir)
+  ├─ RENDERERS[output_format]()  # "html"→HtmlRenderer, "md_tui"→MdTuiRenderer
+  └─ HtmlRenderer.render(work_id, output_dir)   # md_tui면 MdTuiRenderer
        ├─ _load_all
        │    - state, book_info, chapters/ch{N}.json,
        │      extensions/ch{N}.json, chapters_raw/ch{N}.json 모두 로드
@@ -282,12 +285,17 @@ server.finalize_study(work_id, output_format="html", keep_work_dir=True, force=F
             - main.html (책 정보 상단 + 사이드바 없음)
 ```
 
-- 코드: `renderer/html_renderer.py:HtmlRenderer.render`, `_sidebar`,
-  `_chapter_body`, `_page_shell`
-- next_action 응답에:
-  - `serve_command`: `cd <output_dir> && python3 study_html.py`
-  - 파일을 file://로 직접 열면 /api/progress가 동작하지 않는다는 경고
-  - `Ctrl+C`로 서버 종료, 백그라운드 띄웠을 때의 `pkill` 안내
+- 코드: `renderer/html_renderer.py:HtmlRenderer.render`(+`md_tui_renderer.py`),
+  `_sidebar`, `_chapter_body`, `_page_shell`
+- next_action은 `output_format`별로 분기. `data.launch_command`/`data.python`은
+  **MCP 서버를 띄운 인터프리터(`sys.executable`)**로 만들어져, 의존성이 이미
+  깔린 venv로 바로 실행된다.
+  - html: `cd <output_dir> && <sys.executable> study_html.py`(진도 API 서버).
+    file://로 직접 열면 /api/progress 미동작 경고 + `Ctrl+C`/`pkill` 종료 안내.
+  - md_tui: `cd <output_dir> && <sys.executable> study_tui.py`(터미널 TUI).
+    다른 python으로 실행 시 rich 자동설치→평문 폴백. 진도는 progress.json 직접 저장.
+  - 두 포맷 공통: 사용자에게 `.work` 보존/삭제 여부를 묻고, 삭제 원하면
+    `keep_work_dir=False`로 재호출하라는 안내 포함.
 
 ### Stage 8 · 학습 — `study_html.py`
 
@@ -328,7 +336,9 @@ POST /api/progress/<chapter_id>   → 같은 규칙
 | `prompts.py` | 4 | sub-agent KO/EN 템플릿 + workflow + chapter_ids 분리 |
 | `exa_client.py` | 5 | Exa Web Research MCP HTTP 호출 + 평문 파서 |
 | `renderer/html_renderer.py` | 7 | 정적 사이트 합성 (사이드바·완료 토글·옵션 비활성 섹션 생략) |
-| `templates/html/{style.css,storage.js,grading.js,study_html.py,README.md}` | 7·8 | 학습 자료 정적 리소스 + 런처 |
+| `renderer/md_tui_renderer.py` | 7 | 챕터별 폴더 + summary.md + quiz.json + study_tui.py 런처 합성 |
+| `templates/html/{style.css,storage.js,grading.js,study_html.py,README.md}` | 7·8 | HTML 학습 자료 정적 리소스 + 런처 |
+| `templates/md_tui/{study_tui.py,chapter_launcher.py,README.md}` | 7·8 | TUI 엔진(rich, 없으면 자동설치/평문 폴백) + 챕터 shim |
 
 ---
 
