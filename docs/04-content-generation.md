@@ -70,6 +70,7 @@
   "ok": True,
   "data": {
     "mode": "sequential" | "parallel",
+    "extraction_mode": "text" | "ocr",  # ocr이면 page_images를 읽어 OCR
     "summarizer_prompt": "...",       # 챕터 요약 + 문제 생성 시스템 프롬프트
     "extension_prompt": "...",        # 확장 문제 시스템 프롬프트 (옵션)
     "workflow_instructions": "...",   # 아래 참고
@@ -101,10 +102,16 @@
 - 실패 챕터는 모든 배치 종료 후 1회 재시도
 ```
 
-### 이미지 전달
+### 이미지 전달 (extraction_mode별)
 
-- `get_chapter_content`는 `image_refs`에 **절대 경로**로 이미지 위치를 제공.
-- 프롬프트에 "필요 시 다음 이미지를 참조하세요: [path1, path2, ...]" 라인을 명시 → sub-agent(멀티모달 모델)가 직접 로드/참조.
+- **text 모드**: `get_chapter_content`가 `text`(본문) + `image_refs`(그림, **절대
+  경로**)를 준다. sub-agent는 text를 읽고 필요 시 그림을 멀티모달로 참조.
+- **ocr 모드**: 본문 텍스트가 없다. 대신 `page_images`(챕터 페이지를 렌더한
+  JPEG **절대 경로**)를 순서대로 멀티모달로 읽어 **본문을 직접 OCR**한다.
+  - 프롬프트(`prompts.py`의 `INPUT_MODE_OCR_*`)가 "page_images를 순서대로 읽어
+    본문을 파악하고, 흐릿한 기술용어·식별자·예약어는 문맥으로 복원하라"고 지시.
+  - 읽어낸 글자수로 위의 문제 개수·요약 길이 표를 적용 (서버는 글자수를 모름).
+  - `image_refs`(그림)는 순수 스캔본이면 비어 있을 수 있다.
 - 캡션 생성은 sub-agent의 자유 판단.
 
 병렬 모드의 동시성 보장은 [06-concurrency.md](./06-concurrency.md) 참고.

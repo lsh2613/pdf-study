@@ -88,6 +88,7 @@ def init_work(
     pdf_path: str,
     output_dir: str = "",
     execution_mode: str = "",
+    extraction_mode: str = "",
     enable_multiple_choice: bool = True,
     enable_short_answer: bool = True,
     enable_reflection: bool = True,
@@ -104,6 +105,12 @@ def init_work(
       말고 반드시 사용자에게 물어 선택을 받으세요.** 미지정 시 거부됩니다.
         - sequential: 한 챕터씩 순차 처리 (안정적, 느림)
         - parallel: 최대 5개 챕터 동시 처리 (빠름, sub-agent 병렬 디스패치)
+    - extraction_mode: "text" | "ocr". **기본값 없음 — 임의로 정하지 말고 반드시
+      사용자에게 물어 선택을 받으세요.** 미지정 시 거부됩니다.
+        - text: 디지털/전자책 PDF(텍스트 복사·검색이 잘 되는 PDF)에 적합.
+          빠르고 비용 적음. 단 스캔본·글꼴 깨진 PDF는 본문이 손상될 수 있음.
+        - ocr: 스캔본·이미지 기반·텍스트가 깨지는 PDF에 적합. 비전 LLM(sub-agent)이
+          페이지 이미지를 직접 읽어 정확하나 느리고 비용 큼.
     - enable_*: 4가지 문제 유형 활성/비활성 (모두 False 금지)
     - user_context: 학습자 정보 (학년/배경 등). sub-agent 프롬프트에 주입.
     다음 단계: scan_pdf(work_id)
@@ -115,6 +122,16 @@ def init_work(
             "병렬(parallel): 최대 5개 챕터 동시 처리' 중 무엇을 원하는지 물어본 뒤 "
             "그 선택을 execution_mode로 전달해 다시 호출하세요.",
             data={"choices": ["sequential", "parallel"]},
+        )
+    if extraction_mode not in ("text", "ocr"):
+        return _err(
+            "extraction_mode가 지정되지 않았습니다. 기본값을 임의로 정하지 말고, "
+            "사용자에게 '텍스트(text): 디지털 PDF에서 라이브러리로 텍스트 추출 — "
+            "빠르고 저렴하나 스캔본·글꼴 깨진 PDF는 본문 손상 위험 / "
+            "OCR(ocr): 비전 LLM이 페이지 이미지를 직접 읽음 — 스캔본·깨진 PDF에 "
+            "강하나 느리고 비용 큼' 중 무엇을 원하는지 물어본 뒤 그 선택을 "
+            "extraction_mode로 전달해 다시 호출하세요.",
+            data={"choices": ["text", "ocr"]},
         )
 
     work_id = workspace.make_work_id()
@@ -133,6 +150,7 @@ def init_work(
         },
         user_context=user_context,
         execution_mode=execution_mode,
+        extraction_mode=extraction_mode,
         work_id=work_id,
     )
     return _ok(
@@ -184,6 +202,7 @@ def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
             "output_dir": state.get("output_dir"),
             "current_phase": state.get("current_phase"),
             "execution_mode": state.get("execution_mode"),
+            "extraction_mode": state.get("extraction_mode"),
             "summary_pending": pending["summary_pending"],
             "extension_pending": ext_pending,
         },
@@ -252,18 +271,28 @@ def set_chapters(
     work_id: str,
     chapters: list[dict[str, Any]],
     book_info: dict[str, Any] | None = None,
+    language: str = "",
 ) -> dict[str, Any]:
     """챕터 구조를 확정하고 챕터별 본문/이미지를 추출합니다.
 
     - chapters: [{"chapter_id","title","page_range":[start,end]}, ...] (1-based)
+      page_range는 항상 **PDF 물리 페이지** 기준. printed_range(책 페이지)는
+      옵셔널 표시용 메타로, 주면 보존하되 검증하지 않습니다.
     - 각 chapter에 optional "skip": true 를 주면 그 챕터는 본문 추출과
       sub-agent 디스패치, 렌더링 모두에서 제외됩니다. **찾아보기·색인·
       판권·저자 소개 같은 비본문 페이지가 목차 후보에 섞여 들어왔을 때
       사용**하세요.
-    - book_info: 메인 LLM이 scanned_text + PDF 메타로 보강한 책 정보
+    - book_info: 메인 LLM이 scanned_text(또는 OCR 모드의 scan_page_images)와
+      PDF 메타로 보강한 책 정보
+    - language: "ko" | "en". **OCR 모드에서는 텍스트 언어 감지가 불가능하므로,
+      scan_page_images를 읽고 파악한 본문 언어를 반드시 전달**하세요. (text
+      모드는 scan_pdf가 자동 감지하므로 생략 가능)
+
+    OCR 모드(extraction_mode="ocr")에서는 본문 텍스트를 추출하지 않습니다.
+    서브에이전트가 get_chapter_content가 렌더한 페이지 이미지를 직접 읽습니다.
     다음 단계: get_subagent_prompts(work_id)
     """
-    data = analysis.set_chapters_impl(work_id, chapters, book_info)
+    data = analysis.set_chapters_impl(work_id, chapters, book_info, language=language)
     return _ok(data, next_action=f'get_subagent_prompts(work_id="{work_id}")')
 
 
@@ -274,11 +303,17 @@ def set_chapters(
 @mcp.tool()
 @_safe("get_chapter_content")
 def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
-    """챕터의 본문 텍스트 + image_refs(절대 경로)를 반환합니다.
+    """챕터 본문을 반환합니다 (extraction_mode에 따라 형태가 다름).
 
-    sub-agent는 image_refs의 path를 멀티모달 입력으로 직접 로드해 활용하세요.
+    - text 모드: `text`(본문) + `image_refs`(그림 절대경로)를 반환. sub-agent는
+      text를 읽고, 필요 시 image_refs를 멀티모달 입력으로 로드하세요.
+    - ocr 모드: 본문 텍스트가 없습니다. 대신 `page_images`(이 챕터 페이지들을
+      렌더한 JPEG 절대경로)를 반환합니다. **sub-agent는 page_images를 순서대로
+      멀티모달 입력으로 읽어 본문을 직접 파악(OCR)**한 뒤, 읽어낸 글자수로
+      문제 개수·요약 길이 스케일을 정하세요. 흐릿한 기술용어·식별자·예약어는
+      문맥으로 복원하세요. `image_refs`(그림)는 비어 있을 수 있습니다.
     """
-    raw = workspace.get_chapter_raw(work_id, chapter_id)
+    raw = analysis.get_chapter_content_impl(work_id, chapter_id)
     return _ok(raw)
 
 
@@ -498,7 +533,15 @@ def finalize_study(
             f"\n[서버 종료] 서버를 실행한 터미널에서 Ctrl+C 를 누르세요. "
             f"브라우저 탭/창을 닫는 것만으로는 서버가 꺼지지 않습니다. "
             f"백그라운드로 띄웠다면 `lsof -i :8765` 로 PID를 찾아 `kill <pid>` "
-            f"하거나, `pkill -f \"serve.py --port 8765\"` 로 종료할 수 있습니다."
+            f"하거나, `pkill -f \"serve.py --port 8765\"` 로 종료할 수 있습니다.\n"
+            f"\n[작업 데이터 정리] 중간 작업 폴더(.work/: 페이지 이미지·raw·"
+            f"상태 파일)가 보존되어 있습니다"
+            + (" (현재 keep_work_dir=False라 이미 삭제됨)." if not keep_work_dir
+               else f" ({workspace.get_work_dir(work_id)}).") +
+            f" 사용자에게 이 중간 데이터를 삭제할지 보존할지 물어보세요. "
+            f"삭제를 원하면 finalize_study(work_id=\"{work_id}\", "
+            f"output_format=\"{output_format}\", keep_work_dir=False)로 다시 "
+            f"호출하면 .work/가 제거됩니다(재실행 시 캐시로 쓰려면 보존)."
         ),
     )
 

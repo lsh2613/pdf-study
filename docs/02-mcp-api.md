@@ -14,6 +14,11 @@ init_work(
     execution_mode: str = "",            # "sequential" | "parallel" — 기본값 없음.
                                           # 임의 지정 금지, 반드시 사용자에게 물어볼 것.
                                           # 미지정 시 ok=False로 거부.
+    extraction_mode: str = "",           # "text" | "ocr" — 기본값 없음. 임의 지정
+                                          # 금지, 반드시 사용자에게 물어볼 것. 미지정 거부.
+                                          # text: 라이브러리로 텍스트 추출(디지털 PDF).
+                                          # ocr: 비전 LLM이 페이지 이미지를 직접 읽음
+                                          #      (스캔본·글꼴 깨진 PDF).
     enable_multiple_choice: bool = True,
     enable_short_answer: bool = True,
     enable_reflection: bool = True,
@@ -38,6 +43,10 @@ resume_work(output_dir: str = "", pdf_path: str = "") -> dict
 # data.recommendations.text_sample에 깨진 텍스트 일부(≤600자)를 담는다.
 # 이를 사용자에게 보여주고 ① 무손실 재추출(qpdf) ② OCR(ocrmypdf)
 # ③ 그대로 진행 중 선택을 받아라. ③이면 allow_garbled=True로 재호출.
+# [OCR 모드] extraction_mode="ocr"이면 텍스트 품질 거부(no_text_layer/garbled)를
+# 모두 우회하고, 첫 scan_size 페이지를 JPEG로 렌더해 data.scan_page_images로 준다.
+# 목차·offset은 (깨질 수 있는) 텍스트 대신 LLM이 그 이미지를 읽어 직접 파악하고,
+# recommendations.next_step_guidance 지시에 따라 from_toc 챕터를 구성한다.
 scan_pdf(work_id: str, scan_size: int = 30, allow_garbled: bool = False) -> dict
 
 # 각 chapter 항목 형식: {"chapter_id", "title", "page_range":[s,e],
@@ -45,7 +54,13 @@ scan_pdf(work_id: str, scan_size: int = 30, allow_garbled: bool = False) -> dict
 # page_range=PDF 물리(필수·검증 대상), printed_range=책 페이지(표시용 옵셔널).
 # skip=True 인 챕터(찾아보기·색인·판권)는 본문 추출과 sub-agent 디스패치,
 # HTML 렌더링에서 모두 제외된다.
-set_chapters(work_id: str, chapters: list[dict], book_info: dict = None) -> dict
+# language: "ko"|"en". OCR 모드는 텍스트 언어감지가 불가하니 LLM이 이미지로
+# 파악한 언어를 반드시 전달(text 모드는 scan_pdf가 자동 감지하므로 생략 가능).
+# OCR 모드는 본문 텍스트를 추출하지 않는다(그림만 best-effort).
+set_chapters(work_id: str, chapters: list[dict], book_info: dict = None, language: str = "") -> dict
+# text 모드: data에 text(본문) + image_refs(그림 절대경로).
+# ocr  모드: data에 page_images(챕터 페이지를 렌더한 JPEG 절대경로) — sub-agent가
+#            순서대로 읽어 본문을 OCR. image_refs(그림)는 비어 있을 수 있다.
 get_chapter_content(work_id: str, chapter_id: str) -> dict
 get_subagent_prompts(work_id: str) -> dict
 save_chapter_result(work_id: str, chapter_id: str, data: dict) -> dict
@@ -80,18 +95,21 @@ finalize_study(work_id: str, output_format: str = "", keep_work_dir: bool = True
 ## 메인 LLM 워크플로
 
 ```
-1. init_work(pdf, output, user_context="...", execution_mode="sequential")
+1. init_work(pdf, output, user_context="...", execution_mode="sequential",
+             extraction_mode="text" | "ocr")        # 둘 다 사용자에게 물어 결정
    → work_id
 2. scan_pdf(work_id, scan_size=30)
    ├ book_metadata (PDF 자체 메타)
-   ├ scanned_text (첫 청크, 서문 등이 들어있을 가능성)
-   ├ language (감지된 본문 언어)
-   ├ toc_candidates (본문 목차 후보)
-   └ recommendations (페이지 수 기반 챕터 분리 추천)
+   ├ scanned_text (첫 청크 — text 모드. OCR 모드는 신뢰 안 함)
+   ├ scan_page_images (OCR 모드: 첫 N페이지 JPEG — LLM이 직접 읽음)
+   ├ language (감지된 본문 언어 — OCR 모드는 LLM이 이미지로 파악)
+   ├ toc_candidates (text 모드의 본문 목차 후보)
+   └ recommendations (페이지 수 기반 챕터 분리 추천 + offset + next_step_guidance)
 3. 메인 LLM이 결정:
-   ├ scanned_text에서 책 정보 추가 추출 (서문 요약, 출판사 등)
+   ├ 책 정보 추가 추출 (text: scanned_text / ocr: scan_page_images)
    └ chapters 구조 결정 (recommendations 활용 또는 사용자에게 묻기)
-4. set_chapters(work_id, chapters, book_info)
+      OCR 모드면 scan_page_images에서 목차·offset을 읽어 from_toc 직접 구성
+4. set_chapters(work_id, chapters, book_info, language=...)  # ocr이면 language 필수
 5. get_subagent_prompts(work_id)
    → {summarizer_prompt, extension_prompt, workflow_instructions, mode}
 6. Sub-agent 디스패치 (workflow_instructions에 따라):

@@ -125,6 +125,11 @@ def images_dir(work_id: str) -> Path:
     return pdf_analysis_dir(work_id) / "images"
 
 
+def pages_dir(work_id: str) -> Path:
+    """OCR 모드에서 페이지를 JPEG로 렌더해 두는 곳 (p{N}.jpg)."""
+    return pdf_analysis_dir(work_id) / "pages"
+
+
 def chapters_dir(work_id: str) -> Path:
     return get_work_dir(work_id) / "chapters"
 
@@ -146,6 +151,7 @@ def outline_path(work_id: str) -> Path:
 # ---------------------------------------------------------------------------
 
 VALID_EXECUTION_MODES = ("sequential", "parallel")
+VALID_EXTRACTION_MODES = ("text", "ocr")
 
 
 def _validate_options(options: dict[str, bool]) -> dict[str, bool]:
@@ -162,6 +168,7 @@ def create_workspace(
     options: dict[str, bool],
     user_context: str = "",
     execution_mode: str = "sequential",
+    extraction_mode: str = "text",
     work_id: str | None = None,
 ) -> str:
     """워크스페이스 생성 → work_id 반환.
@@ -171,7 +178,8 @@ def create_workspace(
     work_id를 인자로 받으면(외부에서 미리 발급) 그 값으로 등록. 없으면 새로 발급.
 
     Raises:
-        ValueError: pdf_path 미존재, execution_mode 잘못됨, 모든 문제 비활성.
+        ValueError: pdf_path 미존재, execution_mode/extraction_mode 잘못됨,
+            모든 문제 비활성.
     """
     pdf = Path(pdf_path)
     if not pdf.exists():
@@ -180,6 +188,10 @@ def create_workspace(
     if execution_mode not in VALID_EXECUTION_MODES:
         raise ValueError(
             f"execution_mode must be one of {VALID_EXECUTION_MODES}, got {execution_mode!r}"
+        )
+    if extraction_mode not in VALID_EXTRACTION_MODES:
+        raise ValueError(
+            f"extraction_mode must be one of {VALID_EXTRACTION_MODES}, got {extraction_mode!r}"
         )
 
     question_options = _validate_options(options)
@@ -191,6 +203,7 @@ def create_workspace(
     # 하위 디렉터리 미리 생성
     (work_dir / "pdf_analysis" / "chapters_raw").mkdir(parents=True, exist_ok=True)
     (work_dir / "pdf_analysis" / "images").mkdir(parents=True, exist_ok=True)
+    (work_dir / "pdf_analysis" / "pages").mkdir(parents=True, exist_ok=True)
     (work_dir / "chapters").mkdir(parents=True, exist_ok=True)
     (work_dir / "extensions").mkdir(parents=True, exist_ok=True)
 
@@ -204,6 +217,7 @@ def create_workspace(
         "output_dir": str(out.resolve()),
         "started_at": _now_iso(),
         "execution_mode": execution_mode,
+        "extraction_mode": extraction_mode,
         "language": None,
         "question_options": question_options,
         "user_context": user_context or "",

@@ -19,8 +19,8 @@ PDF(주로 책 스캔본)를 챕터별 요약 + 4유형 검증 문제로 변환�
 
 | 주체 | 역할 |
 |---|---|
-| pdf-study MCP (우리) | PDF 처리, 챕터 분리, 학습 자료 렌더링 |
-| 메인 LLM (Claude/GPT/Gemini) | 챕터 요약, 4유형 문제 생성, 책 정보 추출, OCR 오류 자연 교정 |
+| pdf-study MCP (우리) | PDF 처리, 챕터 분리, (OCR 모드) 페이지→이미지 렌더, 학습 자료 렌더링 |
+| 메인 LLM (Claude/GPT/Gemini) | 챕터 요약, 4유형 문제 생성, 책 정보 추출, 본문/OCR 오류 자연 교정. **OCR 모드에선 sub-agent가 페이지 이미지를 직접 읽어 본문을 OCR** |
 | Exa Web Research MCP (HTTP 내부 흡수) | 확장 문제용 외부 검색 (API key 불필요) |
 | serve.py (생성물) | 학습 시 localhost 서버 + 진도 read/write |
 

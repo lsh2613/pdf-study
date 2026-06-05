@@ -99,7 +99,7 @@ def test_from_toc_applies_offset_printed_to_physical():
 
 
 def test_chunks_printed_range_marks_front_matter_none():
-    # offset 18: 물리 1-20 청크는 책 번호 < 1 구간(front matter) 포함 → 일부 클램프
+    # offset 18: 물리 1-30 청크는 책 번호 < 1 구간(front matter) 포함 → 일부 클램프
     r = analysis._build_recommendations(
         page_count=93,
         toc_result=_toc(False),
@@ -107,10 +107,10 @@ def test_chunks_printed_range_marks_front_matter_none():
         page_offset=18,
         offset_confidence="high",
     )
-    first = r["suggested_chapters"][0]      # 물리 [1,20]
-    # 책 페이지 = 물리-18 → [-17, 2]; 끝이 ≥1 이라 시작만 1로 클램프
-    assert first["page_range"][0] == 1
-    assert first["printed_range"] == [1, 2]
+    first = r["suggested_chapters"][0]      # 물리 [1,30]
+    # 책 페이지 = 물리-18 → [-17, 12]; 끝이 ≥1 이라 시작만 1로 클램프
+    assert first["page_range"] == [1, 30]
+    assert first["printed_range"] == [1, 12]
 
 
 def test_short_pdf_routes_to_single_unit():
@@ -138,8 +138,8 @@ def test_large_pdf_routes_to_chunks():
     )
     assert r["primary_mode"] == "chunks"
     chs = r["suggested_chapters"]
-    assert len(chs) == 15  # 300 / 20
-    assert chs[0]["page_range"] == [1, 20]
+    assert len(chs) == 10  # 300 / 30
+    assert chs[0]["page_range"] == [1, 30]
 
 
 def test_medium_pdf_no_toc_routes_to_ask_user():

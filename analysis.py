@@ -17,7 +17,7 @@ from .pdf import toc_finder
 logger = logging.getLogger(__name__)
 
 DEFAULT_SCAN_SIZE = 30  # 목차가 20p를 넘는 책이 있어 기본 스캔 범위를 넓힘
-DEFAULT_CHUNK_SIZE = 20
+DEFAULT_CHUNK_SIZE = 30  # 목차 없을 때 균등 분할 단위
 
 # 페이지 임계값 (docs/03-pdf-processing.md)
 SHORT_PDF_THRESHOLD = 50         # < 50p → single_unit 권장
@@ -54,14 +54,30 @@ def _with_offset_meta(
     reco: dict[str, Any],
     page_offset: int | None,
     offset_confidence: str,
+    ocr_mode: bool = False,
 ) -> dict[str, Any]:
-    """비거부 recommendation에 offset 메타 + printed_range + 3택 안내 주입."""
+    """비거부 recommendation에 offset 메타 + printed_range + 3택 안내 주입.
+
+    ocr_mode=True면 서버가 본문 텍스트를 신뢰하지 않으므로(스캔본),
+    목차·offset을 scan_page_images(첫 N페이지 이미지)에서 직접 읽으라는
+    OCR 안내를 next_step_guidance 앞에 덧붙인다.
+    """
     _annotate_printed_ranges(reco["suggested_chapters"], page_offset)
     reco["page_offset"] = page_offset
     reco["offset_confidence"] = offset_confidence
     reco["user_choices"] = ["proceed", "manual_pdf_pages", "chunks"]
     off_known = page_offset is not None
-    reco["next_step_guidance"] = (
+    ocr_prefix = (
+        "[OCR 모드] 이 PDF는 텍스트를 신뢰하지 않고 페이지 이미지를 직접 읽습니다. "
+        "응답의 scan_page_images(첫 N페이지 JPEG 경로)를 먼저 읽어 ① 목차가 있으면 "
+        "제목과 책 페이지번호를 추출해 from_toc 챕터를 직접 구성하고(아래 "
+        "suggested_chapters의 청크는 목차가 없을 때만 사용), ② 꼬리말 인쇄번호와 "
+        "물리 페이지를 비교해 offset(물리 = 책 + offset)을 추정하세요"
+        + (f" (서버 텍스트 레이어 추정값 {page_offset}을 참고하되 이미지로 검증). "
+           if off_known else " (서버가 offset을 못 구했으니 이미지로 직접 추정). ")
+        + "또한 본문 언어를 파악해 set_chapters(language=\"ko\"|\"en\")로 전달하세요. "
+    ) if ocr_mode else ""
+    reco["next_step_guidance"] = ocr_prefix + (
         "분석된 챕터를 사용자에게 보여줄 때 각 챕터를 "
         "'PDF p.{start}-{end} (책 p.{printed})' 형식으로 **두 번호 모두** 표기하세요"
         + ("." if off_known else " (offset 미측정 → 책 페이지는 '미상'으로 표기).")
@@ -88,6 +104,7 @@ def _build_recommendations(
     allow_garbled: bool = False,
     page_offset: int | None = None,
     offset_confidence: str = "none",
+    ocr_mode: bool = False,
 ) -> dict[str, Any]:
     """페이지 수 + 목차 후보 + 품질 + 페이지 오프셋으로 챕터 분리 모드 추천.
 
@@ -113,12 +130,16 @@ def _build_recommendations(
             "text_sample": str,            # garbled 거부 시 사용자 확인용 샘플
         }
     """
-    if text_quality == "no_text_layer":
+    # OCR 모드는 텍스트 레이어를 신뢰하지 않으므로 텍스트 품질 기반 거부를
+    # 모두 우회한다(스캔본·깨진 PDF가 바로 OCR의 대상). 목차도 (깨질 수 있는)
+    # 텍스트 후보 대신 LLM이 scan_page_images로 직접 구성한다.
+    if not ocr_mode and text_quality == "no_text_layer":
         return {
             "rejected": True,
             "reason": (
                 "텍스트 레이어가 없는 PDF로 보입니다 (페이지당 평균 50자 미만). "
-                "ocrmypdf 등으로 OCR 처리 후 다시 시도해주세요."
+                "ocrmypdf 등으로 OCR 처리 후 다시 시도하거나, extraction_mode=\"ocr\" "
+                "로 다시 init_work 하면 페이지 이미지를 직접 읽어 처리합니다."
             ),
             "primary_mode": None,
             "primary_reason": None,
@@ -126,7 +147,7 @@ def _build_recommendations(
             "alternatives": [],
         }
 
-    if text_quality == "garbled" and not allow_garbled:
+    if not ocr_mode and text_quality == "garbled" and not allow_garbled:
         sample = text_sample.strip()[:GARBLED_SAMPLE_CHARS]
         return {
             "rejected": True,
@@ -156,7 +177,7 @@ def _build_recommendations(
             "text_sample": sample,
         }
 
-    if toc_result.get("is_candidate"):
+    if not ocr_mode and toc_result.get("is_candidate"):
         # 목차 후보를 챕터로 변환 (인쇄→물리 offset 보정). 마지막 끝은 page_count.
         entries = toc_result["entries"]
         suggested = _toc_entries_to_chapters(entries, page_count, page_offset)
@@ -170,7 +191,7 @@ def _build_recommendations(
                 f"chunks ({DEFAULT_CHUNK_SIZE}p 단위 균등 분할)",
                 "single_unit (전체 1챕터)",
             ],
-        }, page_offset, offset_confidence)
+        }, page_offset, offset_confidence, ocr_mode)
 
     if page_count < SHORT_PDF_THRESHOLD:
         suggested = [{
@@ -185,7 +206,7 @@ def _build_recommendations(
             "primary_reason": f"짧은 PDF({page_count}p)이므로 전체를 1챕터로 처리합니다.",
             "suggested_chapters": suggested,
             "alternatives": [f"chunks ({DEFAULT_CHUNK_SIZE}p 단위)"],
-        }, page_offset, offset_confidence)
+        }, page_offset, offset_confidence, ocr_mode)
 
     if page_count >= LARGE_PDF_THRESHOLD:
         suggested = chapter_mod.make_chunks(page_count, DEFAULT_CHUNK_SIZE)
@@ -200,7 +221,7 @@ def _build_recommendations(
             ),
             "suggested_chapters": suggested,
             "alternatives": ["from_toc (사용자가 목차 직접 입력)"],
-        }, page_offset, offset_confidence)
+        }, page_offset, offset_confidence, ocr_mode)
 
     # 50 ≤ page_count < 200 & 목차 없음 → 사용자 의사 확인 권장
     suggested = chapter_mod.make_chunks(page_count, DEFAULT_CHUNK_SIZE)
@@ -217,7 +238,7 @@ def _build_recommendations(
             "single_unit (전체 1챕터)",
             f"chunks ({DEFAULT_CHUNK_SIZE}p 단위)",
         ],
-    }, page_offset, offset_confidence)
+    }, page_offset, offset_confidence, ocr_mode)
 
 
 def _toc_entries_to_chapters(
@@ -261,10 +282,14 @@ def scan_pdf_impl(
     """
     state = workspace.load_state(work_id)
     pdf_path = state["pdf_path"]
+    ocr_mode = state.get("extraction_mode", "text") == "ocr"
 
     workspace.update_phase(work_id, "scanning", "in_progress")
 
     # PDF를 한 번만 열어 메타·페이지수·품질·텍스트를 모두 읽는다.
+    # OCR 모드에서도 텍스트 추출은 best-effort로 수행한다 — offset(꼬리말 숫자)·
+    # 언어(한글)는 글꼴 합자 깨짐에도 살아남아 공짜로 쓸 수 있기 때문. 다만
+    # 본문/목차는 신뢰하지 않고, scan_page_images를 렌더해 LLM이 직접 읽는다.
     doc = reader.open_pdf(pdf_path)
     try:
         page_count = doc.page_count
@@ -284,6 +309,13 @@ def scan_pdf_impl(
 
         # 인쇄 페이지번호 ↔ PDF 물리 인덱스 오프셋 측정 (꼬리말 번호 다수결)
         offset_info = reader.detect_page_offset(doc)
+
+        # OCR 모드: 첫 N페이지를 JPEG로 렌더해 LLM이 목차/offset/언어를 읽게 한다
+        scan_page_images: list[dict[str, Any]] = []
+        if ocr_mode and scan_end > 0:
+            scan_page_images = reader.render_pages(
+                doc, 1, scan_end, workspace.pages_dir(work_id),
+            )
     finally:
         doc.close()
 
@@ -294,6 +326,7 @@ def scan_pdf_impl(
         page_count, toc_result, text_quality,
         text_sample=scanned_text, allow_garbled=allow_garbled,
         page_offset=page_offset, offset_confidence=offset_confidence,
+        ocr_mode=ocr_mode,
     )
 
     # state 갱신
@@ -310,6 +343,7 @@ def scan_pdf_impl(
     # outline.json 저장 (목차 후보 + 추천)
     workspace.save_outline(work_id, {
         "page_count": page_count,
+        "extraction_mode": "ocr" if ocr_mode else "text",
         "text_quality": text_quality,
         "language": language,
         "page_offset": page_offset,
@@ -320,12 +354,15 @@ def scan_pdf_impl(
 
     return {
         "page_count": page_count,
+        "extraction_mode": "ocr" if ocr_mode else "text",
         "book_metadata": book_metadata,
         "text_quality": text_quality,
         "avg_chars_per_page": quality["avg_chars_per_page"],
         "language": language,
         "page_offset": page_offset,
         "page_offset_confidence": offset_confidence,
+        # OCR 모드에서만 채워진다 — LLM이 직접 읽을 첫 N페이지 이미지 경로
+        "scan_page_images": scan_page_images,
         "scanned_text": scanned_text,
         "toc_candidates": toc_result,
         "recommendations": recommendations,
@@ -366,6 +403,7 @@ def set_chapters_impl(
     work_id: str,
     chapters: list[dict[str, Any]],
     book_info: dict[str, Any] | None = None,
+    language: str = "",
 ) -> dict[str, Any]:
     """챕터 구조 확정 → 챕터별 텍스트/이미지 추출 + 저장.
 
@@ -373,20 +411,32 @@ def set_chapters_impl(
         chapters: [{"chapter_id", "title", "page_range"=[start,end]}, ...]
                   (1-based inclusive)
         book_info: 메인 LLM이 보강한 책 정보. None이면 PDF 메타만 사용.
+        language: "ko" | "en". OCR 모드에서 LLM이 이미지로 파악한 본문 언어를
+                  전달하면 state.language를 갱신한다(텍스트 감지가 불가능하므로).
 
     Returns:
         {"chapter_count", "total_chars", "total_images", "chapters": [...]}
+
+    OCR 모드(state.extraction_mode == "ocr")에서는 본문 텍스트를 추출하지 않는다.
+    서브에이전트가 get_chapter_content가 렌더한 페이지 이미지를 직접 읽기 때문.
+    그림(임베디드 raster)만 best-effort로 추출해 둔다(순수 스캔본은 풀페이지
+    필터에 걸려 비는 게 정상).
     """
     if not chapters:
         raise ValueError("chapters must not be empty")
 
     state = workspace.load_state(work_id)
     pdf_path = state["pdf_path"]
+    ocr_mode = state.get("extraction_mode", "text") == "ocr"
     page_count = state.get("page_count")
     if page_count is None:
         raise RuntimeError(
             "page_count not in state. call scan_pdf before set_chapters."
         )
+
+    # OCR 모드: LLM이 파악한 언어를 state에 반영 (텍스트 감지가 불가능)
+    if language and language.lower() in ("ko", "en"):
+        workspace.update_state(work_id, language=language.lower())
 
     # 검증 + 정규화
     normalized = [_validate_chapter_def(ch, page_count) for ch in chapters]
@@ -433,10 +483,23 @@ def set_chapters_impl(
                 continue
 
             try:
-                extracted = chapter_mod.extract_chapter(doc, ch_def)
-                image_refs = images_mod.extract_chapter_images(
-                    doc, cid, ch_def["page_range"], images_out_dir,
-                )
+                if ocr_mode:
+                    # 본문 텍스트는 추출하지 않는다(서브에이전트가 페이지 이미지를
+                    # 직접 읽음). 그림만 best-effort — 순수 스캔본은 빌 수 있음.
+                    char_count = 0
+                    try:
+                        image_refs = images_mod.extract_chapter_images(
+                            doc, cid, ch_def["page_range"], images_out_dir,
+                        )
+                    except Exception:
+                        logger.warning("ocr figure extraction skipped: %s", cid)
+                        image_refs = []
+                else:
+                    extracted = chapter_mod.extract_chapter(doc, ch_def)
+                    char_count = extracted["char_count"]
+                    image_refs = images_mod.extract_chapter_images(
+                        doc, cid, ch_def["page_range"], images_out_dir,
+                    )
             except Exception as e:
                 logger.exception("chapter extraction failed: %s", cid)
                 workspace.mark_chapter_failed(work_id, cid, kind="summary", error=str(e))
@@ -451,21 +514,21 @@ def set_chapters_impl(
                 "chapter_id": cid,
                 "title": ch_def["title"],
                 "page_range": ch_def["page_range"],
-                "text": extracted["text"],
-                "char_count": extracted["char_count"],
-                "image_refs": image_refs,  # 절대 경로 포함
+                "char_count": char_count,
+                "image_refs": image_refs,  # 그림(절대 경로). OCR 모드는 비어 있을 수 있음
             }
+            if not ocr_mode:
+                raw_payload["text"] = extracted["text"]
             workspace.save_chapter_raw(work_id, cid, raw_payload)
-            workspace.update_chapter_status(work_id, cid,
-                char_count=extracted["char_count"])
+            workspace.update_chapter_status(work_id, cid, char_count=char_count)
 
-            total_chars += extracted["char_count"]
+            total_chars += char_count
             total_images += len(image_refs)
             summaries.append({
                 "chapter_id": cid,
                 "title": ch_def["title"],
                 "page_range": ch_def["page_range"],
-                "char_count": extracted["char_count"],
+                "char_count": char_count,
                 "image_count": len(image_refs),
                 "error": None,
             })
@@ -478,3 +541,30 @@ def set_chapters_impl(
         "total_images": total_images,
         "chapters": summaries,
     }
+
+
+# ---------------------------------------------------------------------------
+# get_chapter_content
+# ---------------------------------------------------------------------------
+
+def get_chapter_content_impl(work_id: str, chapter_id: str) -> dict[str, Any]:
+    """챕터 raw 데이터 반환. OCR 모드면 페이지를 lazy 렌더해 page_images 첨부.
+
+    - text 모드: chapters_raw의 {text, image_refs(그림)}를 그대로 반환.
+    - ocr 모드: 본문 텍스트가 없으므로 page_range의 페이지를 JPEG로 렌더해
+      page_images(서브에이전트가 직접 읽을 페이지 이미지 절대경로)를 채운다.
+      이미 렌더된 페이지는 재사용한다(p{N}.jpg 캐시).
+    """
+    state = workspace.load_state(work_id)
+    raw = workspace.get_chapter_raw(work_id, chapter_id)  # 없으면 FileNotFoundError
+
+    if state.get("extraction_mode", "text") == "ocr":
+        start, end = raw["page_range"]
+        doc = reader.open_pdf(state["pdf_path"])
+        try:
+            raw["page_images"] = reader.render_pages(
+                doc, int(start), int(end), workspace.pages_dir(work_id),
+            )
+        finally:
+            doc.close()
+    return raw

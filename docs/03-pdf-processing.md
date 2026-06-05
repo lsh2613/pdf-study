@@ -1,15 +1,43 @@
 # 03. PDF 처리
 
+## 추출 모드 (extraction_mode: "text" | "ocr")
+
+`init_work(extraction_mode=...)`로 **시작 시 사용자에게 강제 선택**받는다.
+멀쩡한 PDF인지 사전 판별이 불가능하기 때문에(한글 본문은 잘 추출돼 품질이
+`high`로 나와도 영문 합자 구간만 깨지는 부분 모지바케가 흔하다), 판별을
+포기하고 사용자가 모드를 고른다.
+
+| 모드 | 본문을 얻는 방법 | 적합 | 비용 |
+|---|---|---|---|
+| `text` | PyMuPDF 텍스트 레이어 추출 | 디지털/전자책 PDF | 빠름·저렴 |
+| `ocr` | **비전 LLM(sub-agent)이 페이지 이미지를 직접 읽음** | 스캔본·글꼴 깨진 PDF | 느림·비쌈 |
+
+### OCR 모드 동작 (시스템 의존성 0 유지)
+
+서버에 OCR 엔진을 넣지 않는다. "OCR"은 **이미 멀티모달인 sub-agent가 렌더된
+페이지 이미지를 읽는 것**이다(문맥으로 `SERIALIZABLE` 같은 깨진 토큰까지 복원).
+
+- `reader.render_pages(doc, start, end, dir, dpi=150, quality=80)` 가 페이지를
+  **JPEG**로 렌더(`.work/pdf_analysis/pages/p{N}.jpg`, 페이지 단위라 scan↔챕터
+  재사용·캐시). PyMuPDF `get_pixmap` + PIL만 사용.
+- `scan_pdf`: 첫 N페이지만 렌더(`scan_page_images`)해 LLM이 목차·offset·언어를
+  읽는다. 텍스트 품질 거부(`no_text_layer`/`garbled`)는 **우회**(스캔본이 대상).
+  단 offset·언어는 텍스트 레이어 best-effort로도 시도한다 — 꼬리말 **숫자**와
+  한글은 합자 깨짐에도 살아남아 공짜로 쓸 수 있기 때문(없으면 LLM이 이미지로).
+- `set_chapters`: 본문 텍스트를 추출하지 않고 그림만 best-effort 추출.
+- `get_chapter_content`: 챕터 page_range를 lazy 렌더해 `page_images`로 반환.
+- 문제 개수·요약 길이 스케일: sub-agent가 OCR로 읽어낸 글자수로 기존 표를 적용.
+
 ## PDF 처리 정책
 
-- **PyMuPDF만 사용 (OCR 없음)**
+- **text 모드는 PyMuPDF 텍스트 레이어만 사용, ocr 모드는 페이지 이미지를 LLM이 읽음**
 - 정규식으로 기계적 노이즈 1차 정리:
   - `�` (깨진 유니코드) 제거
   - 반복 공백 정규화
   - 페이지 번호만 있는 줄 제거
 - OCR 오류 교정은 sub-agent(LLM)가 요약 과정에서 자연 처리
 - 텍스트 품질 점수: `high` / `medium` / `low` / `no_text_layer` / `garbled`
-- `no_text_layer` (avg <50자/페이지) → 명확히 거부 + ocrmypdf 안내
+- `no_text_layer` (avg <50자/페이지) → text 모드에선 거부 + ocrmypdf/`extraction_mode="ocr"` 안내. **ocr 모드에선 거부하지 않음**
 - `garbled` (모지바케; avg_mojibake >0.06) → 거부 + 삼중 안내:
   - 글꼴 ToUnicode 매핑 손상으로 추출 텍스트가 깨진 경우.
   - `recommendations.text_sample`에 깨진 텍스트 일부(최대 600자)를 실어
@@ -88,7 +116,7 @@ front matter면 None)가 함께 담긴다. `next_step_guidance`가 LLM에 두 �
 
 ### 메인 LLM이 보완
 
-`scanned_text`(첫 20페이지)에는 보통 표지, 판권 페이지, 서문이 포함됨. 메인 LLM이 이걸 보고:
+`scanned_text`(첫 30페이지, OCR 모드는 `scan_page_images`)에는 보통 표지, 판권 페이지, 서문이 포함됨. 메인 LLM이 이걸 보고:
 - PDF 메타가 비어있거나 부정확하면 본문에서 추출하여 보정
 - 서문 내용을 200-400자로 요약
 - 출판사, 출판년도 등 추가 정보 파악
@@ -123,7 +151,7 @@ book_info가 없으면 PDF 메타만 사용.
 |---|---|---|
 | `from_toc` | 본문에 목차 패턴 발견 | 추출된 챕터 구조 사용 |
 | `single_unit` | 짧은 PDF (<50p) 또는 사용자 의도 | chapters=[1개 항목] |
-| `chunks` | 50p+ & 목차 없음 | 20페이지 단위 균등 분할 |
+| `chunks` | 50p+ & 목차 없음 | 30페이지 단위 균등 분할 |
 | `user_input` | 사용자가 직접 챕터 텍스트/페이지 제공 | LLM이 파싱 후 set_chapters |
 
 ### 페이지 수에 따른 자동 추천

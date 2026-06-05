@@ -18,7 +18,7 @@ from pdf_study import analysis
 
 def _setup(tmp_path, pdf):
     r = server.init_work(str(pdf), str(tmp_path / "out"),
-                         execution_mode="sequential")
+                         execution_mode="sequential", extraction_mode="text")
     return r["data"]["work_id"], tmp_path / "out"
 
 

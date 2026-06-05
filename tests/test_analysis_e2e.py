@@ -55,6 +55,30 @@ def test_scan_pdf_scanned_empty_is_rejected(make_workspace, scanned_empty):
     assert out["recommendations"]["rejected"] is True
 
 
+def test_scan_pdf_ocr_mode_renders_pages_and_bypasses_rejection(
+    make_workspace, scanned_empty
+):
+    """OCR 모드: 텍스트 레이어 없는 PDF도 거부하지 않고 scan_page_images를 렌더."""
+    wid, _ = make_workspace(scanned_empty, extraction_mode="ocr")
+    out = analysis.scan_pdf_impl(wid)
+    assert out["extraction_mode"] == "ocr"
+    assert out["recommendations"]["rejected"] is False  # 품질 거부 우회
+    assert out["scan_page_images"], "첫 N페이지가 이미지로 렌더되어야 함"
+    from pathlib import Path
+    assert Path(out["scan_page_images"][0]["path"]).exists()
+    # OCR 안내가 next_step_guidance에 포함
+    assert "[OCR 모드]" in out["recommendations"]["next_step_guidance"]
+
+
+def test_scan_pdf_ocr_mode_ignores_text_toc(make_workspace, ko_with_toc):
+    """OCR 모드는 텍스트 목차 후보를 무시하고 페이지 수 기반으로 라우팅한다."""
+    wid, _ = make_workspace(ko_with_toc, extraction_mode="ocr")
+    out = analysis.scan_pdf_impl(wid)
+    # 28p < 50 → single_unit (텍스트 목차가 있어도 from_toc로 안 감)
+    assert out["recommendations"]["primary_mode"] != "from_toc"
+    assert out["scan_page_images"]
+
+
 def test_set_chapters_extracts_text_and_filters_images(make_workspace, ko_with_toc):
     wid, _ = make_workspace(ko_with_toc)
     scan = analysis.scan_pdf_impl(wid)
@@ -72,6 +96,32 @@ def test_set_chapters_extracts_text_and_filters_images(make_workspace, ko_with_t
     state = workspace.load_state(wid)
     for cid in [c["chapter_id"] for c in res["chapters"]]:
         assert state["chapters"][cid]["char_count"] > 0
+
+
+def test_ocr_mode_set_chapters_and_get_content(make_workspace, ko_with_toc):
+    """OCR 모드: set_chapters는 본문 텍스트를 안 뽑고, get_chapter_content가
+    페이지 이미지를 렌더해 page_images로 돌려준다. language도 state에 반영."""
+    wid, _ = make_workspace(ko_with_toc, extraction_mode="ocr")
+    analysis.scan_pdf_impl(wid)
+    res = analysis.set_chapters_impl(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 6]}],
+        {"title": "테스트용 한국어 책"},
+        language="ko",
+    )
+    assert res["chapters"][0]["char_count"] == 0  # 텍스트 미추출
+    assert workspace.load_state(wid)["language"] == "ko"
+
+    # raw에는 text 필드가 없어야 한다
+    raw = workspace.get_chapter_raw(wid, "ch1")
+    assert "text" not in raw
+
+    # get_chapter_content_impl이 페이지 이미지를 렌더해 채운다
+    content = analysis.get_chapter_content_impl(wid, "ch1")
+    pages = content["page_images"]
+    assert [p["page"] for p in pages] == [1, 2, 3, 4, 5, 6]
+    from pathlib import Path
+    assert all(Path(p["path"]).exists() for p in pages)
 
 
 def test_set_chapters_rejects_out_of_range(make_workspace, ko_short):

@@ -16,7 +16,8 @@
 │   ├── outline.json
 │   ├── book_info.json
 │   ├── chapters_raw/ch{N}.json
-│   └── images/*.png
+│   ├── images/*.png          # 추출된 그림(figure)
+│   └── pages/p{N}.jpg         # OCR 모드: 페이지를 통째로 렌더한 이미지 (lazy)
 ├── chapters/ch{N}.json
 └── extensions/ch{N}.json
 ```
@@ -71,6 +72,7 @@ study_output/
   "output_dir": "/path/to/study_output",
   "started_at": "2026-05-30T15:23:00+09:00",
   "execution_mode": "sequential",
+  "extraction_mode": "text",          // "text"(텍스트 추출) | "ocr"(페이지 이미지)
   "language": "ko",
   "question_options": {
     "multiple_choice": true,
@@ -140,17 +142,27 @@ study_output/
   "chapter_id": "ch1",
   "title": "트랜잭션",
   "page_range": [12, 47],
-  "text": "트랜잭션은 데이터베이스 시스템에서...",
-  "char_count": 18420,
+  "text": "트랜잭션은 데이터베이스 시스템에서...",   // text 모드만. OCR 모드엔 없음
+  "char_count": 18420,                          // OCR 모드는 0 (서버가 본문을 안 읽음)
   "image_refs": [
     {
       "id": "ch1_p23_0",
-      "path": "pdf_analysis/images/ch1_p23_0.png",
+      "path": "pdf_analysis/images/ch1_p23_0.png",  // 추출된 그림(figure)
       "page": 23
     }
   ]
 }
 ```
+
+- **OCR 모드**: 위에서 `text`가 없고 `char_count=0`. 대신 `get_chapter_content`가
+  호출 시 page_range를 lazy 렌더해 응답에 `page_images`를 채운다(디스크 raw엔
+  저장 안 함):
+  ```json
+  "page_images": [
+    {"id": "p12", "path": "pdf_analysis/pages/p12.jpg", "page": 12}, ...
+  ]
+  ```
+  sub-agent는 이 이미지를 순서대로 읽어 본문을 OCR한 뒤 요약/문제를 만든다.
 
 ### chapters/ch{N}.json (sub-agent 결과)
 

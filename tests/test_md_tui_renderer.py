@@ -31,7 +31,7 @@ def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):
 
 
 def _build_multi(ko_with_toc, tmp_path, *, opts=None):
-    opts = {"execution_mode": "sequential", **(opts or {})}
+    opts = {"execution_mode": "sequential", "extraction_mode": "text", **(opts or {})}
     r = server.init_work(str(ko_with_toc), str(tmp_path / "out"), **opts)
     wid = r["data"]["work_id"]
     s = server.scan_pdf(wid)

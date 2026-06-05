@@ -156,3 +156,37 @@ def test_detect_page_offset_none_when_no_page_numbers():
     r = reader.detect_page_offset(doc)
     assert r["offset"] is None
     assert r["confidence"] == "none"
+
+
+# --- 페이지 → JPEG 렌더 (OCR 모드) ------------------------------------------
+
+def test_render_pages_writes_jpeg_per_page(tmp_path):
+    import fitz
+    doc = fitz.open()
+    for i in range(1, 5):
+        doc.new_page(width=400, height=600).insert_text((50, 60), f"page {i}")
+    refs = reader.render_pages(doc, 2, 4, tmp_path)
+    assert [r["page"] for r in refs] == [2, 3, 4]
+    for r in refs:
+        p = __import__("pathlib").Path(r["path"])
+        assert p.exists() and p.suffix == ".jpg" and p.stat().st_size > 0
+        assert p.read_bytes()[:3] == b"\xff\xd8\xff"  # JPEG 매직
+
+
+def test_render_pages_caches_existing(tmp_path):
+    import fitz
+    doc = fitz.open()
+    doc.new_page(width=400, height=600).insert_text((50, 60), "page 1")
+    first = reader.render_pages(doc, 1, 1, tmp_path)[0]
+    mtime = __import__("pathlib").Path(first["path"]).stat().st_mtime_ns
+    again = reader.render_pages(doc, 1, 1, tmp_path)[0]
+    # 이미 존재하면 재생성하지 않음 (mtime 불변)
+    assert __import__("pathlib").Path(again["path"]).stat().st_mtime_ns == mtime
+
+
+def test_render_pages_rejects_bad_range(tmp_path):
+    import fitz
+    doc = fitz.open()
+    doc.new_page()
+    with pytest.raises(ValueError):
+        reader.render_pages(doc, 1, 5, tmp_path)

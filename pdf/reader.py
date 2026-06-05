@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import io
 import logging
 import re
 import unicodedata
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import fitz  # PyMuPDF
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -349,3 +351,50 @@ def detect_page_offset(doc: fitz.Document, sample_cap: int = 400) -> dict[str, A
         "samples": samples,
         "runner_up": runner_up,
     }
+
+
+# ---------------------------------------------------------------------------
+# 페이지 → JPEG 렌더 (OCR 모드: 비전 LLM이 페이지를 직접 읽게 함)
+# ---------------------------------------------------------------------------
+
+RENDER_DPI = 150       # 한글 본문 가독 충분 + 비전 토큰 절약
+RENDER_QUALITY = 80    # JPEG 품질 (스캔 텍스트는 PNG보다 3~5배 작음)
+
+
+def render_pages(
+    doc: fitz.Document,
+    start: int,
+    end: int,
+    output_dir: str | Path,
+    dpi: int = RENDER_DPI,
+    quality: int = RENDER_QUALITY,
+) -> list[dict[str, Any]]:
+    """페이지 범위(1-based inclusive)를 JPEG로 렌더해 output_dir에 저장.
+
+    OCR 모드에서 서브에이전트(비전 LLM)가 본문 텍스트 대신 페이지 이미지를
+    직접 읽도록 하기 위함. 파일명은 p{N}.jpg로 페이지 단위라, scan과 챕터가
+    같은 페이지를 렌더해도 한 번만 만들어 캐시처럼 재사용한다(이미 있으면 스킵).
+
+    Returns:
+        [{"id": "p12", "path": "<output_dir>/p12.jpg", "page": 12}, ...]
+        path는 절대 경로 문자열(호출자가 받은 output_dir 기준).
+    """
+    if start < 1 or end > doc.page_count or start > end:
+        raise ValueError(
+            f"invalid page range [{start}, {end}] for {doc.page_count}p doc"
+        )
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    refs: list[dict[str, Any]] = []
+    for p in range(start, end + 1):
+        out_path = out_dir / f"p{p}.jpg"
+        if not out_path.exists():
+            pix = doc.load_page(p - 1).get_pixmap(dpi=dpi)  # 0-based 경계 변환
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(out_path, format="JPEG", quality=quality, optimize=True)
+        refs.append({"id": f"p{p}", "path": str(out_path), "page": p})
+    return refs

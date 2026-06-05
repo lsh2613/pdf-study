@@ -59,6 +59,42 @@ the key ideas without reopening the original text.
 
 
 # ---------------------------------------------------------------------------
+# 입력 방식 블록 (text vs ocr) — extraction_mode에 따라 본문을 어떻게 얻는지
+# ---------------------------------------------------------------------------
+INPUT_MODE_TEXT_KO = """\
+[입력 방식 — 본문 텍스트]
+get_chapter_content가 제공한 text가 챕터 본문입니다. 깨진 글자·띄어쓰기 오류·
+잘못 분리된 줄이 있으면 의미를 해치지 않는 선에서 자연스럽게 교정해 읽으세요
+(임의 추가 금지). image_refs(절대 경로)는 챕터의 그림/표입니다 — 필요 시
+멀티모달 입력으로 직접 로드해 캡션이나 예시로 활용하세요.""".strip()
+
+INPUT_MODE_OCR_KO = """\
+[입력 방식 — 페이지 이미지(OCR)]
+본문 텍스트는 제공되지 않습니다. get_chapter_content가 주는 page_images
+(페이지 JPEG 절대경로)를 순서대로 멀티모달 입력으로 읽어 본문을 직접
+파악하세요(=OCR). 흐릿하거나 깨져 보이는 기술용어·식별자·예약어
+(예: SERIALIZABLE, KEY_BLOCK_SIZE, select_type)는 문맥으로 복원하세요.
+읽어낸 본문의 글자수를 헤아려 위의 두 표(문제 개수·요약 길이)를 적용하세요.
+image_refs(그림)는 비어 있을 수 있습니다.""".strip()
+
+INPUT_MODE_TEXT_EN = """\
+[Input mode — body text]
+The `text` from get_chapter_content is the chapter body. If it has broken
+characters, spacing errors, or split lines, read with natural corrections where
+meaning is preserved (do not invent content). `image_refs` (absolute paths) are
+the chapter's figures/tables — load them as multimodal input when useful.""".strip()
+
+INPUT_MODE_OCR_EN = """\
+[Input mode — page images (OCR)]
+No body text is provided. Read the `page_images` (absolute JPEG paths) from
+get_chapter_content in order, as multimodal input, to recover the body yourself
+(=OCR). Reconstruct blurry/garbled technical terms, identifiers, and keywords
+(e.g. SERIALIZABLE, KEY_BLOCK_SIZE, select_type) from context. Count the chars
+you read and apply the two tables above (question counts / summary length).
+`image_refs` (figures) may be empty.""".strip()
+
+
+# ---------------------------------------------------------------------------
 # Summarizer 템플릿
 # ---------------------------------------------------------------------------
 
@@ -81,13 +117,7 @@ _SUMMARIZER_KO = """\
 [챕터 본문 분량에 따른 요약 길이 권장]
 {summary_length_table}
 
-[OCR/스캔 본문 주의]
-본문에 깨진 글자, 띄어쓰기 오류, 잘못 분리된 줄이 있을 수 있습니다.
-의미를 해치지 않는 한 자연스럽게 교정해서 읽으세요. 임의 추가는 금지.
-
-[이미지 참조]
-get_chapter_content가 제공한 image_refs(절대 경로)는 챕터의 그림/표입니다.
-필요 시 멀티모달 입력으로 직접 로드해 캡션이나 예시로 활용하세요.
+{input_mode_block}
 
 [출력 형식 — JSON]
 반드시 다음 스키마의 **JSON 객체 하나만** 반환하세요. 마크다운 코드펜스(```) 금지.
@@ -139,13 +169,7 @@ Read the given chapter and produce ① summary, ② key points, ③ verification
 [Suggested summary length per chapter body size]
 {summary_length_table}
 
-[OCR/scan caveat]
-The text may contain broken characters, spacing errors, or split lines.
-Read with natural corrections where meaning is preserved. Do not invent content.
-
-[Image references]
-image_refs returned by get_chapter_content are absolute paths to figures/tables.
-Load them as multimodal input if useful for captions or examples.
+{input_mode_block}
 
 [Output format — JSON]
 Return **exactly one JSON object** matching the schema below. No markdown fences.
@@ -368,10 +392,16 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     opts = state.get("question_options", {})
     user_context = state.get("user_context", "") or ""
     mode = state.get("execution_mode", "sequential")
+    ocr_mode = state.get("extraction_mode", "text") == "ocr"
 
     book_info_block = _format_book_info_block(book_info, language)
     user_context_block = _format_user_context(user_context, language)
     enabled_types_block = _format_enabled_types(opts, language)
+
+    if language == "ko":
+        input_mode_block = INPUT_MODE_OCR_KO if ocr_mode else INPUT_MODE_TEXT_KO
+    else:
+        input_mode_block = INPUT_MODE_OCR_EN if ocr_mode else INPUT_MODE_TEXT_EN
 
     summ_tmpl = _SUMMARIZER_KO if language == "ko" else _SUMMARIZER_EN
     summary_length_table = (
@@ -383,6 +413,7 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         user_context_block=user_context_block,
         enabled_types_block=enabled_types_block,
         scales_table=QUESTION_SCALES_TABLE,
+        input_mode_block=input_mode_block,
     )
 
     extension_prompt: str | None = None
@@ -399,6 +430,13 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         if mode == "parallel"
         else WORKFLOW_INSTRUCTIONS_SEQUENTIAL
     )
+    if ocr_mode:
+        ocr_note = (
+            "[OCR 모드] get_chapter_content는 본문 text 대신 page_images(페이지 "
+            "이미지 절대경로)를 돌려줍니다. 각 챕터에서 page_images를 순서대로 "
+            "멀티모달로 읽어 본문을 파악한 뒤 요약/문제를 생성하세요.\n\n"
+        )
+        workflow = ocr_note + workflow
 
     # 비본문(skipped) 챕터는 sub-agent 디스패치 대상에서 제외
     all_chapter_ids = sorted(state.get("chapters", {}).keys(), key=_chapter_sort_key)
@@ -410,6 +448,7 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
 
     return {
         "mode": mode,
+        "extraction_mode": "ocr" if ocr_mode else "text",
         "language": language,
         "summarizer_prompt": summarizer_prompt,
         "extension_prompt": extension_prompt,

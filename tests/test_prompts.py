@@ -74,6 +74,30 @@ def test_workflow_instructions_branch_by_mode():
     assert "최대 5개 챕터를 동시에" in par["workflow_instructions"]
 
 
+def test_text_mode_input_block_default():
+    """기본(text) 모드는 본문 text 입력 블록을 쓴다."""
+    out = prompts.build_prompts(_state())
+    assert out["extraction_mode"] == "text"
+    assert "[입력 방식 — 본문 텍스트]" in out["summarizer_prompt"]
+    assert "[OCR 모드]" not in out["workflow_instructions"]
+
+
+def test_ocr_mode_uses_page_image_input_block_and_workflow_note():
+    """ocr 모드는 page_images 입력 블록 + 워크플로 OCR 노트를 쓴다."""
+    out = prompts.build_prompts(_state(extraction_mode="ocr"))
+    assert out["extraction_mode"] == "ocr"
+    p = out["summarizer_prompt"]
+    assert "[입력 방식 — 페이지 이미지(OCR)]" in p
+    assert "page_images" in p
+    assert "[입력 방식 — 본문 텍스트]" not in p
+    assert "[OCR 모드]" in out["workflow_instructions"]
+
+
+def test_ocr_mode_english_input_block():
+    out = prompts.build_prompts(_state(language="en", extraction_mode="ocr"))
+    assert "[Input mode — page images (OCR)]" in out["summarizer_prompt"]
+
+
 def test_chapter_ids_naturally_sorted():
     out = prompts.build_prompts(_state())
     # ch1, ch2, ch10이 사전순(ch1, ch10, ch2)이 아니라 자연수 순으로

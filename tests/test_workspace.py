@@ -28,6 +28,7 @@ def test_create_workspace_initial_state(tmp_path, fake_pdf):
     )
     state = workspace.load_state(wid)
     assert state["execution_mode"] == "parallel"
+    assert state["extraction_mode"] == "text"  # 기본값
     assert state["user_context"] == "학부생 대상"
     assert state["question_options"] == {
         "multiple_choice": True, "short_answer": True,
@@ -53,6 +54,16 @@ def test_invalid_execution_mode_rejected(tmp_path, fake_pdf):
             fake_pdf, tmp_path / "out",
             options={"multiple_choice": True},
             execution_mode="bogus",
+        )
+
+
+def test_invalid_extraction_mode_rejected(tmp_path, fake_pdf):
+    with pytest.raises(ValueError, match="extraction_mode"):
+        workspace.create_workspace(
+            fake_pdf, tmp_path / "out",
+            options={"multiple_choice": True},
+            execution_mode="sequential",
+            extraction_mode="bogus",
         )
 
 

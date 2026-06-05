@@ -57,8 +57,8 @@
 
 ```
 사용자 발화에서 메인 LLM이 추출:
-  pdf_path, (옵션) output_dir, execution_mode, enable_*, user_context
-        │
+  pdf_path, (옵션) output_dir, execution_mode, extraction_mode, enable_*, user_context
+        │  execution_mode·extraction_mode는 기본값 없음 → 미지정 시 ok=False 거부
         ▼
 server.init_work(...)
    - output_dir이 비었으면 default = <Path.cwd()>/result/<pdf_basename>/
@@ -67,9 +67,9 @@ server.init_work(...)
         │
         ▼
 workspace.create_workspace(..., work_id=work_id)
-   - PDF 존재·옵션·execution_mode 검증
-   - <output_dir>/.work/ 하위 폴더 생성
-   - state.json 초기화 (phases=pending, chapters={})
+   - PDF 존재·옵션·execution_mode·extraction_mode 검증
+   - <output_dir>/.work/ 하위 폴더 생성 (pdf_analysis/pages/ 포함)
+   - state.json 초기화 (extraction_mode, phases=pending, chapters={})
    - register(work_id → work_dir)  in-memory registry
 ```
 
@@ -79,7 +79,7 @@ workspace.create_workspace(..., work_id=work_id)
 - 결과: `state.json` 한 파일 + 빈 디렉토리 트리
 - 응답 data: `{work_id, work_dir, output_dir}` — `output_dir`은 실제로 사용된
   절대 경로(자동 default든 사용자 지정이든)
-- next_action: `scan_pdf(work_id, scan_size=20)`
+- next_action: `scan_pdf(work_id, scan_size=30)`
 
 ### Stage 1b · `resume_work` — 재시작 후 워크스페이스 재부착 (선택)
 
@@ -121,15 +121,20 @@ server.scan_pdf(work_id, scan_size)
        ├─ lang.detect_language(scanned_text)         # ko/en
        ├─ toc_finder.find_toc_candidates(scanned_text)
        │    └─ 4가지 정규식 매칭 + 단조 LIS 필터
-       ├─ _build_recommendations(page_count, toc_result, text_quality, offset)
-       │    ├─ no_text_layer        → rejected + ocrmypdf 안내
-       │    ├─ garbled(모지바케)     → rejected + 무손실 재추출/OCR 이중 안내
-       │    ├─ toc.is_candidate     → from_toc (인쇄→물리 offset 보정)
+       ├─ (OCR 모드만) reader.render_pages(doc, 1, N, pages/) → scan_page_images
+       ├─ _build_recommendations(page_count, toc_result, text_quality, offset, ocr_mode)
+       │    ├─ (ocr_mode=False)
+       │    │    ├─ no_text_layer        → rejected + ocrmypdf/extraction_mode=ocr 안내
+       │    │    ├─ garbled(모지바케)     → rejected + 무손실 재추출/OCR 이중 안내
+       │    │    └─ toc.is_candidate     → from_toc (인쇄→물리 offset 보정)
+       │    ├─ (ocr_mode=True) 거부·텍스트 toc 모두 우회 → 페이지 수로만 라우팅
+       │    │                  목차·offset은 LLM이 scan_page_images로 직접
        │    ├─ page_count < 50      → single_unit
-       │    ├─ page_count ≥ 200     → chunks (20p 단위)
+       │    ├─ page_count ≥ 200     → chunks (30p 단위)
        │    └─ 그 외                → ask_user (chunks 기본 fallback)
        │    + 비거부면 page_offset·printed_range·user_choices(이대로/직접입력/
-       │      청크)·next_step_guidance(두 번호 표기 + 경계 본문 대조 보정) 주입
+       │      청크)·next_step_guidance(두 번호 표기 + 경계 본문 대조 보정,
+       │      ocr이면 scan_page_images로 목차·offset·언어 읽기 안내) 주입
        ├─ workspace.update_state(page_count, text_quality, language,
        │                         page_offset, page_offset_confidence)
        ├─ workspace.update_phase("scanning", "completed")
@@ -137,10 +142,12 @@ server.scan_pdf(work_id, scan_size)
 ```
 
 - 코드: `analysis.py:scan_pdf_impl`, `_build_recommendations`,
-  `_toc_entries_to_chapters`
-- 응답: `book_metadata, scanned_text, language, toc_candidates,
-  recommendations.{primary_mode, suggested_chapters, alternatives, reason}`
+  `_toc_entries_to_chapters`, `reader.render_pages`
+- 응답: `extraction_mode, book_metadata, scanned_text, scan_page_images(ocr),
+  language, toc_candidates, recommendations.{primary_mode, suggested_chapters,
+  alternatives, reason, next_step_guidance}`
 - `rejected=True` 면 서버는 `ok=False`로 변환하여 메인 LLM에게 OCR 안내 전달.
+  **ocr 모드는 텍스트 품질로 거부하지 않는다**(스캔본이 바로 대상).
 
 ### Stage 3 · `set_chapters` — 챕터 구조 확정 + 추출
 
@@ -148,9 +155,10 @@ server.scan_pdf(work_id, scan_size)
 사용자에게 확인할지, `skip: true`(찾아보기·색인·판권)를 추가할지 결정한다.
 
 ```
-server.set_chapters(work_id, chapters, book_info)
-  └─ analysis.set_chapters_impl(work_id, chapters, book_info)
+server.set_chapters(work_id, chapters, book_info, language)
+  └─ analysis.set_chapters_impl(work_id, chapters, book_info, language)
        ├─ _validate_chapter_def(ch, page_count)           # 페이지 범위 검증
+       ├─ (ocr 모드 & language 주어지면) workspace.update_state(language=...)
        ├─ workspace.set_chapters_in_state(work_id, normalized)
        │    - chapter[skip=True] → status=skipped
        │    - 그 외             → status=pending
@@ -159,8 +167,9 @@ server.set_chapters(work_id, chapters, book_info)
        ├─ workspace.update_phase("chapter_processing", "in_progress")
        └─ for ch in normalized:
             ├─ skip이면 추출 자체 건너뜀 (raw/이미지 파일 없음)
-            ├─ chapter_mod.extract_chapter(doc, ch)        # 본문 text+char_count
-            ├─ images_mod.extract_chapter_images(doc, ...) # PNG 저장
+            ├─ (text 모드) chapter_mod.extract_chapter(doc, ch)  # 본문 text+char_count
+            ├─ (ocr 모드)  본문 추출 안 함(char_count=0). 그림만 best-effort
+            ├─ images_mod.extract_chapter_images(doc, ...) # 그림 PNG 저장
             │    └─ 페이지 면적 ≥70% raster, <80px 이미지 거름
             ├─ workspace.save_chapter_raw(...)             # chapters_raw/ch{N}.json
             └─ workspace.update_chapter_status(char_count=...)
@@ -169,7 +178,7 @@ server.set_chapters(work_id, chapters, book_info)
 - 코드: `analysis.py:set_chapters_impl`, `pdf/chapter.extract_chapter`,
   `pdf/images.extract_chapter_images`
 - 결과 디스크 상태: `chapters_raw/ch{N}.json` (skip 제외), `images/*.png`,
-  `book_info.json`
+  `book_info.json` (ocr 모드 raw엔 `text` 없음)
 - next_action: `get_subagent_prompts(work_id)`
 
 ### Stage 4 · `get_subagent_prompts` — sub-agent용 프롬프트 발급
@@ -201,10 +210,14 @@ Task tool만 진짜 병렬, Gemini/Codex는 메인 모델이 순차 처리).
 
 ```
 (1) get_chapter_content(work_id, chapter_id)
-       └─ workspace.get_chapter_raw → text, image_refs(절대 경로) 반환
+       └─ analysis.get_chapter_content_impl
+            - text 모드: get_chapter_raw → text, image_refs(그림 절대경로)
+            - ocr  모드: page_range를 lazy 렌더(reader.render_pages) →
+                         page_images(페이지 JPEG 절대경로) 반환
 
 (2) summarizer sub-agent (메인 LLM이 위 프롬프트로 호출)
-       - text + image_refs로 멀티모달 입력
+       - text 모드: text + image_refs로 멀티모달 입력
+       - ocr  모드: page_images를 순서대로 읽어 본문 OCR(글자수로 스케일 적용)
        - 결과 JSON: {summary, key_points, questions:{mc,sa,rf}}
 
 (3) save_chapter_result(work_id, chapter_id, data)
@@ -304,12 +317,12 @@ POST /api/progress/<chapter_id>   → 같은 규칙
 | `__main__.py` | 0 | `python -m pdf_study` 진입점 |
 | `server.py` | 0–7 | FastMCP 인스턴스 + 12개 도구(resume_work 포함). 모든 응답 envelope 보장 |
 | `workspace.py` | 1·3·5·6 | `.work/` 폴더 + state.json + work_id별 lock + atomic write |
-| `pdf/reader.py` | 2·3 | PyMuPDF 래퍼 (메타·텍스트·품질, 1↔0-based 변환 경계) |
-| `pdf/toc_finder.py` | 2 | 본문에서 목차 후보 추출 |
-| `pdf/chapter.py` | 2·3 | 청크 분할, 챕터 텍스트 추출 |
-| `pdf/images.py` | 3 | 챕터별 이미지 PNG + 풀페이지/소형 필터 |
-| `lang.py` | 2 | 한글/라틴 비율로 ko/en 감지 |
-| `analysis.py` | 2·3 | scan_pdf_impl / set_chapters_impl 통합 로직 |
+| `pdf/reader.py` | 2·3·5 | PyMuPDF 래퍼 (메타·텍스트·품질·offset, 1↔0-based 경계, **render_pages** 페이지→JPEG) |
+| `pdf/toc_finder.py` | 2 | 본문에서 목차 후보 추출 (text 모드) |
+| `pdf/chapter.py` | 2·3 | 청크 분할, 챕터 텍스트 추출 (text 모드) |
+| `pdf/images.py` | 3 | 챕터별 그림 PNG + 풀페이지/소형 필터 |
+| `lang.py` | 2 | 한글/라틴 비율로 ko/en 감지 (text 모드) |
+| `analysis.py` | 2·3·5 | scan_pdf_impl / set_chapters_impl / get_chapter_content_impl 통합 로직 (text·ocr 분기) |
 | `prompts.py` | 4 | sub-agent KO/EN 템플릿 + workflow + chapter_ids 분리 |
 | `exa_client.py` | 5 | Exa Web Research MCP HTTP 호출 + 평문 파서 |
 | `renderer/html_renderer.py` | 7 | 정적 사이트 합성 (사이드바·완료 토글·옵션 비활성 섹션 생략) |
@@ -354,14 +367,15 @@ T5  serve.py 실행
 ## 메인 LLM이 따라야 할 호출 순서 (요약)
 
 ```
-init_work
+init_work (execution_mode·extraction_mode 모두 사용자에게 물어 결정)
   → scan_pdf
-  → (rejected이면 사용자에게 OCR 안내, 종료)
-  → set_chapters (skip 챕터는 "skip": true로 표시)
+  → (text 모드 & rejected이면 OCR 안내 또는 extraction_mode="ocr" 재시작, 종료)
+  → (ocr 모드면 scan_page_images를 읽어 목차·offset·언어 파악)
+  → set_chapters (skip 챕터는 "skip": true, ocr이면 language= 전달)
   → get_subagent_prompts
   → for each chapter_id (workflow_instructions에 따라 sequential / parallel):
-       get_chapter_content
-       → summarizer sub-agent
+       get_chapter_content   (text: text+그림 / ocr: page_images)
+       → summarizer sub-agent (ocr이면 page_images를 읽어 본문 OCR)
        → save_chapter_result
        → (extension 활성 시)
            search_extension_context
@@ -369,7 +383,8 @@ init_work
            → save_extension_result
   → list_pending_chapters → 실패 챕터 1회 재시도
   → finalize_study   (pending 남아 있으면 ok=False 거부, force=True로 우회)
-  → 사용자에게 serve.py 시작/종료 명령 안내 (next_action 그대로 전달)
+  → 사용자에게 serve.py 시작/종료 명령 안내 + .work 보존/삭제 여부 질문
+    (삭제 원하면 finalize_study(keep_work_dir=False) 재호출)
 
 * 서버 재시작 등으로 work_id가 무효해졌으면:
   resume_work(output_dir 또는 pdf_path) → 레지스트리 복구 후 pending만 이어서 처리
