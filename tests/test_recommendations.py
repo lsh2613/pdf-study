@@ -74,6 +74,45 @@ def test_toc_present_routes_to_from_toc():
     assert chs[-1]["page_range"][1] == 80
 
 
+def test_from_toc_applies_offset_printed_to_physical():
+    # 목차의 인쇄번호(책 1·6·52)에 offset 18 → 물리 19·24·70 (MySQL 패턴)
+    entries = [
+        {"title": "01 소개", "page": 1},
+        {"title": "02 설치", "page": 6},
+        {"title": "03 권한", "page": 52},
+    ]
+    r = analysis._build_recommendations(
+        page_count=93,
+        toc_result=_toc(True, entries),
+        text_quality="high",
+        page_offset=18,
+        offset_confidence="high",
+    )
+    chs = r["suggested_chapters"]
+    assert chs[0]["page_range"] == [19, 23]   # 물리
+    assert chs[0]["printed_range"] == [1, 5]  # 책
+    assert chs[1]["page_range"] == [24, 69]
+    assert chs[2]["page_range"] == [70, 93]
+    assert chs[2]["printed_range"][0] == 52
+    assert r["page_offset"] == 18
+    assert r["offset_confidence"] == "high"
+
+
+def test_chunks_printed_range_marks_front_matter_none():
+    # offset 18: 물리 1-20 청크는 책 번호 < 1 구간(front matter) 포함 → 일부 클램프
+    r = analysis._build_recommendations(
+        page_count=93,
+        toc_result=_toc(False),
+        text_quality="high",
+        page_offset=18,
+        offset_confidence="high",
+    )
+    first = r["suggested_chapters"][0]      # 물리 [1,20]
+    # 책 페이지 = 물리-18 → [-17, 2]; 끝이 ≥1 이라 시작만 1로 클램프
+    assert first["page_range"][0] == 1
+    assert first["printed_range"] == [1, 2]
+
+
 def test_short_pdf_routes_to_single_unit():
     r = analysis._build_recommendations(
         page_count=30,
@@ -81,9 +120,14 @@ def test_short_pdf_routes_to_single_unit():
         text_quality="medium",
     )
     assert r["primary_mode"] == "single_unit"
+    # offset 미전달(None) → printed_range도 None
     assert r["suggested_chapters"] == [
-        {"chapter_id": "ch1", "title": "전체", "page_range": [1, 30]}
+        {"chapter_id": "ch1", "title": "전체",
+         "page_range": [1, 30], "printed_range": None}
     ]
+    assert r["page_offset"] is None
+    assert r["offset_confidence"] == "none"
+    assert r["user_choices"] == ["proceed", "manual_pdf_pages", "chunks"]
 
 
 def test_large_pdf_routes_to_chunks():

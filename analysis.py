@@ -16,7 +16,7 @@ from .pdf import toc_finder
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SCAN_SIZE = 20
+DEFAULT_SCAN_SIZE = 30  # 목차가 20p를 넘는 책이 있어 기본 스캔 범위를 넓힘
 DEFAULT_CHUNK_SIZE = 20
 
 # 페이지 임계값 (docs/03-pdf-processing.md)
@@ -31,17 +31,72 @@ LARGE_PDF_THRESHOLD = 200        # 200p+ & 목차 없음 → chunks 권장 (sing
 GARBLED_SAMPLE_CHARS = 600  # 사용자에게 보여줄 깨진 텍스트 샘플 길이
 
 
+def _annotate_printed_ranges(
+    chapters: list[dict[str, Any]],
+    offset: int | None,
+) -> list[dict[str, Any]]:
+    """각 챕터(물리 page_range)에 인쇄(책) 페이지 printed_range를 덧붙인다.
+
+    책 페이지 = 물리 − offset. offset 미측정이면 None.
+    전 구간이 front matter(책 번호 < 1)면 None, 일부만이면 1로 클램프.
+    """
+    for ch in chapters:
+        if offset is None:
+            ch["printed_range"] = None
+            continue
+        s, e = ch["page_range"]
+        ps, pe = s - offset, e - offset
+        ch["printed_range"] = None if pe < 1 else [max(1, ps), pe]
+    return chapters
+
+
+def _with_offset_meta(
+    reco: dict[str, Any],
+    page_offset: int | None,
+    offset_confidence: str,
+) -> dict[str, Any]:
+    """비거부 recommendation에 offset 메타 + printed_range + 3택 안내 주입."""
+    _annotate_printed_ranges(reco["suggested_chapters"], page_offset)
+    reco["page_offset"] = page_offset
+    reco["offset_confidence"] = offset_confidence
+    reco["user_choices"] = ["proceed", "manual_pdf_pages", "chunks"]
+    off_known = page_offset is not None
+    reco["next_step_guidance"] = (
+        "분석된 챕터를 사용자에게 보여줄 때 각 챕터를 "
+        "'PDF p.{start}-{end} (책 p.{printed})' 형식으로 **두 번호 모두** 표기하세요"
+        + ("." if off_known else " (offset 미측정 → 책 페이지는 '미상'으로 표기).")
+        + " printed_range가 null이면 그 구간은 책 본문 번호가 없는 "
+        "front matter(표지·서문)입니다. 그런 다음 반드시 세 갈래 선택을 받으세요: "
+        "① 이대로 진행 → suggested_chapters를 그대로 set_chapters. "
+        "② 직접 입력 → 사용자에게 **PDF(물리) 페이지 번호로** 챕터 범위를 받으세요 "
+        "(set_chapters는 PDF 물리 페이지 기준). "
+        + (f"사용자가 책 페이지로 말하면 물리 = 책 + {page_offset} 로 변환해 주세요. "
+           if off_known else "offset 미측정이라 변환 불가하니 PDF 페이지로 직접 받으세요. ")
+        + "③ 청크 → N페이지 균등 분할. "
+        "offset_confidence가 'high'가 아니거나 from_toc 경계가 의심되면, 첫 1~2개 "
+        "챕터 제목이 계산된 PDF 페이지(±1)에 실제로 나오는지 본문을 직접 읽어 "
+        "확인하고, 어긋나면 page_range를 보정한 뒤 사용자에게 제시하세요."
+    )
+    return reco
+
+
 def _build_recommendations(
     page_count: int,
     toc_result: dict[str, Any],
     text_quality: str,
     text_sample: str = "",
     allow_garbled: bool = False,
+    page_offset: int | None = None,
+    offset_confidence: str = "none",
 ) -> dict[str, Any]:
-    """페이지 수 + 목차 후보 + 품질로 챕터 분리 모드 추천.
+    """페이지 수 + 목차 후보 + 품질 + 페이지 오프셋으로 챕터 분리 모드 추천.
 
     allow_garbled=True 면 모지바케 거부를 건너뛰고 깨진 텍스트 그대로
     페이지 수 기반 라우팅을 진행한다 (사용자가 샘플 확인 후 강행 선택한 경우).
+
+    page_offset: 물리 = 인쇄(책) + offset. None이면 미측정.
+    비거부 응답에는 _with_offset_meta로 page_offset/offset_confidence,
+    각 챕터의 printed_range(책 페이지), user_choices, next_step_guidance가 붙는다.
 
     Returns:
         {
@@ -49,8 +104,12 @@ def _build_recommendations(
             "reason": str,
             "primary_mode": "from_toc" | "single_unit" | "chunks" | "ask_user",
             "primary_reason": str,
-            "suggested_chapters": [...],   # primary_mode로 즉시 set_chapters 가능
+            "suggested_chapters": [{... "page_range":[s,e], "printed_range":[s,e]|None}],
             "alternatives": [str, ...],
+            "page_offset": int | None,
+            "offset_confidence": "high" | "low" | "none",
+            "user_choices": ["proceed", "manual_pdf_pages", "chunks"],
+            "next_step_guidance": str,
             "text_sample": str,            # garbled 거부 시 사용자 확인용 샘플
         }
     """
@@ -98,10 +157,10 @@ def _build_recommendations(
         }
 
     if toc_result.get("is_candidate"):
-        # 목차 후보를 그대로 챕터로 변환 — 마지막 항목의 끝 페이지는 page_count로 종료
+        # 목차 후보를 챕터로 변환 (인쇄→물리 offset 보정). 마지막 끝은 page_count.
         entries = toc_result["entries"]
-        suggested = _toc_entries_to_chapters(entries, page_count)
-        return {
+        suggested = _toc_entries_to_chapters(entries, page_count, page_offset)
+        return _with_offset_meta({
             "rejected": False,
             "reason": None,
             "primary_mode": "from_toc",
@@ -111,7 +170,7 @@ def _build_recommendations(
                 f"chunks ({DEFAULT_CHUNK_SIZE}p 단위 균등 분할)",
                 "single_unit (전체 1챕터)",
             ],
-        }
+        }, page_offset, offset_confidence)
 
     if page_count < SHORT_PDF_THRESHOLD:
         suggested = [{
@@ -119,18 +178,18 @@ def _build_recommendations(
             "title": "전체",
             "page_range": [1, page_count],
         }]
-        return {
+        return _with_offset_meta({
             "rejected": False,
             "reason": None,
             "primary_mode": "single_unit",
             "primary_reason": f"짧은 PDF({page_count}p)이므로 전체를 1챕터로 처리합니다.",
             "suggested_chapters": suggested,
             "alternatives": [f"chunks ({DEFAULT_CHUNK_SIZE}p 단위)"],
-        }
+        }, page_offset, offset_confidence)
 
     if page_count >= LARGE_PDF_THRESHOLD:
         suggested = chapter_mod.make_chunks(page_count, DEFAULT_CHUNK_SIZE)
-        return {
+        return _with_offset_meta({
             "rejected": False,
             "reason": None,
             "primary_mode": "chunks",
@@ -141,11 +200,11 @@ def _build_recommendations(
             ),
             "suggested_chapters": suggested,
             "alternatives": ["from_toc (사용자가 목차 직접 입력)"],
-        }
+        }, page_offset, offset_confidence)
 
     # 50 ≤ page_count < 200 & 목차 없음 → 사용자 의사 확인 권장
     suggested = chapter_mod.make_chunks(page_count, DEFAULT_CHUNK_SIZE)
-    return {
+    return _with_offset_meta({
         "rejected": False,
         "reason": None,
         "primary_mode": "ask_user",
@@ -158,20 +217,27 @@ def _build_recommendations(
             "single_unit (전체 1챕터)",
             f"chunks ({DEFAULT_CHUNK_SIZE}p 단위)",
         ],
-    }
+    }, page_offset, offset_confidence)
 
 
 def _toc_entries_to_chapters(
     entries: list[dict[str, Any]],
     page_count: int,
+    offset: int | None = None,
 ) -> list[dict[str, Any]]:
-    """목차 entries(title, page) → set_chapters용 chapters(page_range)."""
+    """목차 entries(title, 인쇄 page) → set_chapters용 chapters(물리 page_range).
+
+    offset이 주어지면 물리 = 인쇄 + offset 로 보정한다. None이면 인쇄번호를
+    물리로 간주(레거시 폴백) — 이 경우 next_step_guidance가 LLM에 본문 대조
+    검증을 지시한다.
+    """
+    off = offset or 0
     chapters: list[dict[str, Any]] = []
     for i, e in enumerate(entries):
-        start = max(1, min(int(e["page"]), page_count))
+        start = max(1, min(int(e["page"]) + off, page_count))
         # 다음 entry의 시작 - 1 까지. 마지막은 page_count.
         if i + 1 < len(entries):
-            next_start = max(1, min(int(entries[i + 1]["page"]), page_count))
+            next_start = max(1, min(int(entries[i + 1]["page"]) + off, page_count))
             end = max(start, next_start - 1)
         else:
             end = page_count
@@ -215,12 +281,19 @@ def scan_pdf_impl(
 
         language = lang.detect_language(scanned_text)
         toc_result = toc_finder.find_toc_candidates(scanned_text)
+
+        # 인쇄 페이지번호 ↔ PDF 물리 인덱스 오프셋 측정 (꼬리말 번호 다수결)
+        offset_info = reader.detect_page_offset(doc)
     finally:
         doc.close()
+
+    page_offset = offset_info["offset"]
+    offset_confidence = offset_info["confidence"]
 
     recommendations = _build_recommendations(
         page_count, toc_result, text_quality,
         text_sample=scanned_text, allow_garbled=allow_garbled,
+        page_offset=page_offset, offset_confidence=offset_confidence,
     )
 
     # state 갱신
@@ -229,6 +302,8 @@ def scan_pdf_impl(
         page_count=page_count,
         text_quality=text_quality,
         language=language,
+        page_offset=page_offset,
+        page_offset_confidence=offset_confidence,
     )
     workspace.update_phase(work_id, "scanning", "completed")
 
@@ -237,6 +312,8 @@ def scan_pdf_impl(
         "page_count": page_count,
         "text_quality": text_quality,
         "language": language,
+        "page_offset": page_offset,
+        "page_offset_confidence": offset_confidence,
         "toc_candidates": toc_result,
         "recommendations": recommendations,
     })
@@ -247,6 +324,8 @@ def scan_pdf_impl(
         "text_quality": text_quality,
         "avg_chars_per_page": quality["avg_chars_per_page"],
         "language": language,
+        "page_offset": page_offset,
+        "page_offset_confidence": offset_confidence,
         "scanned_text": scanned_text,
         "toc_candidates": toc_result,
         "recommendations": recommendations,
@@ -273,6 +352,11 @@ def _validate_chapter_def(ch: dict[str, Any], page_count: int) -> dict[str, Any]
         )
     out = {"chapter_id": str(ch["chapter_id"]), "title": str(ch["title"]),
            "page_range": [start, end]}
+    # printed_range(책 페이지)는 표시용 메타 — 있으면 보존, 검증은 하지 않음
+    # (책 번호는 PDF 페이지와 체계가 달라 page_count로 검증할 수 없다).
+    pr_printed = ch.get("printed_range")
+    if isinstance(pr_printed, (list, tuple)) and len(pr_printed) == 2:
+        out["printed_range"] = [int(pr_printed[0]), int(pr_printed[1])]
     if ch.get("skip"):
         out["skip"] = True
     return out

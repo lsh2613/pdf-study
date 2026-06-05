@@ -110,3 +110,49 @@ def test_mojibake_score_passes_clean_text(clean):
 
 def test_mojibake_score_returns_zero_on_short_sample():
     assert reader.mojibake_score("개" * 10) == 0.0
+
+
+# --- 페이지 오프셋 측정 --------------------------------------------------------
+
+def _pdf_with_footer_numbers(offset, n, blanks=()):
+    """물리 i 페이지의 꼬리말에 인쇄번호(i - offset)를 찍은 합성 PDF.
+
+    인쇄번호 < 1(앞 front matter)이거나 blanks면 번호를 찍지 않는다.
+    """
+    import fitz
+    doc = fitz.open()
+    for i in range(1, n + 1):
+        page = doc.new_page(width=400, height=600)
+        if i in blanks:
+            continue
+        page.insert_text((50, 60), f"본문 페이지 {i} 내용")
+        printed = i - offset
+        if printed >= 1:
+            page.insert_text((180, 560), str(printed))  # 하단 꼬리말
+    return doc
+
+
+def test_detect_page_offset_positive_with_front_matter():
+    # offset 3: 물리 1~3은 번호 없음(front matter), 4부터 인쇄번호 1,2,...
+    doc = _pdf_with_footer_numbers(offset=3, n=14)
+    r = reader.detect_page_offset(doc)
+    assert r["offset"] == 3
+    assert r["confidence"] == "high"
+
+
+def test_detect_page_offset_negative_and_blanks():
+    # offset -3 (PDF가 책보다 앞섬) + 중간 빈 페이지 → 빈 페이지는 자동 스킵
+    doc = _pdf_with_footer_numbers(offset=-3, n=14, blanks=(5, 10))
+    r = reader.detect_page_offset(doc)
+    assert r["offset"] == -3
+    assert r["confidence"] == "high"
+
+
+def test_detect_page_offset_none_when_no_page_numbers():
+    import fitz
+    doc = fitz.open()
+    for _ in range(6):
+        doc.new_page().insert_text((50, 60), "숫자 없는 본문")
+    r = reader.detect_page_offset(doc)
+    assert r["offset"] is None
+    assert r["confidence"] == "none"

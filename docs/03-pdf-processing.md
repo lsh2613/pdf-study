@@ -29,6 +29,29 @@
 - 변환은 **`pdf/reader.py` 경계에서만** 수행. 다른 모듈은 1-based만 다룬다.
 - `page_range: [12, 47]`은 12~47페이지 inclusive (1-based).
 
+### 페이지 오프셋 (인쇄 책 번호 ↔ PDF 물리 인덱스)
+
+책에 인쇄된 페이지번호와 PDF 물리 인덱스는 보통 다르다(표지·서문 때문).
+`reader.detect_page_offset`이 **꼬리말 인쇄번호 다수결**로 `offset`(물리 = 책 + offset)을 측정한다.
+
+- 각 페이지 raw 텍스트의 끝 3줄에서 숫자-only 줄을 인쇄번호로 보고
+  `candidate = 물리 − 인쇄`를 모아 최빈값을 취한다.
+  (raw를 써야 함 — `extract_page_text`는 숫자-only 줄을 이미 제거한다.)
+- **빈 페이지·번호 없는 표지/도입부는 후보에서 자동 제외**, 코드 줄번호 등
+  단발 노이즈는 최빈에 밀린다.
+- `offset`은 **음수 가능**(PDF가 앞 front matter를 일부 누락한 경우).
+- confidence: 최빈 지지 ≥3 & 2등의 2배+ → `high`, 측정됐으나 약하면 `low`,
+  인쇄번호 신호 없음(이미지/무텍스트 PDF 등) → `offset=None`/`none`.
+- 실측: MySQL +18, 리팩터링 2판 +1(빈 페이지 7장 무시), 데이터베이스 개론
+  3판은 텍스트 레이어 없음→`none`(OCR 필요).
+
+오프셋은 `state.json`·`outline.json`·`recommendations`에 실리고, 각
+suggested_chapter에 `page_range`(PDF 물리)와 `printed_range`(책, 물리−offset,
+front matter면 None)가 함께 담긴다. `next_step_guidance`가 LLM에 두 번호
+모두 표기 + 3택(이대로/직접입력(PDF 페이지)/청크) + 경계 의심 시 본문 대조
+보정을 지시한다. **set_chapters는 항상 물리 page_range 기준**, printed_range는
+표시용 옵셔널 메타다.
+
 ### 이미지 추출 필터
 
 `pdf/images.py`가 챕터별로 PNG를 추출하면서 두 가지 필터를 적용한다:

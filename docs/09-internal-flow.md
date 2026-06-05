@@ -117,17 +117,21 @@ server.scan_pdf(work_id, scan_size)
        │    ├─ reader.evaluate_text_quality(doc)     # quality + avg_chars/p
        │    ├─ reader.extract_text_range(doc, 1, N)  # 첫 N페이지 통합 텍스트
        │    └─ doc.close()
+       │    ├─ reader.detect_page_offset(doc)        # 꼬리말 번호 다수결 → offset
        ├─ lang.detect_language(scanned_text)         # ko/en
        ├─ toc_finder.find_toc_candidates(scanned_text)
        │    └─ 4가지 정규식 매칭 + 단조 LIS 필터
-       ├─ _build_recommendations(page_count, toc_result, text_quality)
+       ├─ _build_recommendations(page_count, toc_result, text_quality, offset)
        │    ├─ no_text_layer        → rejected + ocrmypdf 안내
        │    ├─ garbled(모지바케)     → rejected + 무손실 재추출/OCR 이중 안내
-       │    ├─ toc.is_candidate     → from_toc + suggested_chapters
+       │    ├─ toc.is_candidate     → from_toc (인쇄→물리 offset 보정)
        │    ├─ page_count < 50      → single_unit
        │    ├─ page_count ≥ 200     → chunks (20p 단위)
        │    └─ 그 외                → ask_user (chunks 기본 fallback)
-       ├─ workspace.update_state(page_count, text_quality, language)
+       │    + 비거부면 page_offset·printed_range·user_choices(이대로/직접입력/
+       │      청크)·next_step_guidance(두 번호 표기 + 경계 본문 대조 보정) 주입
+       ├─ workspace.update_state(page_count, text_quality, language,
+       │                         page_offset, page_offset_confidence)
        ├─ workspace.update_phase("scanning", "completed")
        └─ workspace.save_outline(...)   # .work/pdf_analysis/outline.json
 ```

@@ -81,6 +81,8 @@ study_output/
   "user_context": "데이터베이스 입문서, 학부생 대상",
   "page_count": 487,
   "text_quality": "medium",
+  "page_offset": 18,                  // 물리 = 책 + offset, 미측정이면 null
+  "page_offset_confidence": "high",   // "high" | "low" | "none"
   "current_phase": "chapter_processing",
   "phases": {
     "scanning": "completed",
@@ -93,6 +95,7 @@ study_output/
     "ch1": {
       "title": "트랜잭션",
       "page_range": [12, 47],
+      "printed_range": [1, 36],
       "char_count": 18420,
       "skip": false,
       "summary_status": "completed",

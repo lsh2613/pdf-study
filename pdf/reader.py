@@ -257,3 +257,95 @@ def extract_text_range(doc: fitz.Document, start_page: int, end_page: int) -> st
     for p in range(start_page, end_page + 1):
         parts.append(extract_page_text(doc, p))
     return "\n\n".join(filter(None, parts))
+
+
+# ---------------------------------------------------------------------------
+# 페이지 오프셋 측정 (인쇄 페이지번호 ↔ PDF 물리 인덱스)
+# ---------------------------------------------------------------------------
+
+_FOOTER_NUM_RE = re.compile(r"^(\d{1,4})$")  # 꼬리말의 숫자-only 줄
+_OFFSET_FOOTER_LINES = 3       # 페이지 끝 몇 줄까지 인쇄번호로 볼지
+_OFFSET_MIN_SUPPORT = 3        # 최빈 offset 최소 지지 표 수
+_OFFSET_DOMINANCE = 2          # 최빈이 2등의 N배 이상이어야 high
+
+
+def _footer_printed_number(raw: str) -> int | None:
+    """raw 페이지 텍스트의 꼬리말에서 인쇄 페이지번호(숫자-only 줄)를 추출.
+
+    raw(=get_text 원본)를 받아야 한다. extract_page_text는 _PAGE_NUM_LINE_RE로
+    숫자-only 줄을 이미 제거하므로 여기 쓰면 안 된다.
+    """
+    lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
+    if not lines:
+        return None
+    for ln in reversed(lines[-_OFFSET_FOOTER_LINES:]):
+        m = _FOOTER_NUM_RE.match(ln)
+        if m:
+            p = int(m.group(1))
+            if 1 <= p <= 5000:
+                return p
+    return None
+
+
+def detect_page_offset(doc: fitz.Document, sample_cap: int = 400) -> dict[str, Any]:
+    """인쇄 페이지번호 ↔ PDF 물리 인덱스의 오프셋을 추정.
+
+    각 페이지 꼬리말의 인쇄번호를 읽어 candidate = (물리인덱스 − 인쇄번호)를
+    모으고, 최빈값(mode)을 오프셋으로 본다. 빈 페이지·번호 없는 표지·도입부는
+    자연히 후보에서 빠지고, 본문 노이즈(코드 줄번호 등)는 단발이라 최빈에 밀린다.
+
+    오프셋은 음수일 수 있다(PDF가 앞 front matter를 일부 누락한 경우).
+    텍스트 레이어가 없거나 인쇄번호가 전혀 없으면 offset=None/none.
+
+    Returns:
+        {
+            "offset": int | None,      # 물리 = 인쇄 + offset
+            "confidence": "high" | "low" | "none",
+            "support": int,            # 최빈 offset 지지 표 수
+            "samples": int,            # 인쇄번호를 읽은 페이지 수
+            "runner_up": int,          # 2등 표 수 (참고)
+        }
+    """
+    n = doc.page_count
+    if n == 0:
+        return {"offset": None, "confidence": "none", "support": 0,
+                "samples": 0, "runner_up": 0}
+
+    # 페이지가 매우 많으면 균등 표본만 (대용량 PDF 보호)
+    if n <= sample_cap:
+        indices = range(n)
+    else:
+        step = n / sample_cap
+        indices = sorted({int(i * step) for i in range(sample_cap)})
+
+    counts: dict[int, int] = {}
+    samples = 0
+    for idx in indices:
+        raw = doc.load_page(idx).get_text("text")
+        printed = _footer_printed_number(raw)
+        if printed is None:
+            continue
+        samples += 1
+        cand = (idx + 1) - printed  # 물리(1-based) − 인쇄
+        counts[cand] = counts.get(cand, 0) + 1
+
+    if not counts:
+        return {"offset": None, "confidence": "none", "support": 0,
+                "samples": 0, "runner_up": 0}
+
+    ordered = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    offset, support = ordered[0]
+    runner_up = ordered[1][1] if len(ordered) > 1 else 0
+
+    if support >= _OFFSET_MIN_SUPPORT and support >= _OFFSET_DOMINANCE * max(runner_up, 1):
+        confidence = "high"
+    else:
+        confidence = "low"
+
+    return {
+        "offset": offset,
+        "confidence": confidence,
+        "support": support,
+        "samples": samples,
+        "runner_up": runner_up,
+    }

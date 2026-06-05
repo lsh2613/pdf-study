@@ -29,13 +29,20 @@ init_work(
 #             summary_pending, extension_pending}
 resume_work(output_dir: str = "", pdf_path: str = "") -> dict
 
+# 페이지 오프셋: data.recommendations에 page_offset(물리=책+offset),
+# offset_confidence(high/low/none), 각 suggested_chapter의 page_range(PDF 물리)·
+# printed_range(책, null=front matter), user_choices, next_step_guidance가 담긴다.
+# next_step_guidance를 따라 챕터를 PDF·책 페이지 둘 다 표기해 보여주고 반드시
+# ① 이대로 진행 ② 직접 입력(반드시 PDF 물리 페이지로) ③ 청크 중 선택을 받아라.
 # 인코딩이 깨진(모지바케) PDF면 ok=False로 거부하고
 # data.recommendations.text_sample에 깨진 텍스트 일부(≤600자)를 담는다.
 # 이를 사용자에게 보여주고 ① 무손실 재추출(qpdf) ② OCR(ocrmypdf)
 # ③ 그대로 진행 중 선택을 받아라. ③이면 allow_garbled=True로 재호출.
-scan_pdf(work_id: str, scan_size: int = 20, allow_garbled: bool = False) -> dict
+scan_pdf(work_id: str, scan_size: int = 30, allow_garbled: bool = False) -> dict
 
-# 각 chapter 항목 형식: {"chapter_id", "title", "page_range":[s,e], "skip"?: bool}
+# 각 chapter 항목 형식: {"chapter_id", "title", "page_range":[s,e],
+#                        "printed_range"?:[s,e], "skip"?: bool}
+# page_range=PDF 물리(필수·검증 대상), printed_range=책 페이지(표시용 옵셔널).
 # skip=True 인 챕터(찾아보기·색인·판권)는 본문 추출과 sub-agent 디스패치,
 # HTML 렌더링에서 모두 제외된다.
 set_chapters(work_id: str, chapters: list[dict], book_info: dict = None) -> dict
@@ -75,7 +82,7 @@ finalize_study(work_id: str, output_format: str = "", keep_work_dir: bool = True
 ```
 1. init_work(pdf, output, user_context="...", execution_mode="sequential")
    → work_id
-2. scan_pdf(work_id, scan_size=20)
+2. scan_pdf(work_id, scan_size=30)
    ├ book_metadata (PDF 자체 메타)
    ├ scanned_text (첫 청크, 서문 등이 들어있을 가능성)
    ├ language (감지된 본문 언어)

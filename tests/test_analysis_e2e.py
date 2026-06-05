@@ -41,9 +41,11 @@ def test_scan_pdf_short_routes_to_single_unit(make_workspace, ko_short):
     out = analysis.scan_pdf_impl(wid)
     assert out["language"] == "ko"
     assert out["recommendations"]["primary_mode"] == "single_unit"
-    assert out["recommendations"]["suggested_chapters"] == [
-        {"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}
-    ]
+    ch = out["recommendations"]["suggested_chapters"][0]
+    assert ch["chapter_id"] == "ch1"
+    assert ch["title"] == "전체"
+    assert ch["page_range"] == [1, 12]
+    assert "printed_range" in ch  # offset 메타 부착 확인
 
 
 def test_scan_pdf_scanned_empty_is_rejected(make_workspace, scanned_empty):
