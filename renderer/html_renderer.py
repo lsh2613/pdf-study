@@ -5,22 +5,39 @@
 - assets/는 templates/html의 static 파일 복사.
 - 단일 챕터는 index.html 생략 → main.html 하나에 책 정보 상단 부착.
 - 옵션 비활성 유형은 섹션 자체를 생략 (sub-agent도 생성하지 않으므로 빈 섹션 없음).
-- 이미지: chapters_raw의 image_refs → output_dir/images/로 복사 + 챕터 페이지에 figure로 표시.
+- 요약은 마크다운 → HTML(markdown-it)로 렌더한다. 그림(figure)은 더 이상 다루지 않는다.
 """
 from __future__ import annotations
 
 import html
 import json
 import logging
+import re
 import shutil
 from pathlib import Path
 from typing import Any
+
+from markdown_it import MarkdownIt
 
 from .. import workspace
 from ..prompts import _chapter_sort_key  # 내부 헬퍼 재사용
 from .base import Renderer
 
 logger = logging.getLogger(__name__)
+
+# 요약 마크다운 → HTML. html=False라 본문 내 원시 HTML은 이스케이프되어 안전.
+# 표(GFM)만 추가로 활성화. (rich TUI와 동일 파서 계열이라 렌더 결과가 일관됨)
+_MD = MarkdownIt("commonmark", {"html": False}).enable("table")
+
+# 요약 본문 안의 헤딩은 섹션 제목('요약' h2) 아래로 한 단계 낮춰 계층을 맞춘다.
+_HEADING_RE = re.compile(r"(</?)h([1-6])\b")
+
+
+def _demote_headings(html_text: str) -> str:
+    return _HEADING_RE.sub(
+        lambda m: f"{m.group(1)}h{min(int(m.group(2)) + 1, 6)}", html_text
+    )
+
 
 # templates 디렉터리 (이 파일과 동일 패키지의 templates/html)
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates" / "html"
@@ -70,41 +87,6 @@ def _load_all(work_id: str) -> dict[str, Any]:
         "book_info": book_info,
         "chapters": chapters,
     }
-
-
-# ---------------------------------------------------------------------------
-# 이미지 복사
-# ---------------------------------------------------------------------------
-
-def _copy_chapter_images(chapters: list[dict[str, Any]], output_dir: Path) -> dict[str, list[dict[str, Any]]]:
-    """raw image_refs → output_dir/images/로 복사. chapter_id → image meta 매핑 반환."""
-    out_images = output_dir / "images"
-    out_images.mkdir(parents=True, exist_ok=True)
-
-    by_chapter: dict[str, list[dict[str, Any]]] = {}
-    for ch in chapters:
-        cid = ch["chapter_id"]
-        raw = ch.get("raw") or {}
-        refs = raw.get("image_refs") or []
-        rel_list: list[dict[str, Any]] = []
-        for ref in refs:
-            src = Path(ref["path"])
-            if not src.exists():
-                logger.warning("image not found, skipping: %s", src)
-                continue
-            dest = out_images / src.name
-            try:
-                shutil.copyfile(src, dest)
-            except OSError as e:
-                logger.warning("image copy failed %s -> %s: %s", src, dest, e)
-                continue
-            rel_list.append({
-                "id": ref.get("id") or src.stem,
-                "rel": f"images/{dest.name}",
-                "page": ref.get("page"),
-            })
-        by_chapter[cid] = rel_list
-    return by_chapter
 
 
 # ---------------------------------------------------------------------------
@@ -179,41 +161,20 @@ def _chapter_nav_links(chapters: list[dict[str, Any]], index: int, show_index_li
     return '<nav class="chapter-nav">' + "".join(parts) + "</nav>"
 
 
-def _figures_section(images: list[dict[str, Any]]) -> str:
-    if not images:
-        return ""
-    items: list[str] = []
-    for img in images:
-        cap = f"p.{_esc(img['page'])}" if img.get("page") is not None else ""
-        items.append(
-            '<figure>'
-            f'<img src="{_esc(img["rel"])}" alt="{_esc(img["id"])}" loading="lazy">'
-            f'<figcaption>{cap}</figcaption>'
-            '</figure>'
-        )
-    return (
-        '<section id="figures">'
-        '<h2>그림</h2>'
-        '<div class="figures">' + "".join(items) + "</div>"
-        "</section>"
-    )
-
-
 def _summary_section(summary: dict[str, Any]) -> str:
-    text = summary.get("summary") or ""
+    """요약을 마크다운 → HTML로 렌더. 헤딩은 섹션 제목 아래로 한 단계 낮춘다."""
+    text = str(summary.get("summary") or "")
     key_points = summary.get("key_points") or []
-    parts = ['<section id="summary"><h2>요약</h2>']
-    # 단락 분리
-    for para in str(text).split("\n\n"):
-        para = para.strip()
-        if para:
-            parts.append(f"<p>{_esc(para)}</p>")
-    parts.append("</section>")
+
+    body_html = _demote_headings(_MD.render(text))
+
+    parts = [f'<section id="summary"><h2>요약</h2>{body_html}</section>']
 
     if key_points:
         parts.append('<section id="key-points"><h2>핵심 포인트</h2><ul>')
         for kp in key_points:
-            parts.append(f"<li>{_esc(kp)}</li>")
+            # 핵심 포인트도 인라인 마크다운(굵게·코드 등) 허용
+            parts.append(f"<li>{_MD.renderInline(str(kp))}</li>")
         parts.append("</ul></section>")
     return "".join(parts)
 
@@ -299,7 +260,6 @@ def _extension_section(items: list[dict[str, Any]]) -> str:
 
 def _chapter_body(
     chapter: dict[str, Any],
-    images: list[dict[str, Any]],
     opts: dict[str, bool],
 ) -> str:
     meta = chapter["meta"]
@@ -317,7 +277,6 @@ def _chapter_body(
         f'<h1>{_esc(title)}</h1>',
         range_html,
         _summary_section(summary),
-        _figures_section(images),
     ]
     if opts.get("multiple_choice"):
         sections.append(_mc_section(questions.get("multiple_choice") or []))
@@ -451,7 +410,6 @@ class HtmlRenderer(Renderer):
 
         output_dir.mkdir(parents=True, exist_ok=True)
         _copy_assets(output_dir)
-        images_by_chapter = _copy_chapter_images(chapters, output_dir)
 
         single = len(chapters) == 1
         book_title = book_info.get("title") or "Study"
@@ -459,7 +417,7 @@ class HtmlRenderer(Renderer):
         if single:
             ch = chapters[0]
             body = _book_info_header(book_info) + (
-                '<article>' + _chapter_body(ch, images_by_chapter.get(ch["chapter_id"], []), opts) + '</article>'
+                '<article>' + _chapter_body(ch, opts) + '</article>'
             )
             html_text = _page_shell(
                 lang=language,
@@ -489,10 +447,9 @@ class HtmlRenderer(Renderer):
             for i, ch in enumerate(chapters):
                 cid = ch["chapter_id"]
                 ch_title = (ch.get("summary") or {}).get("title") or ch["meta"].get("title") or cid
-                images = images_by_chapter.get(cid, [])
                 article_body = (
                     _chapter_nav_links(chapters, i, show_index_link=True)
-                    + '<article>' + _chapter_body(ch, images, opts) + '</article>'
+                    + '<article>' + _chapter_body(ch, opts) + '</article>'
                     + _chapter_nav_links(chapters, i, show_index_link=True)
                 )
                 (output_dir / f"{cid}.html").write_text(

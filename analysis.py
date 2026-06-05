@@ -10,7 +10,6 @@ from typing import Any
 
 from . import lang, workspace
 from .pdf import chapter as chapter_mod
-from .pdf import images as images_mod
 from .pdf import reader
 from .pdf import toc_finder
 
@@ -478,7 +477,7 @@ def set_chapters_impl(
     book_info: dict[str, Any] | None = None,
     language: str = "",
 ) -> dict[str, Any]:
-    """챕터 구조 확정 → 챕터별 텍스트/이미지 추출 + 저장.
+    """챕터 구조 확정 → 챕터별 텍스트 추출 + 저장.
 
     Args:
         chapters: [{"chapter_id", "title", "page_range"=[start,end]}, ...]
@@ -488,12 +487,11 @@ def set_chapters_impl(
                   전달하면 state.language를 갱신한다(텍스트 감지가 불가능하므로).
 
     Returns:
-        {"chapter_count", "total_chars", "total_images", "chapters": [...]}
+        {"chapter_count", "total_chars", "chapters": [...]}
 
     OCR 모드(state.extraction_mode == "ocr")에서는 본문 텍스트를 추출하지 않는다.
     서브에이전트가 get_chapter_content가 렌더한 페이지 이미지를 직접 읽기 때문.
-    그림(임베디드 raster)만 best-effort로 추출해 둔다(순수 스캔본은 풀페이지
-    필터에 걸려 비는 게 정상).
+    (그림 추출은 더 이상 하지 않는다 — 요약은 텍스트/마크다운만 다룬다.)
     """
     if not chapters:
         raise ValueError("chapters must not be empty")
@@ -531,14 +529,11 @@ def set_chapters_impl(
         }
     workspace.save_book_info(work_id, book_info)
 
-    images_out_dir = workspace.images_dir(work_id)
-
     # 챕터별 추출
     workspace.update_phase(work_id, "chapter_processing", "in_progress")
 
     summaries: list[dict[str, Any]] = []
     total_chars = 0
-    total_images = 0
 
     doc = reader.open_pdf(pdf_path)
     try:
@@ -550,7 +545,7 @@ def set_chapters_impl(
                 summaries.append({
                     "chapter_id": cid, "title": ch_def["title"],
                     "page_range": ch_def["page_range"],
-                    "char_count": 0, "image_count": 0,
+                    "char_count": 0,
                     "skipped": True, "error": None,
                 })
                 continue
@@ -558,28 +553,18 @@ def set_chapters_impl(
             try:
                 if ocr_mode:
                     # 본문 텍스트는 추출하지 않는다(서브에이전트가 페이지 이미지를
-                    # 직접 읽음). 그림만 best-effort — 순수 스캔본은 빌 수 있음.
+                    # 직접 읽음).
                     char_count = 0
-                    try:
-                        image_refs = images_mod.extract_chapter_images(
-                            doc, cid, ch_def["page_range"], images_out_dir,
-                        )
-                    except Exception:
-                        logger.warning("ocr figure extraction skipped: %s", cid)
-                        image_refs = []
                 else:
                     extracted = chapter_mod.extract_chapter(doc, ch_def)
                     char_count = extracted["char_count"]
-                    image_refs = images_mod.extract_chapter_images(
-                        doc, cid, ch_def["page_range"], images_out_dir,
-                    )
             except Exception as e:
                 logger.exception("chapter extraction failed: %s", cid)
                 workspace.mark_chapter_failed(work_id, cid, kind="summary", error=str(e))
                 summaries.append({
                     "chapter_id": cid, "title": ch_def["title"],
                     "page_range": ch_def["page_range"],
-                    "char_count": 0, "image_count": 0, "error": str(e),
+                    "char_count": 0, "error": str(e),
                 })
                 continue
 
@@ -588,7 +573,6 @@ def set_chapters_impl(
                 "title": ch_def["title"],
                 "page_range": ch_def["page_range"],
                 "char_count": char_count,
-                "image_refs": image_refs,  # 그림(절대 경로). OCR 모드는 비어 있을 수 있음
             }
             if not ocr_mode:
                 raw_payload["text"] = extracted["text"]
@@ -596,13 +580,11 @@ def set_chapters_impl(
             workspace.update_chapter_status(work_id, cid, char_count=char_count)
 
             total_chars += char_count
-            total_images += len(image_refs)
             summaries.append({
                 "chapter_id": cid,
                 "title": ch_def["title"],
                 "page_range": ch_def["page_range"],
                 "char_count": char_count,
-                "image_count": len(image_refs),
                 "error": None,
             })
     finally:
@@ -611,7 +593,6 @@ def set_chapters_impl(
     return {
         "chapter_count": len(normalized),
         "total_chars": total_chars,
-        "total_images": total_images,
         "chapters": summaries,
     }
 
@@ -623,7 +604,7 @@ def set_chapters_impl(
 def get_chapter_content_impl(work_id: str, chapter_id: str) -> dict[str, Any]:
     """챕터 raw 데이터 반환. OCR 모드면 페이지를 lazy 렌더해 page_images 첨부.
 
-    - text 모드: chapters_raw의 {text, image_refs(그림)}를 그대로 반환.
+    - text 모드: chapters_raw의 {text}를 그대로 반환.
     - ocr 모드: 본문 텍스트가 없으므로 page_range의 페이지를 JPEG로 렌더해
       page_images(서브에이전트가 직접 읽을 페이지 이미지 절대경로)를 채운다.
       이미 렌더된 페이지는 재사용한다(p{N}.jpg 캐시).

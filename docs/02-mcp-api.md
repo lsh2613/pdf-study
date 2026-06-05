@@ -63,11 +63,11 @@ scan_pdf(work_id: str, scan_size: int = 30, allow_garbled: bool = False) -> dict
 # HTML 렌더링에서 모두 제외된다.
 # language: "ko"|"en". OCR 모드는 텍스트 언어감지가 불가하니 LLM이 이미지로
 # 파악한 언어를 반드시 전달(text 모드는 scan_pdf가 자동 감지하므로 생략 가능).
-# OCR 모드는 본문 텍스트를 추출하지 않는다(그림만 best-effort).
+# OCR 모드는 본문 텍스트를 추출하지 않는다(sub-agent가 page_images를 직접 읽음).
 set_chapters(work_id: str, chapters: list[dict], book_info: dict = None, language: str = "") -> dict
-# text 모드: data에 text(본문) + image_refs(그림 절대경로).
+# text 모드: data에 text(본문).
 # ocr  모드: data에 page_images(챕터 페이지를 렌더한 JPEG 절대경로) — sub-agent가
-#            순서대로 읽어 본문을 OCR. image_refs(그림)는 비어 있을 수 있다.
+#            순서대로 읽어 본문을 OCR. (그림 추출/렌더링은 제공하지 않는다.)
 get_chapter_content(work_id: str, chapter_id: str) -> dict
 get_subagent_prompts(work_id: str) -> dict
 save_chapter_result(work_id: str, chapter_id: str, data: dict) -> dict

@@ -59,14 +59,41 @@ the key ideas without reopening the original text.
 
 
 # ---------------------------------------------------------------------------
+# 요약 작성 형식 (마크다운)
+#   요약은 렌더 시 마크다운으로 해석된다(HTML은 markdown-it, TUI는 rich).
+#   그림(figure)은 다루지 않는다 — 요약은 순수 텍스트/마크다운만.
+# ---------------------------------------------------------------------------
+SUMMARY_FORMAT_KO = """\
+[요약 작성 형식 — 마크다운]
+summary는 **마크다운**으로 작성하세요. 렌더러가 그대로 마크다운으로 해석합니다
+(평문 나열 금지). 다음을 적극 활용하세요:
+- `##`/`###` 소제목으로 구획을 나눠 가독성을 높이기
+- **굵게**, *기울임*, `인라인 코드`, 코드블록(```), 목록(-, 1.), 표(| … |)
+- 정의·수식·예약어는 코드/표로 정리하면 더 또렷해집니다
+
+이미지(그림)는 넣지 마세요 — `![...]()` 같은 이미지 문법은 사용하지 않습니다.
+필요한 그림 내용은 글/표로 풀어 설명하세요.""".strip()
+
+SUMMARY_FORMAT_EN = """\
+[Summary format — Markdown]
+Write `summary` in **Markdown**; the renderer interprets it as Markdown
+(HTML via markdown-it, TUI via rich). Do not dump flat prose. Use freely:
+- `##`/`###` subheadings to structure the summary for readability
+- **bold**, *italics*, `inline code`, code blocks (```), lists (-, 1.), tables (| … |)
+- Render definitions, formulas, and keywords as code/tables when it clarifies
+
+Do not embed images — never use image syntax like `![...]()`. Describe any
+needed figure content in prose or tables instead.""".strip()
+
+
+# ---------------------------------------------------------------------------
 # 입력 방식 블록 (text vs ocr) — extraction_mode에 따라 본문을 어떻게 얻는지
 # ---------------------------------------------------------------------------
 INPUT_MODE_TEXT_KO = """\
 [입력 방식 — 본문 텍스트]
 get_chapter_content가 제공한 text가 챕터 본문입니다. 깨진 글자·띄어쓰기 오류·
 잘못 분리된 줄이 있으면 의미를 해치지 않는 선에서 자연스럽게 교정해 읽으세요
-(임의 추가 금지). image_refs(절대 경로)는 챕터의 그림/표입니다 — 필요 시
-멀티모달 입력으로 직접 로드해 캡션이나 예시로 활용하세요.""".strip()
+(임의 추가 금지).""".strip()
 
 INPUT_MODE_OCR_KO = """\
 [입력 방식 — 페이지 이미지(OCR)]
@@ -74,15 +101,13 @@ INPUT_MODE_OCR_KO = """\
 (페이지 JPEG 절대경로)를 순서대로 멀티모달 입력으로 읽어 본문을 직접
 파악하세요(=OCR). 흐릿하거나 깨져 보이는 기술용어·식별자·예약어
 (예: SERIALIZABLE, KEY_BLOCK_SIZE, select_type)는 문맥으로 복원하세요.
-읽어낸 본문의 글자수를 헤아려 위의 두 표(문제 개수·요약 길이)를 적용하세요.
-image_refs(그림)는 비어 있을 수 있습니다.""".strip()
+읽어낸 본문의 글자수를 헤아려 위의 두 표(문제 개수·요약 길이)를 적용하세요.""".strip()
 
 INPUT_MODE_TEXT_EN = """\
 [Input mode — body text]
 The `text` from get_chapter_content is the chapter body. If it has broken
 characters, spacing errors, or split lines, read with natural corrections where
-meaning is preserved (do not invent content). `image_refs` (absolute paths) are
-the chapter's figures/tables — load them as multimodal input when useful.""".strip()
+meaning is preserved (do not invent content).""".strip()
 
 INPUT_MODE_OCR_EN = """\
 [Input mode — page images (OCR)]
@@ -90,8 +115,7 @@ No body text is provided. Read the `page_images` (absolute JPEG paths) from
 get_chapter_content in order, as multimodal input, to recover the body yourself
 (=OCR). Reconstruct blurry/garbled technical terms, identifiers, and keywords
 (e.g. SERIALIZABLE, KEY_BLOCK_SIZE, select_type) from context. Count the chars
-you read and apply the two tables above (question counts / summary length).
-`image_refs` (figures) may be empty.""".strip()
+you read and apply the two tables above (question counts / summary length).""".strip()
 
 
 # ---------------------------------------------------------------------------
@@ -119,13 +143,17 @@ _SUMMARIZER_KO = """\
 
 {input_mode_block}
 
+{summary_format_block}
+
 [출력 형식 — JSON]
-반드시 다음 스키마의 **JSON 객체 하나만** 반환하세요. 마크다운 코드펜스(```) 금지.
+반드시 다음 스키마의 **JSON 객체 하나만** 반환하세요. 객체 전체를 감싸는
+코드펜스(```)는 금지하지만, summary 값 **안에서는** 마크다운(코드블록 포함)을
+자유롭게 쓰세요. summary는 JSON 문자열이므로 줄바꿈은 `\\n`으로 이스케이프됩니다.
 
 {{
   "chapter_id": "<주어진 chapter_id 그대로>",
   "title": "<주어진 title 그대로>",
-  "summary": "<위 권장 길이 표를 참고해 본문 분량에 맞춘 한국어 요약>",
+  "summary": "<위 권장 길이 표를 참고해 본문 분량에 맞춘 한국어 요약 (마크다운, 그림 인라인)>",
   "key_points": ["...", "..."],
   "questions": {{
     "multiple_choice": [
@@ -171,13 +199,18 @@ Read the given chapter and produce ① summary, ② key points, ③ verification
 
 {input_mode_block}
 
+{summary_format_block}
+
 [Output format — JSON]
-Return **exactly one JSON object** matching the schema below. No markdown fences.
+Return **exactly one JSON object** matching the schema below. Do not wrap the
+whole object in a code fence, but **inside** the summary value use Markdown
+freely (including code blocks). summary is a JSON string, so newlines are
+escaped as `\\n`.
 
 {{
   "chapter_id": "<as given>",
   "title": "<as given>",
-  "summary": "<English summary scaled to body size per the table above>",
+  "summary": "<English summary scaled to body size per the table above (Markdown, inline figures)>",
   "key_points": ["...", "..."],
   "questions": {{
     "multiple_choice": [
@@ -292,7 +325,7 @@ JSON only. No code fences. Save via save_extension_result.
 
 WORKFLOW_INSTRUCTIONS_SEQUENTIAL = """\
 한 챕터씩 처리하세요.
-1) get_chapter_content(work_id, chapter_id) — 본문 + image_refs 받기
+1) get_chapter_content(work_id, chapter_id) — 본문 받기
 2) 위 summarizer 시스템 프롬프트로 sub-agent 호출 (없으면 본인이 직접 처리)
 3) 결과 JSON을 save_chapter_result(work_id, chapter_id, data)
 4) extension이 활성화돼 있으면 동일한 방식으로 extension sub-agent 호출 → save_extension_result
@@ -400,8 +433,10 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
 
     if language == "ko":
         input_mode_block = INPUT_MODE_OCR_KO if ocr_mode else INPUT_MODE_TEXT_KO
+        summary_format_block = SUMMARY_FORMAT_KO
     else:
         input_mode_block = INPUT_MODE_OCR_EN if ocr_mode else INPUT_MODE_TEXT_EN
+        summary_format_block = SUMMARY_FORMAT_EN
 
     summ_tmpl = _SUMMARIZER_KO if language == "ko" else _SUMMARIZER_EN
     summary_length_table = (
@@ -414,6 +449,7 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         enabled_types_block=enabled_types_block,
         scales_table=QUESTION_SCALES_TABLE,
         input_mode_block=input_mode_block,
+        summary_format_block=summary_format_block,
     )
 
     extension_prompt: str | None = None

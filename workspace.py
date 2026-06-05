@@ -7,7 +7,7 @@
     │   ├── outline.json
     │   ├── book_info.json
     │   ├── chapters_raw/ch{N}.json
-    │   └── images/*.png
+    │   └── pages/p{N}.jpg          # OCR 모드: 페이지 통째 렌더 (lazy)
     ├── chapters/ch{N}.json
     └── extensions/ch{N}.json
 
@@ -121,10 +121,6 @@ def chapters_raw_dir(work_id: str) -> Path:
     return pdf_analysis_dir(work_id) / "chapters_raw"
 
 
-def images_dir(work_id: str) -> Path:
-    return pdf_analysis_dir(work_id) / "images"
-
-
 def pages_dir(work_id: str) -> Path:
     """OCR 모드에서 페이지를 JPEG로 렌더해 두는 곳 (p{N}.jpg)."""
     return pdf_analysis_dir(work_id) / "pages"
@@ -202,7 +198,6 @@ def create_workspace(
 
     # 하위 디렉터리 미리 생성
     (work_dir / "pdf_analysis" / "chapters_raw").mkdir(parents=True, exist_ok=True)
-    (work_dir / "pdf_analysis" / "images").mkdir(parents=True, exist_ok=True)
     (work_dir / "pdf_analysis" / "pages").mkdir(parents=True, exist_ok=True)
     (work_dir / "chapters").mkdir(parents=True, exist_ok=True)
     (work_dir / "extensions").mkdir(parents=True, exist_ok=True)

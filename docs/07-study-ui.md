@@ -29,6 +29,14 @@
 
 단일 챕터일 때는 `index.html` 생략하고 `main.html` 상단에 동일한 책 정보 섹션을 둔다.
 
+## 요약 본문 렌더링 (마크다운)
+
+`summary`는 마크다운 문자열이라, HtmlRenderer가 `markdown-it-py`로 HTML 변환한다
+(`_summary_section`). `##` 소제목·**굵게**·목록·코드블록·표가 살아나고, 본문 헤딩은
+섹션 제목 '요약'(h2) 아래로 한 단계 낮춰 계층을 맞춘다. (평문 escape 방식은 폐기 —
+마크다운이 글자 그대로 노출되던 문제 해결.) **그림(figure)은 다루지 않는다** — 요약은
+텍스트/마크다운만 렌더하며 학습 자료에 별도 이미지를 싣지 않는다.
+
 ## study_html.py 완성본 (HTML 출력용 launcher)
 
 ```python
@@ -136,7 +144,7 @@ if __name__ == "__main__":
 
 1. `GET /api/progress/ch{N}` → 답안 복원 (객관식 선택 / 단답·주관 텍스트), `mc_score` 표시
 2. `last_position`이 있으면 해당 섹션으로 scroll (`IntersectionObserver`로 추적)
-3. **챕터 완료 여부는 사용자가 명시적으로 누르는 "이 챕터 완료로 표시" 버튼으로만 토글**. 스크롤 비율 자동 측정은 사용하지 않는다.
+3. **챕터 완료 여부는 사용자가 명시적으로 누르는 "이 챕터 완료로 표시" 버튼으로만 토글**. 스크롤 비율 자동 측정은 사용하지 않는다. 이 버튼(`.completion-control`)은 **우하단에 `position: fixed`로 떠 있어** 스크롤 위치와 무관하게 항상 보인다(최하단까지 내려갈 필요 없음). 좌측 사이드바·좌상단 토글과 겹치지 않는 코너를 골랐고, 토글 로직은 그대로 `.complete-btn` 하나만 본다.
 4. 객관식 채점: 선택 즉시 정/오답 판정, `mc_score` 갱신 후 throttle(2초) POST
 5. 단답/주관/확장: 텍스트 입력 시 debounce(1초) POST, "모범답안 보기" 클릭 시 `viewed_answer: true` POST
 6. 완료 버튼 토글 → `state.completed` 즉시 변경 + 사이드바 항목 ✓ 즉시 갱신 + POST

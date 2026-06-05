@@ -16,7 +16,6 @@
 │   ├── outline.json
 │   ├── book_info.json
 │   ├── chapters_raw/ch{N}.json
-│   ├── images/*.png          # 추출된 그림(figure)
 │   └── pages/p{N}.jpg         # OCR 모드: 페이지를 통째로 렌더한 이미지 (lazy)
 ├── chapters/ch{N}.json
 └── extensions/ch{N}.json
@@ -29,7 +28,6 @@ study_output/
 ├── index.html                # 책 정보 섹션 + 챕터 목록 + 진도 대시보드
 │                             # (단일 챕터면 생략, main.html이 대체)
 ├── ch1.html, ch2.html, ...   # 또는 main.html
-├── images/*.png
 ├── assets/
 │   ├── style.css             # 최소 스타일 (가독성 + prefers-color-scheme 다크모드)
 │   ├── grading.js            # (자리표시 — 채점/입력 hook은 storage.js와 통합)
@@ -50,9 +48,8 @@ study_output/
 │                             #   rich 없으면 첫 실행 시 자동 설치
 ├── README.md                 # 실행 안내
 ├── ch1/
-│   ├── summary.md            # 요약 (읽기 전용: 제목·요약·핵심포인트·이미지)
+│   ├── summary.md            # 요약 (읽기 전용: 제목·요약·핵심포인트, 마크다운)
 │   ├── quiz.json             # 4유형 문제+정답 (TUI 전용)
-│   ├── images/*.png          # 이 챕터 이미지
 │   ├── study_tui.py          # 이 챕터로 바로 진입하는 thin launcher → 루트 엔진 호출
 │   └── progress.json         # TUI 풀이 기록 (실행 시 생성)
 ├── ch2/ ...
@@ -144,16 +141,11 @@ study_output/
   "title": "트랜잭션",
   "page_range": [12, 47],
   "text": "트랜잭션은 데이터베이스 시스템에서...",   // text 모드만. OCR 모드엔 없음
-  "char_count": 18420,                          // OCR 모드는 0 (서버가 본문을 안 읽음)
-  "image_refs": [
-    {
-      "id": "ch1_p23_0",
-      "path": "pdf_analysis/images/ch1_p23_0.png",  // 추출된 그림(figure)
-      "page": 23
-    }
-  ]
+  "char_count": 18420                           // OCR 모드는 0 (서버가 본문을 안 읽음)
 }
 ```
+
+- 그림(figure)은 추출하지 않으므로 raw에 `image_refs` 같은 이미지 필드는 없다.
 
 - **OCR 모드**: 위에서 `text`가 없고 `char_count=0`. 대신 `get_chapter_content`가
   호출 시 page_range를 lazy 렌더해 응답에 `page_images`를 채운다(디스크 raw엔
@@ -167,11 +159,14 @@ study_output/
 
 ### chapters/ch{N}.json (sub-agent 결과)
 
+`summary`는 **마크다운 문자열**이다(`##` 소제목·**굵게**·목록·코드·표 가능). 이미지
+(그림)는 넣지 않는다([04-content-generation.md](./04-content-generation.md#요약-형식--마크다운)).
+
 ```json
 {
   "chapter_id": "ch1",
   "title": "트랜잭션",
-  "summary": "...",
+  "summary": "## 개요\n트랜잭션은 **원자성**을 보장한다.\n\n- 격리 수준\n...",
   "key_points": ["...", "..."],
   "questions": {
     "multiple_choice": [

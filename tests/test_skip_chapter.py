@@ -127,4 +127,3 @@ def test_set_chapters_impl_marks_skipped_in_result(tmp_path, ko_with_toc):
     assert by_id["ch1"].get("skipped") is not True
     assert by_id["ch2"].get("skipped") is True
     assert by_id["ch2"]["char_count"] == 0
-    assert by_id["ch2"]["image_count"] == 0

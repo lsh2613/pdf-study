@@ -11,8 +11,7 @@ pdf_study/
 │   ├── __init__.py
 │   ├── reader.py           # PyMuPDF + 텍스트 추출 + 품질 평가 + book metadata + offset + render_pages(OCR)
 │   ├── toc_finder.py       # 본문 내 목차 패턴 탐색
-│   ├── chapter.py          # 챕터 분할 (set_chapters 처리)
-│   └── images.py           # 이미지 추출 + 리사이즈
+│   └── chapter.py          # 챕터 분할 (set_chapters 처리)
 ├── analysis.py             # scan_pdf, set_chapters 통합 로직
 ├── workspace.py            # .work/ 폴더 관리, state.json read/write + lock
 ├── prompts.py              # sub-agent 시스템 프롬프트 (user_context + language 주입)
@@ -21,7 +20,7 @@ pdf_study/
 ├── renderer/
 │   ├── __init__.py
 │   ├── base.py             # Renderer 인터페이스 (render(work_id, out_dir))
-│   ├── html_renderer.py    # 현재 구현
+│   ├── html_renderer.py    # 요약 마크다운→HTML(markdown-it). 그림은 다루지 않음
 │   └── md_tui_renderer.py  # 챕터별 폴더 + summary.md + quiz.json + TUI launcher
 └── templates/
     ├── html/

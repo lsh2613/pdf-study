@@ -30,7 +30,7 @@
   품질 거부(`no_text_layer`/`garbled`)는 **우회**(스캔본이 대상). 단 offset·언어는
   텍스트 레이어 best-effort로도 시도한다 — 꼬리말 **숫자**와 한글은 합자 깨짐에도
   살아남아 공짜로 쓸 수 있기 때문(없으면 LLM이 이미지로).
-- `set_chapters`: 본문 텍스트를 추출하지 않고 그림만 best-effort 추출.
+- `set_chapters`: 본문 텍스트를 추출하지 않는다(그림 추출도 하지 않는다).
 - `get_chapter_content`: 챕터 page_range를 lazy 렌더해 `page_images`로 반환.
 - 문제 개수·요약 길이 스케일: sub-agent가 OCR로 읽어낸 글자수로 기존 표를 적용.
 
@@ -91,17 +91,11 @@ front matter면 None)가 함께 담긴다. recommendations에는 `physical_range
 보정을 지시한다. **set_chapters는 항상 물리 page_range 기준**, printed_range는
 표시용 옵셔널 메타다.
 
-### 이미지 추출 필터
+### 그림(figure) 추출 — 제거됨
 
-`pdf/images.py`가 챕터별로 PNG를 추출하면서 두 가지 필터를 적용한다:
-
-| 필터 | 조건 | 의도 |
-|---|---|---|
-| 풀페이지 raster 거름 | 페이지 면적의 **70% 이상** 차지 (`page.get_image_info`로 bbox 비율 계산) | 스캔본 PDF의 페이지 전체 raster가 매 페이지마다 잡혀 본문 그림처럼 들어오는 것을 막는다 |
-| 작은 이미지 거름 | 긴 변 < 80px | 아이콘·디바이더 같은 비-콘텐츠 |
-| 다운스케일 | 긴 변 > 1600px | 멀티모달 sub-agent 입력 부담 감소 |
-
-같은 xref가 여러 페이지에 박혀 있어도 중복 추출하지 않는다.
+본문 그림(figure) 추출 기능은 제거됐다. 요약은 순수 텍스트/마크다운만 다루며,
+학습 자료에 별도 그림을 싣지 않는다. (OCR 모드의 `page_images`는 그림이 아니라
+sub-agent가 본문을 읽는 페이지 렌더 — `reader.render_pages` — 로 그대로 유지된다.)
 
 ### 언어 감지
 

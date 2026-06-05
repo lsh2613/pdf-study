@@ -127,6 +127,18 @@ def test_summary_length_is_not_fixed_400_800():
     assert "scaled to body size" in en
 
 
+def test_summary_format_markdown_no_images():
+    """요약은 마크다운으로 작성하되 이미지(그림)는 넣지 말라는 지시."""
+    ko = prompts.build_prompts(_state(language="ko"))["summarizer_prompt"]
+    en = prompts.build_prompts(_state(language="en"))["summarizer_prompt"]
+    assert "[요약 작성 형식 — 마크다운]" in ko
+    assert "이미지(그림)는 넣지 마세요" in ko
+    assert "fig:" not in ko                       # 그림 인라인 토큰 흔적 없음
+    assert "[Summary format — Markdown]" in en
+    assert "Do not embed images" in en
+    assert "fig:" not in en
+
+
 def test_enabled_types_reflects_options():
     opts = {
         "multiple_choice": True, "short_answer": False,

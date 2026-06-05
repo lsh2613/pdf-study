@@ -316,13 +316,12 @@ def set_chapters(
 def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
     """챕터 본문을 반환합니다 (extraction_mode에 따라 형태가 다름).
 
-    - text 모드: `text`(본문) + `image_refs`(그림 절대경로)를 반환. sub-agent는
-      text를 읽고, 필요 시 image_refs를 멀티모달 입력으로 로드하세요.
+    - text 모드: `text`(본문)를 반환. sub-agent는 text를 읽고 요약/문제를 만드세요.
     - ocr 모드: 본문 텍스트가 없습니다. 대신 `page_images`(이 챕터 페이지들을
       렌더한 JPEG 절대경로)를 반환합니다. **sub-agent는 page_images를 순서대로
       멀티모달 입력으로 읽어 본문을 직접 파악(OCR)**한 뒤, 읽어낸 글자수로
       문제 개수·요약 길이 스케일을 정하세요. 흐릿한 기술용어·식별자·예약어는
-      문맥으로 복원하세요. `image_refs`(그림)는 비어 있을 수 있습니다.
+      문맥으로 복원하세요.
     """
     raw = analysis.get_chapter_content_impl(work_id, chapter_id)
     if "page_images" in raw:  # ocr 모드
@@ -333,7 +332,7 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
         )
     else:  # text 모드
         guide = (
-            f"이 챕터({chapter_id})의 text(+필요 시 image_refs)를 읽고 "
+            f"이 챕터({chapter_id})의 text를 읽고 "
             "summarizer_prompt 스키마대로 요약·문제를 만들어 "
         )
     return _ok(raw, next_action=(

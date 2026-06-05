@@ -89,7 +89,7 @@ def test_scan_pdf_ocr_mode_ignores_text_toc(make_workspace, ko_with_toc):
     assert "메인 에이전트" in toc.get("note", "")
 
 
-def test_set_chapters_extracts_text_and_filters_images(make_workspace, ko_with_toc):
+def test_set_chapters_extracts_text(make_workspace, ko_with_toc):
     wid, _ = make_workspace(ko_with_toc)
     scan = analysis.scan_pdf_impl(wid)
     chs = scan["recommendations"]["suggested_chapters"]
@@ -99,8 +99,9 @@ def test_set_chapters_extracts_text_and_filters_images(make_workspace, ko_with_t
     for c in res["chapters"]:
         assert c["error"] is None, c
         assert c["char_count"] > 0
-    # 본문 그림 3장(각 챕터 1장) + 찾아보기는 그림 없음 = 총 3장 (이미지 필터 작동)
-    assert res["total_images"] == 3
+    # 그림 기능은 제거됨 — 추출 결과에 이미지 관련 필드가 없어야 한다
+    assert "total_images" not in res
+    assert all("image_count" not in c for c in res["chapters"])
 
     # state.chapters의 char_count 갱신
     state = workspace.load_state(wid)

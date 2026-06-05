@@ -26,14 +26,14 @@
 ┌──────────────────────────────────────────────────────────────┐
 │ 작업 디스크 레이아웃: <output_dir>/.work/                    │
 │   state.json / pdf_analysis/ / chapters/ / extensions/ /     │
-│   pdf_analysis/chapters_raw/ / pdf_analysis/images/          │
+│   pdf_analysis/chapters_raw/ / pdf_analysis/pages/ (OCR)     │
 └──────────────────────────────────────────────────────────────┘
         │ finalize_study 후
         ▼
 ┌──────────────────────────────────────────────────────────────┐
 │ 학습 자료 정적 사이트: <output_dir>/                         │
 │   index.html / ch{N}.html (또는 main.html) / assets/ /       │
-│   images/ / study_html.py / progress/                             │
+│   study_html.py / progress/                                  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -168,19 +168,16 @@ server.set_chapters(work_id, chapters, book_info, language)
        ├─ workspace.save_book_info(work_id, book_info)    # 없으면 PDF 메타로 fallback
        ├─ workspace.update_phase("chapter_processing", "in_progress")
        └─ for ch in normalized:
-            ├─ skip이면 추출 자체 건너뜀 (raw/이미지 파일 없음)
+            ├─ skip이면 추출 자체 건너뜀 (raw 파일 없음)
             ├─ (text 모드) chapter_mod.extract_chapter(doc, ch)  # 본문 text+char_count
-            ├─ (ocr 모드)  본문 추출 안 함(char_count=0). 그림만 best-effort
-            ├─ images_mod.extract_chapter_images(doc, ...) # 그림 PNG 저장
-            │    └─ 페이지 면적 ≥70% raster, <80px 이미지 거름
+            ├─ (ocr 모드)  본문 추출 안 함(char_count=0)
             ├─ workspace.save_chapter_raw(...)             # chapters_raw/ch{N}.json
             └─ workspace.update_chapter_status(char_count=...)
 ```
 
-- 코드: `analysis.py:set_chapters_impl`, `pdf/chapter.extract_chapter`,
-  `pdf/images.extract_chapter_images`
-- 결과 디스크 상태: `chapters_raw/ch{N}.json` (skip 제외), `images/*.png`,
-  `book_info.json` (ocr 모드 raw엔 `text` 없음)
+- 코드: `analysis.py:set_chapters_impl`, `pdf/chapter.extract_chapter`
+- 결과 디스크 상태: `chapters_raw/ch{N}.json` (skip 제외),
+  `book_info.json` (ocr 모드 raw엔 `text` 없음). 그림(figure) 추출은 하지 않는다.
 - next_action: `get_subagent_prompts(work_id)`
 
 ### Stage 4 · `get_subagent_prompts` — sub-agent용 프롬프트 발급
@@ -213,14 +210,14 @@ Task tool만 진짜 병렬, Gemini/Codex는 메인 모델이 순차 처리).
 ```
 (1) get_chapter_content(work_id, chapter_id)
        └─ analysis.get_chapter_content_impl
-            - text 모드: get_chapter_raw → text, image_refs(그림 절대경로)
+            - text 모드: get_chapter_raw → text
             - ocr  모드: page_range를 lazy 렌더(reader.render_pages) →
                          page_images(페이지 JPEG 절대경로) 반환
 
 (2) summarizer sub-agent (메인 LLM이 위 프롬프트로 호출)
-       - text 모드: text + image_refs로 멀티모달 입력
+       - text 모드: text를 읽어 요약/문제 생성
        - ocr  모드: page_images를 순서대로 읽어 본문 OCR(글자수로 스케일 적용)
-       - 결과 JSON: {summary, key_points, questions:{mc,sa,rf}}
+       - 결과 JSON: {summary(마크다운), key_points, questions:{mc,sa,rf}}
 
 (3) save_chapter_result(work_id, chapter_id, data)
        └─ workspace.save_chapter_result
@@ -277,7 +274,7 @@ server.finalize_study(work_id, output_format="", keep_work_dir=True, force=False
        │      extensions/ch{N}.json, chapters_raw/ch{N}.json 모두 로드
        │    - state.chapters[*]에서 skip=True 인 챕터는 제외
        ├─ _copy_assets       → style.css, storage.js, grading.js, study_html.py, README.md
-       ├─ _copy_chapter_images → images_refs를 output/images/ 로 복사
+       ├─ _summary_section   → 요약 마크다운을 markdown-it로 HTML 변환
        └─ 멀티 챕터:
             - index.html(책 정보 + 챕터 카드)
             - ch{N}.html (각 챕터, 사이드바·완료 버튼 포함)
@@ -330,12 +327,11 @@ POST /api/progress/<chapter_id>   → 같은 규칙
 | `pdf/reader.py` | 2·3·5 | PyMuPDF 래퍼 (메타·텍스트·품질·offset, 1↔0-based 경계, **render_pages** 페이지→JPEG) |
 | `pdf/toc_finder.py` | 2 | 본문에서 목차 후보 추출 (text 모드) |
 | `pdf/chapter.py` | 2·3 | 청크 분할, 챕터 텍스트 추출 (text 모드) |
-| `pdf/images.py` | 3 | 챕터별 그림 PNG + 풀페이지/소형 필터 |
 | `lang.py` | 2 | 한글/라틴 비율로 ko/en 감지 (text 모드) |
 | `analysis.py` | 2·3·5 | scan_pdf_impl / set_chapters_impl / get_chapter_content_impl 통합 로직 (text·ocr 분기) |
 | `prompts.py` | 4 | sub-agent KO/EN 템플릿 + workflow + chapter_ids 분리 |
 | `exa_client.py` | 5 | Exa Web Research MCP HTTP 호출 + 평문 파서 |
-| `renderer/html_renderer.py` | 7 | 정적 사이트 합성 (사이드바·완료 토글·옵션 비활성 섹션 생략) |
+| `renderer/html_renderer.py` | 7 | 정적 사이트 합성 (요약 마크다운→HTML·사이드바·floating 완료 토글·옵션 비활성 섹션 생략. 그림 없음) |
 | `renderer/md_tui_renderer.py` | 7 | 챕터별 폴더 + summary.md + quiz.json + study_tui.py 런처 합성 |
 | `templates/html/{style.css,storage.js,grading.js,study_html.py,README.md}` | 7·8 | HTML 학습 자료 정적 리소스 + 런처 |
 | `templates/md_tui/{study_tui.py,chapter_launcher.py,README.md}` | 7·8 | TUI 엔진(rich, 없으면 자동설치/평문 폴백) + 챕터 shim |
@@ -353,8 +349,7 @@ T1  scan_pdf
 T2  set_chapters
     ├─ state.json (chapters 채움, skip=true는 skipped 상태)
     ├─ pdf_analysis/book_info.json
-    ├─ pdf_analysis/chapters_raw/ch{N}.json   (skip 제외)
-    └─ pdf_analysis/images/*.png
+    └─ pdf_analysis/chapters_raw/ch{N}.json   (skip 제외)
 T3  챕터 루프
     ├─ chapters/ch{N}.json                    (summarizer 결과)
     └─ extensions/ch{N}.json                  (extension 결과)
@@ -363,7 +358,6 @@ T4  finalize_study (output_format=html)
     └─ <output_dir>/
        ├─ index.html | main.html
        ├─ ch{N}.html
-       ├─ images/*.png             (raw에서 복사)
        ├─ assets/{style,storage,grading}
        ├─ study_html.py, README.md
        └─ progress/                (빈 상태)
@@ -386,7 +380,7 @@ init_work (execution_mode·extraction_mode 모두 사용자에게 물어 결정)
   → set_chapters (skip 챕터는 "skip": true, ocr이면 language= 전달)
   → get_subagent_prompts
   → for each chapter_id (workflow_instructions에 따라 sequential / parallel):
-       get_chapter_content   (text: text+그림 / ocr: page_images)
+       get_chapter_content   (text: text / ocr: page_images)
        → summarizer sub-agent (ocr이면 page_images를 읽어 본문 OCR)
        → save_chapter_result
        → (extension 활성 시)

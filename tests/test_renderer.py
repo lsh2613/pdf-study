@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pdf_study import server
+from pdf_study.renderer.html_renderer import _summary_section
 
 
 def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):
@@ -169,3 +170,55 @@ def test_single_chapter_still_has_complete_button(ko_short, tmp_path):
     _, out = _build_single(ko_short, tmp_path)
     mh = (out / "main.html").read_text(encoding="utf-8")
     assert 'class="complete-btn"' in mh
+
+
+def test_complete_button_is_floating_fixed(ko_with_toc, tmp_path):
+    """완료 버튼이 스크롤과 무관하게 보이도록 .completion-control이 fixed여야 한다."""
+    _, out, _ = _build_multi(ko_with_toc, tmp_path)
+    css = (out / "assets" / "style.css").read_text(encoding="utf-8")
+    # .completion-control 블록이 position: fixed 를 포함
+    block = css.split(".completion-control", 1)[1].split("}", 1)[0]
+    assert "position: fixed" in block
+
+
+# ---------------------------- 요약 마크다운 (그림 없음) ----------------------------
+
+def test_summary_markdown_is_rendered_not_escaped():
+    summary = {
+        "summary": "## 개요\n\n트랜잭션은 **원자성**을 보장하고 `SERIALIZABLE`을 쓴다.\n\n"
+                   "| 수준 | 비용 |\n|---|---|\n| 높음 | 큼 |",
+        "key_points": ["**ACID** 4요소"],
+    }
+    html = _summary_section(summary)
+    assert "<strong>원자성</strong>" in html
+    assert "<code>SERIALIZABLE</code>" in html
+    assert "<table>" in html and "<td>높음</td>" in html
+    # 마크다운 원문(별표/해시)이 그대로 노출되지 않아야
+    assert "**원자성**" not in html
+    # 핵심 포인트도 인라인 마크다운 렌더
+    assert "<strong>ACID</strong>" in html
+
+
+def test_summary_headings_demoted_under_section():
+    """본문 ## 헤딩은 섹션 제목(h2) 아래 h3로 낮춰야 계층이 깔끔."""
+    html = _summary_section({"summary": "## 개요\n내용", "key_points": []})
+    assert "<h2>요약</h2>" in html       # 섹션 제목은 h2 유지
+    assert "<h3>개요</h3>" in html       # 본문 ##(h2) → h3
+    assert "<h2>개요</h2>" not in html
+
+
+def test_no_figures_section_rendered():
+    """그림 기능 제거: 챕터 본문 어디에도 '그림' 섹션이 생기지 않는다."""
+    summary = {"summary": "## 개요\n내용", "key_points": ["p1"]}
+    html = _summary_section(summary)
+    assert 'id="figures"' not in html
+    # 헬퍼는 이제 (html, used) 튜플이 아니라 문자열만 반환
+    assert isinstance(html, str)
+
+
+def test_chapter_page_has_no_figures_section(ko_with_toc, tmp_path):
+    """전체 파이프라인에서도 챕터 페이지에 '그림' 섹션이 없어야 한다."""
+    _, out, _ = _build_multi(ko_with_toc, tmp_path)
+    html = (out / "ch1.html").read_text(encoding="utf-8")
+    assert 'id="figures"' not in html
+    assert "<h2>그림</h2>" not in html
