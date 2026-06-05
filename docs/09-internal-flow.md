@@ -127,7 +127,9 @@ server.scan_pdf(work_id, scan_size)
        │    │    ├─ no_text_layer        → rejected + ocrmypdf/extraction_mode=ocr 안내
        │    │    ├─ garbled(모지바케)     → rejected + 무손실 재추출/OCR 이중 안내
        │    │    └─ toc.is_candidate     → from_toc (인쇄→물리 offset 보정)
-       │    ├─ (ocr_mode=True) 거부·텍스트 toc 모두 우회 → 페이지 수로만 라우팅
+       │    ├─ (ocr_mode=True) 거부·텍스트 toc 모두 우회. 서버는 챕터 제안 안 함:
+       │    │                  primary_mode="analyze_toc_from_images",
+       │    │                  suggested_chapters=[], 청크는 chunk_fallback에 분리.
        │    │                  목차·offset은 LLM이 scan_page_images로 직접
        │    ├─ page_count < 50      → single_unit
        │    ├─ page_count ≥ 200     → chunks (30p 단위)

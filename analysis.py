@@ -68,6 +68,8 @@ def _with_offset_meta(
     OCR 안내를 next_step_guidance 앞에 덧붙인다.
     """
     _annotate_printed_ranges(reco["suggested_chapters"], page_offset)
+    if reco.get("chunk_fallback"):
+        _annotate_printed_ranges(reco["chunk_fallback"], page_offset)
     reco["page_offset"] = page_offset
     reco["offset_confidence"] = offset_confidence
     reco["user_choices"] = ["proceed", "manual_pdf_pages", "chunks"]
@@ -96,8 +98,10 @@ def _with_offset_meta(
         "**최상위 챕터 항목(예: '01. 소개', '02. 설치와 설정')만** 골라 각 항목의 "
         "책 페이지번호를 읽으세요(하위 절 '1.1', '2.1.1'은 챕터가 아니니 무시). "
         "제목·페이지번호가 다른 줄에 있을 수 있습니다. 책 페이지 → 물리 = 책 + offset "
-        "으로 변환해 from_toc 챕터를 구성하세요(아래 suggested_chapters의 청크는 "
-        "목차를 못 읽을 때만 사용). ② 꼬리말 인쇄번호와 물리 페이지를 비교해 "
+        "으로 변환해 from_toc 챕터를 구성하세요. suggested_chapters는 비어 있습니다 "
+        "— 서버는 챕터를 제안하지 않으니 직접 채우세요. chunk_fallback(균등 청크)은 "
+        "목차를 도저히 못 읽을 때만 쓰는 최후 수단입니다(그대로 추천하지 마세요). "
+        "② 꼬리말 인쇄번호와 물리 페이지를 비교해 "
         "offset(물리 = 책 + offset)을 검증·추정하세요"
         + (f" (서버 텍스트 레이어 추정값 {page_offset}을 참고하되 이미지로 검증). "
            if off_known else " (서버가 offset을 못 구했으니 이미지로 직접 추정). ")
@@ -111,7 +115,8 @@ def _with_offset_meta(
         + ("." if off_known else " (offset 미측정 → 책 페이지는 '미상'으로 표기).")
         + " printed_range가 null이면 그 구간은 책 본문 번호가 없는 "
         "front matter(표지·서문)입니다. 그런 다음 반드시 세 갈래 선택을 받으세요: "
-        "① 이대로 진행 → suggested_chapters를 그대로 set_chapters. "
+        "① 이대로 진행 → 위에서 정한 챕터(text 모드는 suggested_chapters, OCR 모드는 "
+        "이미지로 분석한 챕터)를 그대로 set_chapters. "
         "② 직접 입력 → 사용자에게 **PDF(물리) 페이지 번호로** 챕터 범위를 받으세요 "
         "(set_chapters는 PDF 물리 페이지 기준). "
         + (f"사용자가 책 페이지로 말하면 물리 = 책 + {page_offset} 로 변환해 주세요. "
@@ -204,6 +209,29 @@ def _build_recommendations(
             "alternatives": [],
             "text_sample": sample,
         }
+
+    if ocr_mode:
+        # OCR 모드: 서버는 챕터를 제안하지 않는다. 메인 에이전트가
+        # scan_page_images(페이지 이미지)에서 목차를 직접 읽어 from_toc로
+        # 구성해야 한다. 청크는 '목차를 못 읽을 때만' 쓰는 최후 수단이라
+        # suggested_chapters가 아니라 chunk_fallback에 분리해 둔다(에이전트가
+        # 이걸 '추천 챕터'로 오해해 그대로 제시하는 것을 막는다).
+        return _with_offset_meta({
+            "rejected": False,
+            "reason": None,
+            "primary_mode": "analyze_toc_from_images",
+            "primary_reason": (
+                "OCR 모드: 서버는 챕터를 제안하지 않습니다. scan_page_images에서 "
+                "목차를 직접 읽어 챕터(from_toc)를 구성하세요. 목차를 도저히 못 "
+                "읽을 때만 chunk_fallback(또는 single_unit)을 쓰세요."
+            ),
+            "suggested_chapters": [],  # 에이전트가 이미지 분석으로 채운다
+            "chunk_fallback": chapter_mod.make_chunks(page_count, DEFAULT_CHUNK_SIZE),
+            "alternatives": [
+                f"chunk_fallback ({DEFAULT_CHUNK_SIZE}p 단위 균등 분할)",
+                "single_unit (전체 1챕터)",
+            ],
+        }, page_offset, offset_confidence, page_count, ocr_mode)
 
     if not ocr_mode and toc_result.get("is_candidate"):
         # 목차 후보를 챕터로 변환 (인쇄→물리 offset 보정). 마지막 끝은 page_count.

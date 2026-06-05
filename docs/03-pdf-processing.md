@@ -23,9 +23,12 @@
 - `scan_pdf`: 첫 N페이지만 렌더(`scan_page_images`)해 **목차는 메인 에이전트가
   그 이미지로 직접 분석**한다(`toc_finder` 스크립트 파싱은 OCR 모드에서 돌리지
   않음 — 깨진 텍스트에선 쓰레기 후보만 나와 에이전트를 헷갈리게 하므로
-  `toc_candidates`는 빈 후보 + note로 반환). 텍스트 품질 거부
-  (`no_text_layer`/`garbled`)는 **우회**(스캔본이 대상). 단 offset·언어는 텍스트
-  레이어 best-effort로도 시도한다 — 꼬리말 **숫자**와 한글은 합자 깨짐에도
+  `toc_candidates`는 빈 후보 + note로 반환). **서버는 챕터를 제안하지 않는다**:
+  `recommendations.primary_mode="analyze_toc_from_images"`, `suggested_chapters=[]`,
+  균등 청크는 "목차를 못 읽을 때만 쓰는 최후 수단"으로 **`chunk_fallback`에 분리**
+  한다(에이전트가 청크를 '추천 챕터'로 오해해 그대로 제시하던 문제 방지). 텍스트
+  품질 거부(`no_text_layer`/`garbled`)는 **우회**(스캔본이 대상). 단 offset·언어는
+  텍스트 레이어 best-effort로도 시도한다 — 꼬리말 **숫자**와 한글은 합자 깨짐에도
   살아남아 공짜로 쓸 수 있기 때문(없으면 LLM이 이미지로).
 - `set_chapters`: 본문 텍스트를 추출하지 않고 그림만 best-effort 추출.
 - `get_chapter_content`: 챕터 page_range를 lazy 렌더해 `page_images`로 반환.

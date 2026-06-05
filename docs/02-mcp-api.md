@@ -50,8 +50,10 @@ resume_work(output_dir: str = "", pdf_path: str = "") -> dict
 # ③ 그대로 진행 중 선택을 받아라. ③이면 allow_garbled=True로 재호출.
 # [OCR 모드] extraction_mode="ocr"이면 텍스트 품질 거부(no_text_layer/garbled)를
 # 모두 우회하고, 첫 scan_size 페이지를 JPEG로 렌더해 data.scan_page_images로 준다.
-# 목차·offset은 (깨질 수 있는) 텍스트 대신 LLM이 그 이미지를 읽어 직접 파악하고,
-# recommendations.next_step_guidance 지시에 따라 from_toc 챕터를 구성한다.
+# 서버는 챕터를 제안하지 않는다: primary_mode="analyze_toc_from_images",
+# suggested_chapters=[], 균등 청크는 chunk_fallback(목차를 못 읽을 때만)에 분리.
+# 목차·offset은 (깨질 수 있는) 텍스트 대신 LLM이 scan_page_images를 읽어 직접
+# 파악하고, next_step_guidance 지시에 따라 from_toc 챕터를 구성해 set_chapters한다.
 scan_pdf(work_id: str, scan_size: int = 30, allow_garbled: bool = False) -> dict
 
 # 각 chapter 항목 형식: {"chapter_id", "title", "page_range":[s,e],
