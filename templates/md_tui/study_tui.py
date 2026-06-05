@@ -1,27 +1,48 @@
 #!/usr/bin/env python3
 """pdf-study 학습 TUI (rich 기반).
 
-- 루트에서 실행: `python study.py` → 챕터 선택 메뉴
-- 챕터 폴더에서 실행: `cd ch1 && python study.py` → 해당 챕터로 바로 진입
+- 루트에서 실행: `python study_tui.py` → 챕터 선택 메뉴
+- 챕터 폴더에서 실행: `cd ch1 && python study_tui.py` → 해당 챕터로 바로 진입
 
 외부 의존성은 rich 하나뿐이며, pdf_study 패키지에 의존하지 않는다
-(출력 폴더에 그대로 복사되어 독립 실행되는 스크립트).
+(출력 폴더에 그대로 복사되어 독립 실행되는 스크립트). rich가 없으면
+**처음 실행 시 자동으로 설치**하므로 별도 준비 없이 바로 실행할 수 있다.
 """
 from __future__ import annotations
 
 import datetime as _dt
 import json
+import subprocess
 import sys
 from pathlib import Path
 
-try:
-    from rich.console import Console
-    from rich.markdown import Markdown
-    from rich.panel import Panel
-    from rich.prompt import Confirm, Prompt
-except ImportError:
-    sys.stderr.write("rich가 필요합니다. 설치: pip install rich\n")
-    sys.exit(1)
+
+def _ensure_rich() -> None:
+    """rich가 없으면 현재 인터프리터에 자동 설치한다 (바로 실행 가능하도록)."""
+    try:
+        import rich  # noqa: F401
+        return
+    except ImportError:
+        pass
+    print("필수 의존성 'rich'가 없어 설치합니다… (pip install rich)", flush=True)
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "rich"], check=True
+        )
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write(
+            f"rich 자동 설치 실패: {e}\n수동으로 설치 후 다시 실행하세요: "
+            f"{sys.executable} -m pip install rich\n"
+        )
+        sys.exit(1)
+
+
+_ensure_rich()
+
+from rich.console import Console  # noqa: E402
+from rich.markdown import Markdown  # noqa: E402
+from rich.panel import Panel  # noqa: E402
+from rich.prompt import Confirm, Prompt  # noqa: E402
 
 console = Console()
 

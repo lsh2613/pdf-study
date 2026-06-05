@@ -3,7 +3,7 @@
 설계 메모 (docs/05-data-schemas.md, docs/07-study-ui.md):
 - 출력 포맷 중립 JSON(chapters/, extensions/)을 읽어 챕터별 폴더로 전개.
 - summary.md = 읽기 전용(요약/핵심포인트/이미지), quiz.json = TUI 전용(4유형 문제+정답).
-- 엔진(study.py)은 출력 루트에 1벌 복사, 각 챕터엔 엔진을 호출하는 얇은 launcher.
+- 엔진(study_tui.py)은 출력 루트에 1벌 복사, 각 챕터엔 엔진을 호출하는 얇은 launcher.
 - 옵션 비활성 유형은 quiz.json에서 생략 (sub-agent도 생성하지 않으므로 빈 유형 없음).
 - 데이터 로딩은 HtmlRenderer와 동일 소스 → _load_all 재사용.
 """
@@ -151,13 +151,13 @@ class MdTuiRenderer(Renderer):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # 엔진 + launcher 템플릿 + README
-        engine_src = _TEMPLATES_DIR / "study.py"
+        engine_src = _TEMPLATES_DIR / "study_tui.py"
         launcher_src = _TEMPLATES_DIR / "chapter_launcher.py"
         readme_src = _TEMPLATES_DIR / "README.md"
         for src in (engine_src, launcher_src, readme_src):
             if not src.exists():
                 raise FileNotFoundError(f"md_tui template missing: {src}")
-        shutil.copyfile(engine_src, output_dir / "study.py")
+        shutil.copyfile(engine_src, output_dir / "study_tui.py")
         shutil.copyfile(readme_src, output_dir / "README.md")
         launcher_text = launcher_src.read_text(encoding="utf-8")
 
@@ -174,4 +174,4 @@ class MdTuiRenderer(Renderer):
                 json.dumps(_quiz_data(ch, opts), ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            (ch_dir / "study.py").write_text(launcher_text, encoding="utf-8")
+            (ch_dir / "study_tui.py").write_text(launcher_text, encoding="utf-8")

@@ -2,7 +2,7 @@
 """학습 자료 런처: 정적 파일 서빙 + 진도 read/write API.
 
 사용법:
-    python serve.py [--port 8765] [--no-browser]
+    python study_html.py [--port 8765] [--no-browser]
 """
 from __future__ import annotations
 

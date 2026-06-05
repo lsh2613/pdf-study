@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # templates 디렉터리 (이 파일과 동일 패키지의 templates/html)
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates" / "html"
 _STATIC_ASSET_FILES = ("style.css", "grading.js", "storage.js")
-_STATIC_ROOT_FILES = ("serve.py", "README.md")
+_STATIC_ROOT_FILES = ("study_html.py", "README.md")
 
 
 def _esc(s: Any) -> str:
@@ -507,5 +507,5 @@ class HtmlRenderer(Renderer):
                     encoding="utf-8",
                 )
 
-        # progress 폴더 자리만 만들어 둠 (serve.py가 첫 GET 시 생성하기도 함)
+        # progress 폴더 자리만 만들어 둠 (study_html.py가 첫 GET 시 생성하기도 함)
         (output_dir / "progress").mkdir(exist_ok=True)

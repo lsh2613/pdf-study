@@ -1,4 +1,4 @@
-"""학습 자료의 serve.py launcher 테스트 — progress API 라운드트립."""
+"""학습 자료의 study_html.py launcher 테스트 — progress API 라운드트립."""
 from __future__ import annotations
 
 import json
@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-# templates/html/serve.py를 임시 디렉토리에 복사해 실행 — output_dir 가짜로 만든다
+# templates/html/study_html.py를 임시 디렉토리에 복사해 실행 — output_dir 가짜로 만든다
 SERVE_PY = (
-    Path(__file__).resolve().parent.parent / "templates" / "html" / "serve.py"
+    Path(__file__).resolve().parent.parent / "templates" / "html" / "study_html.py"
 )
 
 
@@ -35,15 +35,15 @@ def _wait_ready(port: int, path: str = "/", timeout: float = 4.0) -> None:
             return
         except Exception:
             time.sleep(0.05)
-    raise RuntimeError("serve.py did not become ready in time")
+    raise RuntimeError("study_html.py did not become ready in time")
 
 
 @pytest.fixture
 def serve_dir(tmp_path):
-    """serve.py가 동작할 디렉토리 구성. (main.html 한 장만)"""
+    """study_html.py가 동작할 디렉토리 구성. (main.html 한 장만)"""
     d = tmp_path / "site"
     d.mkdir()
-    shutil.copy(SERVE_PY, d / "serve.py")
+    shutil.copy(SERVE_PY, d / "study_html.py")
     (d / "main.html").write_text("<html><body>ok</body></html>", encoding="utf-8")
     return d
 
@@ -52,7 +52,7 @@ def serve_dir(tmp_path):
 def serve_proc(serve_dir):
     port = _free_port()
     proc = subprocess.Popen(
-        [sys.executable, str(serve_dir / "serve.py"), "--port", str(port), "--no-browser"],
+        [sys.executable, str(serve_dir / "study_html.py"), "--port", str(port), "--no-browser"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         cwd=str(serve_dir),
     )

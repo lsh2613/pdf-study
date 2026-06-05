@@ -12,7 +12,7 @@ PDF(주로 책 스캔본)를 챕터별 요약 + 4유형 검증 문제로 변환�
 | 4 | [04-content-generation.md](./04-content-generation.md) | 4유형 문제, user_context, Sub-agent 패턴 |
 | 5 | [05-data-schemas.md](./05-data-schemas.md) | 데이터 스키마, 폴더 구조, work_id 규칙 |
 | 6 | [06-concurrency.md](./06-concurrency.md) | 동시성 처리 (병렬 모드) |
-| 7 | [07-study-ui.md](./07-study-ui.md) | serve.py, 진도 시스템, UI 동작 |
+| 7 | [07-study-ui.md](./07-study-ui.md) | study_html.py·study_tui.py, 진도 시스템, UI 동작 |
 | 8 | [08-architecture.md](./08-architecture.md) | 패키지 구조, Renderer 인터페이스, 코딩 가이드 |
 | 9 | [09-internal-flow.md](./09-internal-flow.md) | 사용자 발화 → MCP 도구 흐름 단계별, 파일·함수 매핑, 디스크 데이터 흐름 |
 

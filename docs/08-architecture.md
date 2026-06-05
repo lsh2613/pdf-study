@@ -30,11 +30,11 @@ pdf_study/
     │   ├── style.css       # 최소 스타일
     │   ├── grading.js
     │   ├── storage.js
-    │   ├── serve.py
+    │   ├── study_html.py       # 정적 서버 + 진도 API launcher (→ 출력 루트로 복사)
     │   └── README.md
     └── md_tui/
-        ├── study.py            # rich 기반 학습 TUI 엔진 (출력 루트에 복사)
-        ├── chapter_launcher.py # 챕터별 thin shim (각 ch*/study.py로 복사)
+        ├── study_tui.py        # rich 기반 학습 TUI 엔진 (출력 루트에 복사, rich 자동설치)
+        ├── chapter_launcher.py # 챕터별 thin shim (각 ch*/study_tui.py로 복사)
         └── README.md
 ```
 

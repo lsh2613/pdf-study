@@ -33,7 +33,7 @@
 ┌──────────────────────────────────────────────────────────────┐
 │ 학습 자료 정적 사이트: <output_dir>/                         │
 │   index.html / ch{N}.html (또는 main.html) / assets/ /       │
-│   images/ / serve.py / progress/                             │
+│   images/ / study_html.py / progress/                             │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -273,7 +273,7 @@ server.finalize_study(work_id, output_format="html", keep_work_dir=True, force=F
        │    - state, book_info, chapters/ch{N}.json,
        │      extensions/ch{N}.json, chapters_raw/ch{N}.json 모두 로드
        │    - state.chapters[*]에서 skip=True 인 챕터는 제외
-       ├─ _copy_assets       → style.css, storage.js, grading.js, serve.py, README.md
+       ├─ _copy_assets       → style.css, storage.js, grading.js, study_html.py, README.md
        ├─ _copy_chapter_images → images_refs를 output/images/ 로 복사
        └─ 멀티 챕터:
             - index.html(책 정보 + 챕터 카드)
@@ -285,13 +285,13 @@ server.finalize_study(work_id, output_format="html", keep_work_dir=True, force=F
 - 코드: `renderer/html_renderer.py:HtmlRenderer.render`, `_sidebar`,
   `_chapter_body`, `_page_shell`
 - next_action 응답에:
-  - `serve_command`: `cd <output_dir> && python3 serve.py`
+  - `serve_command`: `cd <output_dir> && python3 study_html.py`
   - 파일을 file://로 직접 열면 /api/progress가 동작하지 않는다는 경고
   - `Ctrl+C`로 서버 종료, 백그라운드 띄웠을 때의 `pkill` 안내
 
-### Stage 8 · 학습 — `serve.py`
+### Stage 8 · 학습 — `study_html.py`
 
-`finalize_study`가 복사한 `templates/html/serve.py`가 정적 파일 + 진도 API를
+`finalize_study`가 복사한 `templates/html/study_html.py`가 정적 파일 + 진도 API를
 제공한다.
 
 ```
@@ -328,7 +328,7 @@ POST /api/progress/<chapter_id>   → 같은 규칙
 | `prompts.py` | 4 | sub-agent KO/EN 템플릿 + workflow + chapter_ids 분리 |
 | `exa_client.py` | 5 | Exa Web Research MCP HTTP 호출 + 평문 파서 |
 | `renderer/html_renderer.py` | 7 | 정적 사이트 합성 (사이드바·완료 토글·옵션 비활성 섹션 생략) |
-| `templates/html/{style.css,storage.js,grading.js,serve.py,README.md}` | 7·8 | 학습 자료 정적 리소스 + 런처 |
+| `templates/html/{style.css,storage.js,grading.js,study_html.py,README.md}` | 7·8 | 학습 자료 정적 리소스 + 런처 |
 
 ---
 
@@ -355,9 +355,9 @@ T4  finalize_study (output_format=html)
        ├─ ch{N}.html
        ├─ images/*.png             (raw에서 복사)
        ├─ assets/{style,storage,grading}
-       ├─ serve.py, README.md
+       ├─ study_html.py, README.md
        └─ progress/                (빈 상태)
-T5  serve.py 실행
+T5  study_html.py 실행
     └─ progress/_global.json + ch{N}.json     (사용자 학습 시 누적)
 ```
 
@@ -385,7 +385,8 @@ init_work (execution_mode·extraction_mode 모두 사용자에게 물어 결정)
            → save_extension_result
   → list_pending_chapters → 실패 챕터 1회 재시도
   → finalize_study   (pending 남아 있으면 ok=False 거부, force=True로 우회)
-  → 사용자에게 serve.py 시작/종료 명령 안내 + .work 보존/삭제 여부 질문
+  → 사용자에게 실행 명령 안내(html: study_html.py 서버 / md_tui: study_tui.py TUI)
+    + .work 보존/삭제 여부 질문
     (삭제 원하면 finalize_study(keep_work_dir=False) 재호출)
 
 * 서버 재시작 등으로 work_id가 무효해졌으면:

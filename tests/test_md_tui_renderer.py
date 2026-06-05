@@ -1,6 +1,6 @@
 """MdTuiRenderer: 챕터별 폴더 + summary.md + quiz.json + launcher + 옵션 필터 검증.
 
-TUI 엔진(study.py)은 대화형이라 직접 실행하지 않고,
+TUI 엔진(study_tui.py)은 대화형이라 직접 실행하지 않고,
 순수 헬퍼(_quiz_data 채점 데이터, _chapter_sort_key)와 산출물 구조만 검증한다.
 """
 from __future__ import annotations
@@ -56,14 +56,14 @@ def _build_multi(ko_with_toc, tmp_path, *, opts=None):
 
 def test_per_chapter_folders_and_files(ko_with_toc, tmp_path):
     out, chs = _build_multi(ko_with_toc, tmp_path)
-    assert (out / "study.py").exists()
+    assert (out / "study_tui.py").exists()
     assert (out / "book.md").exists()
     assert (out / "README.md").exists()
     for c in chs:
         cid = c["chapter_id"]
         assert (out / cid / "summary.md").exists()
         assert (out / cid / "quiz.json").exists()
-        assert (out / cid / "study.py").exists()
+        assert (out / cid / "study_tui.py").exists()
 
 
 def test_book_md_links_chapters(ko_with_toc, tmp_path):
@@ -108,6 +108,6 @@ def test_disabled_types_omitted_from_quiz(ko_with_toc, tmp_path):
 
 def test_chapter_launcher_calls_engine(ko_with_toc, tmp_path):
     out, _ = _build_multi(ko_with_toc, tmp_path)
-    shim = (out / "ch1" / "study.py").read_text(encoding="utf-8")
-    assert "from study import run_chapter" in shim
+    shim = (out / "ch1" / "study_tui.py").read_text(encoding="utf-8")
+    assert "from study_tui import run_chapter" in shim
     assert "run_chapter(_here)" in shim

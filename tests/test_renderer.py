@@ -134,7 +134,7 @@ def test_assets_are_copied(ko_with_toc, tmp_path):
     _, out, _ = _build_multi(ko_with_toc, tmp_path)
     for f in ("assets/style.css", "assets/storage.js", "assets/grading.js"):
         assert (out / f).exists(), f
-    for f in ("serve.py", "README.md"):
+    for f in ("study_html.py", "README.md"):
         assert (out / f).exists(), f
 
 

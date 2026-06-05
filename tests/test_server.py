@@ -197,14 +197,15 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
     assert (out / "main.html").exists()
     assert not (out / "index.html").exists()
 
-    # next_action에 serve.py 명령 + 진도 저장 경고 + 종료 안내가 모두 있어야 한다
+    # next_action에 study_html.py 명령 + 진도 저장 경고 + 종료 안내가 모두 있어야 한다
     msg = r10["next_action"]
-    assert "serve.py" in msg
+    assert "study_html.py" in msg
     assert "http://localhost:8765" in msg
     assert "file://" in msg           # 직접 열기 금지 안내
     assert "Ctrl+C" in msg            # 종료 가이드
     assert "브라우저 탭" in msg        # 탭 닫기로는 안 꺼진다는 안내
-    assert r10["data"]["serve_command"].startswith("cd ")
+    assert r10["data"]["launch_command"].startswith("cd ")
+    assert "study_html.py" in r10["data"]["launch_command"]
     assert r10["data"]["entry_page"] == "main.html"
 
 
@@ -254,11 +255,15 @@ def test_md_tui_renderer_finalizes_ok(tmp_path, ko_short):
     _check_envelope(r)
     assert r["ok"] is True, r
     out = tmp_path / "out"
-    assert (out / "study.py").exists()
+    assert (out / "study_tui.py").exists()
     assert (out / "book.md").exists()
     assert (out / "ch1" / "summary.md").exists()
     assert (out / "ch1" / "quiz.json").exists()
-    assert (out / "ch1" / "study.py").exists()
+    assert (out / "ch1" / "study_tui.py").exists()
+    # md_tui 안내는 study_tui.py 실행 + rich 자동설치 언급
+    assert "study_tui.py" in r["next_action"]
+    assert "rich" in r["next_action"]
+    assert r["data"]["entry_script"] == "study_tui.py"
 
 
 def test_finalize_blocks_on_pending_then_force(tmp_path, ko_short):

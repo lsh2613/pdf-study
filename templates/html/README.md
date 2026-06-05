@@ -1,7 +1,7 @@
 # 학습 자료
 
 ```bash
-python serve.py
+python study_html.py
 ```
 
 기본 포트 8765. 자동으로 브라우저가 열립니다. `--no-browser`로 끌 수 있습니다.

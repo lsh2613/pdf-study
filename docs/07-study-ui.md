@@ -1,4 +1,4 @@
-# 07. 학습 UI & serve.py
+# 07. 학습 UI & study_html.py
 
 ## index.html 책 정보 섹션
 
@@ -29,7 +29,7 @@
 
 단일 챕터일 때는 `index.html` 생략하고 `main.html` 상단에 동일한 책 정보 섹션을 둔다.
 
-## serve.py 완성본
+## study_html.py 완성본 (HTML 출력용 launcher)
 
 ```python
 #!/usr/bin/env python3
@@ -154,13 +154,15 @@ HTML과 동일한 중립 JSON(chapters/, extensions/)에서 렌더되며, 선택
 ### 실행
 
 ```
-pip install rich          # 의존성
-python study.py           # 루트: 챕터 선택 메뉴
-cd ch1 && python study.py # 특정 챕터로 바로 진입
+python study_tui.py           # 루트: 챕터 선택 메뉴
+cd ch1 && python study_tui.py # 특정 챕터로 바로 진입
 ```
 
-`study.py`(rich 엔진)는 출력 루트에 1벌, 각 `ch*/study.py`는 그 엔진을 호출하는
-얇은 shim이다. 엔진은 `pdf_study` 패키지에 의존하지 않는 독립 스크립트다.
+별도 준비 불필요 — 의존성 `rich`가 없으면 `study_tui.py`가 **첫 실행 시 자동으로
+설치**(`pip install rich`)한 뒤 바로 진행한다.
+
+`study_tui.py`(rich 엔진)는 출력 루트에 1벌, 각 `ch*/study_tui.py`는 그 엔진을
+호출하는 얇은 shim이다. 엔진은 `pdf_study` 패키지에 의존하지 않는 독립 스크립트다.
 
 ### TUI 동작
 

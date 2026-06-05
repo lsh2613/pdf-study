@@ -528,9 +528,11 @@ def finalize_study(
       (조용한 부분 렌더링 방지). 일부 챕터가 끝내 실패해 부분 결과라도
       만들고 싶을 때만 force=True를 사용하세요.
 
-    응답의 next_action에 학습 자료 서버 기동 명령(`python serve.py`)이
-    포함됩니다. **이 서버를 띄워야 답안/완료 토글이 progress/ 폴더에
-    저장**되며, 파일을 직접 열면(file://) 진도 API가 동작하지 않습니다.
+    응답의 next_action에 학습 자료 실행 명령이 포함됩니다.
+    - html: `python3 study_html.py`(진도 API 서버). 이 서버를 띄워야 답안/완료
+      토글이 progress/ 폴더에 저장되며, 파일을 직접 열면(file://) 동작 안 함.
+    - md_tui: `python3 study_tui.py`(터미널 TUI). rich가 없으면 첫 실행 시 자동
+      설치되며, 진도는 각 챕터 progress.json에 직접 저장(서버 불필요).
     """
     if not output_format:
         return _err(
@@ -577,14 +579,50 @@ def finalize_study(
         if work_dir.exists():
             shutil.rmtree(work_dir)
 
-    serve_cmd = f"cd {output_dir} && python3 serve.py"
+    # 중간 데이터(.work) 정리 안내 — 두 포맷 공통
+    work_cleanup = (
+        "\n\n[작업 데이터 정리] 중간 작업 폴더(.work/: 페이지 이미지·raw·상태 파일)가 "
+        "보존되어 있습니다"
+        + (" (현재 keep_work_dir=False라 이미 삭제됨)." if not keep_work_dir
+           else f" ({workspace.get_work_dir(work_id)}).")
+        + f" 사용자에게 이 중간 데이터를 삭제할지 보존할지 물어보세요. 삭제를 원하면 "
+        f"finalize_study(work_id=\"{work_id}\", output_format=\"{output_format}\", "
+        "keep_work_dir=False)로 다시 호출하면 .work/가 제거됩니다(재실행 시 캐시로 "
+        "쓰려면 보존)."
+    )
+
+    if output_format == "md_tui":
+        # 터미널 TUI — 서버 없음. study_tui.py가 rich를 자동 설치 후 실행.
+        launch_cmd = f"cd {output_dir} && python3 study_tui.py"
+        data = {
+            "output_dir": str(output_dir),
+            "format": output_format,
+            "work_dir_kept": keep_work_dir,
+            "launch_command": launch_cmd,
+            "entry_script": "study_tui.py",
+        }
+        next_action = (
+            f"학습 자료(Markdown + 터미널 TUI)가 {output_dir}에 만들어졌습니다.\n"
+            f"\n[학습 시작] 다음 명령을 실행하세요:\n"
+            f"  {launch_cmd}\n"
+            f"루트에서 실행하면 챕터 선택 메뉴가, `cd ch1 && python3 study_tui.py`로 "
+            f"실행하면 그 챕터로 바로 진입합니다. 필수 의존성 `rich`가 없으면 "
+            f"**첫 실행 시 자동으로 설치**되니 별도 준비가 필요 없습니다.\n"
+            f"진도(답안·완료·객관식 점수)는 각 챕터 폴더의 progress.json에 자동 "
+            f"저장되어, 다시 실행하면 이어서 풀 수 있습니다(서버 불필요)."
+            + work_cleanup
+        )
+        return _ok(data, next_action=next_action)
+
+    # html — 정적 사이트 + 진도 API 서버(study_html.py)
+    launch_cmd = f"cd {output_dir} && python3 study_html.py"
     entry = "index.html" if (output_dir / "index.html").exists() else "main.html"
     return _ok(
         {
             "output_dir": str(output_dir),
             "format": output_format,
             "work_dir_kept": keep_work_dir,
-            "serve_command": serve_cmd,
+            "launch_command": launch_cmd,
             "entry_page": entry,
             "default_url": "http://localhost:8765/" + entry,
         },
@@ -592,7 +630,7 @@ def finalize_study(
             f"학습 자료가 {output_dir}에 만들어졌습니다.\n"
             f"\n[서버 시작] 진도 저장과 완료 토글이 동작하려면 다음 명령을 "
             f"실행하세요:\n"
-            f"  {serve_cmd}\n"
+            f"  {launch_cmd}\n"
             f"기본 포트는 8765이며 브라우저가 자동으로 "
             f"http://localhost:8765/{entry} 를 엽니다. 파일을 더블클릭"
             f"(file://)으로 열면 /api/progress 호출이 막혀 답안이 저장되지 "
@@ -600,15 +638,8 @@ def finalize_study(
             f"\n[서버 종료] 서버를 실행한 터미널에서 Ctrl+C 를 누르세요. "
             f"브라우저 탭/창을 닫는 것만으로는 서버가 꺼지지 않습니다. "
             f"백그라운드로 띄웠다면 `lsof -i :8765` 로 PID를 찾아 `kill <pid>` "
-            f"하거나, `pkill -f \"serve.py --port 8765\"` 로 종료할 수 있습니다.\n"
-            f"\n[작업 데이터 정리] 중간 작업 폴더(.work/: 페이지 이미지·raw·"
-            f"상태 파일)가 보존되어 있습니다"
-            + (" (현재 keep_work_dir=False라 이미 삭제됨)." if not keep_work_dir
-               else f" ({workspace.get_work_dir(work_id)}).") +
-            f" 사용자에게 이 중간 데이터를 삭제할지 보존할지 물어보세요. "
-            f"삭제를 원하면 finalize_study(work_id=\"{work_id}\", "
-            f"output_format=\"{output_format}\", keep_work_dir=False)로 다시 "
-            f"호출하면 .work/가 제거됩니다(재실행 시 캐시로 쓰려면 보존)."
+            f"하거나, `pkill -f \"study_html.py --port 8765\"` 로 종료할 수 있습니다."
+            + work_cleanup
         ),
     )
 

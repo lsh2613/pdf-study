@@ -35,7 +35,7 @@ study_output/
 │   ├── grading.js            # (자리표시 — 채점/입력 hook은 storage.js와 통합)
 │   └── storage.js            # progress/ API 호출 + 답안 복원 + 완료 토글 + IntersectionObserver(last_position)
 ├── progress/                 # 학습 시 자동 생성 (_global.json + ch{N}.json)
-├── serve.py                  # launcher
+├── study_html.py             # launcher (정적 서버 + 진도 API)
 └── README.md                 # 사용 안내
 ```
 
@@ -46,19 +46,20 @@ study_output/
 ```
 study_output/
 ├── book.md                   # 책 정보 + 챕터 목차 (각 ch*/summary.md로 링크)
-├── study.py                  # 학습 TUI 엔진 (rich) — 루트 실행 시 챕터 선택 메뉴
+├── study_tui.py              # 학습 TUI 엔진 (rich) — 루트 실행 시 챕터 선택 메뉴
+│                             #   rich 없으면 첫 실행 시 자동 설치
 ├── README.md                 # 실행 안내
 ├── ch1/
 │   ├── summary.md            # 요약 (읽기 전용: 제목·요약·핵심포인트·이미지)
 │   ├── quiz.json             # 4유형 문제+정답 (TUI 전용)
 │   ├── images/*.png          # 이 챕터 이미지
-│   ├── study.py              # 이 챕터로 바로 진입하는 thin launcher → 루트 엔진 호출
+│   ├── study_tui.py          # 이 챕터로 바로 진입하는 thin launcher → 루트 엔진 호출
 │   └── progress.json         # TUI 풀이 기록 (실행 시 생성)
 ├── ch2/ ...
 ```
 
 - `summary.md`는 읽기 전용, 문제 풀이는 `quiz.json`을 로드하는 TUI가 담당 (역할 분리).
-- `ch*/study.py`는 엔진을 복제하지 않고 루트 `study.py`를 호출하는 얇은 shim이다.
+- `ch*/study_tui.py`는 엔진을 복제하지 않고 루트 `study_tui.py`를 호출하는 얇은 shim이다.
 - `progress.json`은 챕터별이며 아래 `progress/ch{N}.json`과 동일 스키마(answers/mc_score/completed)를 따른다 (HTTP 대신 TUI가 파일에 직접 기록).
 
 ## 데이터 스키마
@@ -207,7 +208,7 @@ study_output/
 }
 ```
 
-### progress/ (학습 시 serve.py가 생성/관리)
+### progress/ (학습 시 study_html.py가 생성/관리)
 
 **progress/_global.json** — 전역 상태, 자동 포커싱용
 ```json
