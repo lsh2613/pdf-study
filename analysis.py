@@ -339,7 +339,18 @@ def scan_pdf_impl(
         )
 
         language = lang.detect_language(scanned_text)
-        toc_result = toc_finder.find_toc_candidates(scanned_text)
+        if ocr_mode:
+            # OCR 모드: 목차 분석은 메인 에이전트가 scan_page_images(페이지 이미지)로
+            # 직접 수행한다. 스캔본·깨진 텍스트를 스크립트로 파싱하면 쓰레기 항목만
+            # 나와 에이전트를 오히려 헷갈리게 하므로 toc_finder를 돌리지 않는다.
+            toc_result = {
+                "has_toc_keyword": False,
+                "entries": [],
+                "is_candidate": False,
+                "note": "ocr 모드: 목차는 메인 에이전트가 scan_page_images로 직접 분석",
+            }
+        else:
+            toc_result = toc_finder.find_toc_candidates(scanned_text)
 
         # 인쇄 페이지번호 ↔ PDF 물리 인덱스 오프셋 측정 (꼬리말 번호 다수결)
         offset_info = reader.detect_page_offset(doc)

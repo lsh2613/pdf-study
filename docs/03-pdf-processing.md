@@ -20,10 +20,13 @@
 - `reader.render_pages(doc, start, end, dir, dpi=150, quality=80)` 가 페이지를
   **JPEG**로 렌더(`.work/pdf_analysis/pages/p{N}.jpg`, 페이지 단위라 scan↔챕터
   재사용·캐시). PyMuPDF `get_pixmap` + PIL만 사용.
-- `scan_pdf`: 첫 N페이지만 렌더(`scan_page_images`)해 LLM이 목차·offset·언어를
-  읽는다. 텍스트 품질 거부(`no_text_layer`/`garbled`)는 **우회**(스캔본이 대상).
-  단 offset·언어는 텍스트 레이어 best-effort로도 시도한다 — 꼬리말 **숫자**와
-  한글은 합자 깨짐에도 살아남아 공짜로 쓸 수 있기 때문(없으면 LLM이 이미지로).
+- `scan_pdf`: 첫 N페이지만 렌더(`scan_page_images`)해 **목차는 메인 에이전트가
+  그 이미지로 직접 분석**한다(`toc_finder` 스크립트 파싱은 OCR 모드에서 돌리지
+  않음 — 깨진 텍스트에선 쓰레기 후보만 나와 에이전트를 헷갈리게 하므로
+  `toc_candidates`는 빈 후보 + note로 반환). 텍스트 품질 거부
+  (`no_text_layer`/`garbled`)는 **우회**(스캔본이 대상). 단 offset·언어는 텍스트
+  레이어 best-effort로도 시도한다 — 꼬리말 **숫자**와 한글은 합자 깨짐에도
+  살아남아 공짜로 쓸 수 있기 때문(없으면 LLM이 이미지로).
 - `set_chapters`: 본문 텍스트를 추출하지 않고 그림만 best-effort 추출.
 - `get_chapter_content`: 챕터 page_range를 lazy 렌더해 `page_images`로 반환.
 - 문제 개수·요약 길이 스케일: sub-agent가 OCR로 읽어낸 글자수로 기존 표를 적용.

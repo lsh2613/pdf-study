@@ -71,12 +71,18 @@ def test_scan_pdf_ocr_mode_renders_pages_and_bypasses_rejection(
 
 
 def test_scan_pdf_ocr_mode_ignores_text_toc(make_workspace, ko_with_toc):
-    """OCR 모드는 텍스트 목차 후보를 무시하고 페이지 수 기반으로 라우팅한다."""
+    """OCR 모드는 스크립트 목차 파싱을 건너뛰고(메인 에이전트가 이미지로 분석),
+    페이지 수 기반으로 라우팅한다."""
     wid, _ = make_workspace(ko_with_toc, extraction_mode="ocr")
     out = analysis.scan_pdf_impl(wid)
     # 28p < 50 → single_unit (텍스트 목차가 있어도 from_toc로 안 감)
     assert out["recommendations"]["primary_mode"] != "from_toc"
     assert out["scan_page_images"]
+    # toc_finder를 돌리지 않음 — toc_candidates는 빈 후보 + note
+    toc = out["toc_candidates"]
+    assert toc["is_candidate"] is False
+    assert toc["entries"] == []
+    assert "메인 에이전트" in toc.get("note", "")
 
 
 def test_set_chapters_extracts_text_and_filters_images(make_workspace, ko_with_toc):
