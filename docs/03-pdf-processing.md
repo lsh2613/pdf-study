@@ -75,7 +75,12 @@
 
 오프셋은 `state.json`·`outline.json`·`recommendations`에 실리고, 각
 suggested_chapter에 `page_range`(PDF 물리)와 `printed_range`(책, 물리−offset,
-front matter면 None)가 함께 담긴다. `next_step_guidance`가 LLM에 두 번호
+front matter면 None)가 함께 담긴다. recommendations에는 `physical_range`
+([1, page_count])와 `printed_range_available`([1, page_count−offset], 이 파일에
+실제 존재하는 책 페이지 범위)도 실린다 — **발췌본**(책 일부만 담긴 PDF인데
+목차엔 전체 책 챕터가 다 적힌 경우) 대응용. 서버의 `_toc_entries_to_chapters`는
+시작 물리 페이지가 page_count를 넘는 목차 항목을 page_count로 뭉개지 않고
+**드롭**하고, OCR 모드 next_step_guidance도 LLM에 범위 밖 챕터 제외를 지시한다. `next_step_guidance`가 LLM에 두 번호
 모두 표기 + 3택(이대로/직접입력(PDF 페이지)/청크) + 경계 의심 시 본문 대조
 보정을 지시한다. **set_chapters는 항상 물리 page_range 기준**, printed_range는
 표시용 옵셔널 메타다.

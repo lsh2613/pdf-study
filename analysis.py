@@ -54,9 +54,14 @@ def _with_offset_meta(
     reco: dict[str, Any],
     page_offset: int | None,
     offset_confidence: str,
+    page_count: int,
     ocr_mode: bool = False,
 ) -> dict[str, Any]:
     """비거부 recommendation에 offset 메타 + printed_range + 3택 안내 주입.
+
+    physical_range(이 PDF의 물리 페이지 범위)와 printed_range_available(이 파일에
+    실제 존재하는 책 페이지 범위 = [1, page_count - offset])을 함께 실어, LLM이
+    '발췌본인데 목차엔 전체 책 챕터가 다 적힌' 경우 범위 밖 챕터를 제외하도록 한다.
 
     ocr_mode=True면 서버가 본문 텍스트를 신뢰하지 않으므로(스캔본),
     목차·offset을 scan_page_images(첫 N페이지 이미지)에서 직접 읽으라는
@@ -67,16 +72,39 @@ def _with_offset_meta(
     reco["offset_confidence"] = offset_confidence
     reco["user_choices"] = ["proceed", "manual_pdf_pages", "chunks"]
     off_known = page_offset is not None
+    reco["physical_range"] = [1, page_count]
+    # 이 파일에 실제 존재하는 책(인쇄) 페이지 범위. offset 미측정이면 null.
+    reco["printed_range_available"] = (
+        [1, page_count - page_offset] if off_known else None
+    )
+
+    # 발췌본(부분 PDF) 경고 — 두 모드 공통. 목차에 더 많은 챕터가 적혀 있어도
+    # 이 파일의 물리 페이지를 벗어나는 챕터는 제외해야 한다.
+    excerpt_note = (
+        "⚠️ 이 PDF는 더 큰 책의 **일부(발췌본)**일 수 있습니다"
+        + (f" — 실제 담긴 책 페이지는 약 p.1–{page_count - page_offset}뿐입니다. "
+           "목차에 그 뒤 챕터가 더 적혀 있어도, 시작 책페이지가 이 범위를 넘으면 "
+           "이 파일엔 없는 것이니 **그 챕터는 제외**하세요. 포함되는 마지막 챕터의 "
+           f"끝 page_range는 PDF 마지막 페이지({page_count})로 둡니다. "
+           if off_known else
+           ". 목차의 챕터 중 이 PDF의 물리 페이지를 벗어나는 것은 제외하세요. ")
+    )
+
     ocr_prefix = (
         "[OCR 모드] 이 PDF는 텍스트를 신뢰하지 않고 페이지 이미지를 직접 읽습니다. "
         "응답의 scan_page_images(첫 N페이지 JPEG 경로)를 먼저 읽어 ① 목차가 있으면 "
-        "제목과 책 페이지번호를 추출해 from_toc 챕터를 직접 구성하고(아래 "
-        "suggested_chapters의 청크는 목차가 없을 때만 사용), ② 꼬리말 인쇄번호와 "
-        "물리 페이지를 비교해 offset(물리 = 책 + offset)을 추정하세요"
+        "**최상위 챕터 항목(예: '01. 소개', '02. 설치와 설정')만** 골라 각 항목의 "
+        "책 페이지번호를 읽으세요(하위 절 '1.1', '2.1.1'은 챕터가 아니니 무시). "
+        "제목·페이지번호가 다른 줄에 있을 수 있습니다. 책 페이지 → 물리 = 책 + offset "
+        "으로 변환해 from_toc 챕터를 구성하세요(아래 suggested_chapters의 청크는 "
+        "목차를 못 읽을 때만 사용). ② 꼬리말 인쇄번호와 물리 페이지를 비교해 "
+        "offset(물리 = 책 + offset)을 검증·추정하세요"
         + (f" (서버 텍스트 레이어 추정값 {page_offset}을 참고하되 이미지로 검증). "
            if off_known else " (서버가 offset을 못 구했으니 이미지로 직접 추정). ")
         + "또한 본문 언어를 파악해 set_chapters(language=\"ko\"|\"en\")로 전달하세요. "
-    ) if ocr_mode else ""
+        + excerpt_note
+    ) if ocr_mode else excerpt_note
+
     reco["next_step_guidance"] = ocr_prefix + (
         "분석된 챕터를 사용자에게 보여줄 때 각 챕터를 "
         "'PDF p.{start}-{end} (책 p.{printed})' 형식으로 **두 번호 모두** 표기하세요"
@@ -191,7 +219,7 @@ def _build_recommendations(
                 f"chunks ({DEFAULT_CHUNK_SIZE}p 단위 균등 분할)",
                 "single_unit (전체 1챕터)",
             ],
-        }, page_offset, offset_confidence, ocr_mode)
+        }, page_offset, offset_confidence, page_count, ocr_mode)
 
     if page_count < SHORT_PDF_THRESHOLD:
         suggested = [{
@@ -206,7 +234,7 @@ def _build_recommendations(
             "primary_reason": f"짧은 PDF({page_count}p)이므로 전체를 1챕터로 처리합니다.",
             "suggested_chapters": suggested,
             "alternatives": [f"chunks ({DEFAULT_CHUNK_SIZE}p 단위)"],
-        }, page_offset, offset_confidence, ocr_mode)
+        }, page_offset, offset_confidence, page_count, ocr_mode)
 
     if page_count >= LARGE_PDF_THRESHOLD:
         suggested = chapter_mod.make_chunks(page_count, DEFAULT_CHUNK_SIZE)
@@ -221,7 +249,7 @@ def _build_recommendations(
             ),
             "suggested_chapters": suggested,
             "alternatives": ["from_toc (사용자가 목차 직접 입력)"],
-        }, page_offset, offset_confidence, ocr_mode)
+        }, page_offset, offset_confidence, page_count, ocr_mode)
 
     # 50 ≤ page_count < 200 & 목차 없음 → 사용자 의사 확인 권장
     suggested = chapter_mod.make_chunks(page_count, DEFAULT_CHUNK_SIZE)
@@ -238,7 +266,7 @@ def _build_recommendations(
             "single_unit (전체 1챕터)",
             f"chunks ({DEFAULT_CHUNK_SIZE}p 단위)",
         ],
-    }, page_offset, offset_confidence, ocr_mode)
+    }, page_offset, offset_confidence, page_count, ocr_mode)
 
 
 def _toc_entries_to_chapters(
@@ -251,14 +279,20 @@ def _toc_entries_to_chapters(
     offset이 주어지면 물리 = 인쇄 + offset 로 보정한다. None이면 인쇄번호를
     물리로 간주(레거시 폴백) — 이 경우 next_step_guidance가 LLM에 본문 대조
     검증을 지시한다.
+
+    **발췌본 처리**: 시작 물리 페이지가 page_count를 넘는 항목은 이 파일에 없는
+    챕터(목차엔 전체 책 챕터가 다 적힘)이므로 page_count로 뭉개지 않고 **드롭**한다.
+    그렇게 살아남은 마지막 챕터의 끝은 page_count로 둔다.
     """
     off = offset or 0
+    # 물리 시작이 파일 범위 안(≤ page_count)인 항목만 남긴다.
+    in_range = [e for e in entries if int(e["page"]) + off <= page_count]
     chapters: list[dict[str, Any]] = []
-    for i, e in enumerate(entries):
-        start = max(1, min(int(e["page"]) + off, page_count))
+    for i, e in enumerate(in_range):
+        start = max(1, int(e["page"]) + off)
         # 다음 entry의 시작 - 1 까지. 마지막은 page_count.
-        if i + 1 < len(entries):
-            next_start = max(1, min(int(entries[i + 1]["page"]) + off, page_count))
+        if i + 1 < len(in_range):
+            next_start = max(1, int(in_range[i + 1]["page"]) + off)
             end = max(start, next_start - 1)
         else:
             end = page_count

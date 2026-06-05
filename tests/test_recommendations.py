@@ -96,6 +96,36 @@ def test_from_toc_applies_offset_printed_to_physical():
     assert chs[2]["printed_range"][0] == 52
     assert r["page_offset"] == 18
     assert r["offset_confidence"] == "high"
+    # 발췌본 메타: 이 파일에 실제 존재하는 책 페이지 범위 = [1, 93-18=75]
+    assert r["physical_range"] == [1, 93]
+    assert r["printed_range_available"] == [1, 75]
+
+
+def test_from_toc_drops_chapters_beyond_excerpt():
+    """발췌본: 목차엔 전체 책 챕터가 다 있어도, 물리 범위를 넘는 챕터는 드롭.
+
+    Real MySQL 발췌본 패턴 — 파일은 책 1~75p(PDF 19~93)만, 목차엔 04장(책 76+)
+    이후가 더 적혀 있다. offset 18 기준 물리 시작이 93을 넘는 항목은 제외돼야 함.
+    """
+    entries = [
+        {"title": "01 소개", "page": 1},      # 물리 19  (포함)
+        {"title": "02 설치", "page": 6},      # 물리 24  (포함)
+        {"title": "03 권한", "page": 52},     # 물리 70  (포함)
+        {"title": "04 아키텍처", "page": 76},  # 물리 94 > 93 → 드롭
+        {"title": "08 인덱스", "page": 200},   # 물리 218 → 드롭
+    ]
+    r = analysis._build_recommendations(
+        page_count=93,
+        toc_result=_toc(True, entries),
+        text_quality="high",
+        page_offset=18,
+        offset_confidence="high",
+    )
+    chs = r["suggested_chapters"]
+    assert len(chs) == 3                       # 04·08 제외
+    assert [c["title"] for c in chs] == ["01 소개", "02 설치", "03 권한"]
+    assert chs[-1]["page_range"] == [70, 93]   # 마지막 챕터 끝 = page_count
+    assert r["printed_range_available"] == [1, 75]
 
 
 def test_chunks_printed_range_marks_front_matter_none():

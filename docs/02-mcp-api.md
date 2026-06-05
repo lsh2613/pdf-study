@@ -36,9 +36,14 @@ resume_work(output_dir: str = "", pdf_path: str = "") -> dict
 
 # 페이지 오프셋: data.recommendations에 page_offset(물리=책+offset),
 # offset_confidence(high/low/none), 각 suggested_chapter의 page_range(PDF 물리)·
-# printed_range(책, null=front matter), user_choices, next_step_guidance가 담긴다.
+# printed_range(책, null=front matter), physical_range([1,page_count]),
+# printed_range_available(이 파일에 실제 있는 책 페이지 [1, page_count-offset]),
+# user_choices, next_step_guidance가 담긴다.
 # next_step_guidance를 따라 챕터를 PDF·책 페이지 둘 다 표기해 보여주고 반드시
 # ① 이대로 진행 ② 직접 입력(반드시 PDF 물리 페이지로) ③ 청크 중 선택을 받아라.
+# ※ 발췌본: 목차에 책 전체 챕터가 적혀 있어도, 시작 책페이지가
+#   printed_range_available을 넘는 챕터는 이 파일에 없으므로 제외한다(서버의
+#   from_toc도 범위 밖 항목을 드롭). 포함된 마지막 챕터 끝은 page_count.
 # 인코딩이 깨진(모지바케) PDF면 ok=False로 거부하고
 # data.recommendations.text_sample에 깨진 텍스트 일부(≤600자)를 담는다.
 # 이를 사용자에게 보여주고 ① 무손실 재추출(qpdf) ② OCR(ocrmypdf)
