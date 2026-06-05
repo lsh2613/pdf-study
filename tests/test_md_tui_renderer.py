@@ -111,3 +111,62 @@ def test_chapter_launcher_calls_engine(ko_with_toc, tmp_path):
     shim = (out / "ch1" / "study_tui.py").read_text(encoding="utf-8")
     assert "from study_tui import run_chapter" in shim
     assert "run_chapter(_here)" in shim
+
+
+# --- rich 미설치 평문 폴백 셰임 --------------------------------------------
+
+def _load_study_tui():
+    import importlib.util
+    from pathlib import Path
+    p = Path(__file__).resolve().parent.parent / "templates" / "md_tui" / "study_tui.py"
+    spec = importlib.util.spec_from_file_location("study_tui_under_test", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_plain_console_shims_run_without_rich(monkeypatch, capsys):
+    """rich 없이도 동작하도록 평문 셰임이 마크업 제거 + 입력 처리를 한다."""
+    m = _load_study_tui()
+    console, Markdown, Panel, Prompt, Confirm = m._plain_console_shims()
+
+    # 인라인 마크업 태그 제거
+    console.print("[bold]제목[/bold] 본문")
+    out = capsys.readouterr().out
+    assert "제목 본문" in out and "[bold]" not in out
+
+    # Markdown / Panel 평문 출력
+    console.print(Markdown("# 헤더\n내용"))
+    console.print(Panel("패널본문", title="해설"))
+    out = capsys.readouterr().out
+    assert "헤더" in out and "패널본문" in out and "해설" in out
+
+    # Prompt.ask: 잘못된 입력은 재요청, choices 검증
+    inputs = iter(["x", "2"])
+    monkeypatch.setattr("builtins.input", lambda *a, **k: next(inputs))
+    assert Prompt.ask("선택", choices=["1", "2"]) == "2"
+
+    # Confirm.ask: y/빈입력(default)
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "y")
+    assert Confirm.ask("진행?", default=False) is True
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "")
+    assert Confirm.ask("진행?", default=True) is True
+
+
+def test_plain_mode_run_chapter_end_to_end(tmp_path, monkeypatch, capsys):
+    """rich 셰임으로 실제 엔진(run_chapter)이 끝까지 도는지 검증 (요약 읽기→종료)."""
+    m = _load_study_tui()
+    console, Markdown, Panel, Prompt, Confirm = m._plain_console_shims()
+    for name, obj in (("console", console), ("Markdown", Markdown),
+                      ("Panel", Panel), ("Prompt", Prompt), ("Confirm", Confirm)):
+        monkeypatch.setattr(m, name, obj)
+
+    ch = tmp_path / "ch1"
+    ch.mkdir()
+    (ch / "summary.md").write_text("# 제목\n본문내용", encoding="utf-8")
+    (ch / "quiz.json").write_text('{"title":"T","questions":{}}', encoding="utf-8")
+
+    inputs = iter(["r", "q"])  # 요약 읽기 → 종료
+    monkeypatch.setattr("builtins.input", lambda *a, **k: next(inputs))
+    m.run_chapter(ch)  # 예외 없이 종료해야 함
+    assert "본문내용" in capsys.readouterr().out

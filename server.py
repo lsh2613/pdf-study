@@ -531,8 +531,9 @@ def finalize_study(
     응답의 next_action에 학습 자료 실행 명령이 포함됩니다.
     - html: `python3 study_html.py`(진도 API 서버). 이 서버를 띄워야 답안/완료
       토글이 progress/ 폴더에 저장되며, 파일을 직접 열면(file://) 동작 안 함.
-    - md_tui: `python3 study_tui.py`(터미널 TUI). rich가 없으면 첫 실행 시 자동
-      설치되며, 진도는 각 챕터 progress.json에 직접 저장(서버 불필요).
+    - md_tui: `python3 study_tui.py`(터미널 TUI). rich가 없으면 자동 설치 시도,
+      불가능한 환경이면 평문 모드로 폴백(항상 실행). 진도는 각 챕터
+      progress.json에 직접 저장(서버 불필요).
     """
     if not output_format:
         return _err(
@@ -606,8 +607,9 @@ def finalize_study(
             f"\n[학습 시작] 다음 명령을 실행하세요:\n"
             f"  {launch_cmd}\n"
             f"루트에서 실행하면 챕터 선택 메뉴가, `cd ch1 && python3 study_tui.py`로 "
-            f"실행하면 그 챕터로 바로 진입합니다. 필수 의존성 `rich`가 없으면 "
-            f"**첫 실행 시 자동으로 설치**되니 별도 준비가 필요 없습니다.\n"
+            f"실행하면 그 챕터로 바로 진입합니다. 의존성 `rich`는 없으면 자동 설치를 "
+            f"시도하고, 설치가 불가능한 환경이면 평문 모드로 폴백하므로 **어떤 "
+            f"환경에서도 별도 준비 없이 실행**됩니다.\n"
             f"진도(답안·완료·객관식 점수)는 각 챕터 폴더의 progress.json에 자동 "
             f"저장되어, 다시 실행하면 이어서 풀 수 있습니다(서버 불필요)."
             + work_cleanup

@@ -4,47 +4,147 @@
 - 루트에서 실행: `python study_tui.py` → 챕터 선택 메뉴
 - 챕터 폴더에서 실행: `cd ch1 && python study_tui.py` → 해당 챕터로 바로 진입
 
-외부 의존성은 rich 하나뿐이며, pdf_study 패키지에 의존하지 않는다
-(출력 폴더에 그대로 복사되어 독립 실행되는 스크립트). rich가 없으면
-**처음 실행 시 자동으로 설치**하므로 별도 준비 없이 바로 실행할 수 있다.
+pdf_study 패키지에 의존하지 않는 독립 스크립트(출력 폴더에 그대로 복사됨).
+의존성 rich는 **있으면 사용, 없으면 자동 설치 시도, 그래도 안 되면(pip 부재·
+오프라인·권한·externally-managed 환경 등) 평문 모드로 폴백**한다 — 어떤
+환경에서도 별도 준비 없이 실행된다.
 """
 from __future__ import annotations
 
 import datetime as _dt
 import json
+import re as _re
 import subprocess
 import sys
 from pathlib import Path
 
 
-def _ensure_rich() -> None:
-    """rich가 없으면 현재 인터프리터에 자동 설치한다 (바로 실행 가능하도록)."""
+def _try_import_rich() -> bool:
     try:
         import rich  # noqa: F401
-        return
+        return True
     except ImportError:
-        pass
-    print("필수 의존성 'rich'가 없어 설치합니다… (pip install rich)", flush=True)
-    try:
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "rich"], check=True
+        return False
+
+
+def _install_rich() -> bool:
+    """rich 자동 설치 시도 (여러 전략). 성공해서 import 가능하면 True."""
+    import importlib
+    strategies = (
+        [sys.executable, "-m", "pip", "install", "rich"],
+        [sys.executable, "-m", "pip", "install", "--user", "rich"],
+    )
+    for args in strategies:
+        try:
+            subprocess.run(args, check=True)
+        except Exception:  # noqa: BLE001  (pip 없음·오프라인·권한·PEP668 등 무엇이든)
+            continue
+        importlib.invalidate_caches()
+        if _try_import_rich():
+            return True
+    return False
+
+
+# rich가 없으면 자동 설치를 시도하고, 그래도 안 되면(pip 부재·오프라인·권한·
+# externally-managed 환경 등) **평문 모드로 폴백**해 어떤 환경에서도 실행되게 한다.
+_HAS_RICH = _try_import_rich()
+if not _HAS_RICH:
+    print("필수 의존성 'rich'가 없어 설치를 시도합니다… (pip install rich)", flush=True)
+    _HAS_RICH = _install_rich()
+    if not _HAS_RICH:
+        print(
+            "rich 설치에 실패해 평문 모드로 진행합니다(기능은 동일). 더 보기 좋은 "
+            "화면을 원하면 'pip install rich' 후 다시 실행하세요.",
+            flush=True,
         )
-    except Exception as e:  # noqa: BLE001
-        sys.stderr.write(
-            f"rich 자동 설치 실패: {e}\n수동으로 설치 후 다시 실행하세요: "
-            f"{sys.executable} -m pip install rich\n"
-        )
-        sys.exit(1)
 
 
-_ensure_rich()
+def _plain_console_shims():
+    """rich 미설치 시 쓰는 평문 셰임 (Console/Markdown/Panel/Prompt/Confirm).
 
-from rich.console import Console  # noqa: E402
-from rich.markdown import Markdown  # noqa: E402
-from rich.panel import Panel  # noqa: E402
-from rich.prompt import Confirm, Prompt  # noqa: E402
+    study_tui가 실제로 쓰는 rich API 표면만 최소 흉내 낸다. 인라인 마크업
+    태그([bold] 등)는 제거하고, Markdown/Panel은 평문으로 출력한다.
+    """
+    _TAG = _re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9 _#]*\]")
 
-console = Console()
+    def _strip(s):
+        return _TAG.sub("", s) if isinstance(s, str) else s
+
+    class _Markdown:
+        def __init__(self, text):
+            self.text = str(text)
+
+    class _Panel:
+        def __init__(self, text, title="", border_style=""):
+            self.text, self.title = str(text), str(title or "")
+
+    class _Console:
+        def print(self, *args):
+            if not args:
+                print()
+                return
+            for a in args:
+                if isinstance(a, _Markdown):
+                    print(a.text)
+                elif isinstance(a, _Panel):
+                    if a.title:
+                        print(f"── {a.title} ──")
+                    print(a.text)
+                else:
+                    print(_strip(str(a)))
+
+        def rule(self, text=""):
+            t = _strip(str(text))
+            print("\n" + "=" * 60)
+            if t:
+                print(t)
+            print("=" * 60)
+
+    class _Prompt:
+        @staticmethod
+        def ask(prompt, choices=None, default=None):
+            label = _strip(str(prompt))
+            ch = f" {list(choices)}" if choices else ""
+            dh = f" [{default}]" if default is not None else ""
+            while True:
+                try:
+                    v = input(f"{label}{ch}{dh}: ").strip()
+                except EOFError:
+                    return default if default is not None else ""
+                if not v and default is not None:
+                    return str(default)
+                if not choices or v in choices:
+                    return v
+                print(f"  {list(choices)} 중에서 입력하세요.")
+
+    class _Confirm:
+        @staticmethod
+        def ask(prompt, default=False):
+            label = _strip(str(prompt))
+            hint = "Y/n" if default else "y/N"
+            while True:
+                try:
+                    v = input(f"{label} [{hint}]: ").strip().lower()
+                except EOFError:
+                    return bool(default)
+                if not v:
+                    return bool(default)
+                if v in ("y", "yes"):
+                    return True
+                if v in ("n", "no"):
+                    return False
+
+    return _Console(), _Markdown, _Panel, _Prompt, _Confirm
+
+
+if _HAS_RICH:
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+    from rich.prompt import Confirm, Prompt
+    console = Console()
+else:
+    console, Markdown, Panel, Prompt, Confirm = _plain_console_shims()
 
 _TYPE_LABELS = {
     "multiple_choice": "객관식",
