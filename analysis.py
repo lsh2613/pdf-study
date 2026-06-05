@@ -627,8 +627,35 @@ def get_chapter_content_impl(work_id: str, chapter_id: str) -> dict[str, Any]:
     - ocr 모드: 본문 텍스트가 없으므로 page_range의 페이지를 JPEG로 렌더해
       page_images(서브에이전트가 직접 읽을 페이지 이미지 절대경로)를 채운다.
       이미 렌더된 페이지는 재사용한다(p{N}.jpg 캐시).
+
+    chapter_id는 **set_chapters로 등록된 id(ch1·ch2·…)**여야 한다. 페이지 범위
+    같은 임의 문자열('p11-p18' 등)을 주면 등록 챕터 목록을 담아 거부한다 —
+    특정 페이지를 그냥 보려면 scan_pdf의 scan_page_images 경로를 직접 열면 된다.
     """
     state = workspace.load_state(work_id)
+    chapters = state.get("chapters", {})
+
+    if chapter_id not in chapters:
+        valid = [cid for cid, c in chapters.items() if not c.get("skip")]
+        hint = (
+            f"등록된 본문 chapter_id 중에서 고르세요: {valid}. "
+            if valid else
+            "아직 set_chapters로 등록된 챕터가 없습니다 — 먼저 set_chapters를 호출하세요. "
+        )
+        raise FileNotFoundError(
+            f"unknown chapter_id: {chapter_id!r}. {hint}"
+            "(get_chapter_content는 set_chapters로 등록된 챕터 전용입니다. "
+            "목차 분석 등으로 특정 페이지를 보려면 scan_pdf 응답의 "
+            "scan_page_images[].path 이미지를 직접 열어 읽으세요 — 이 도구로 "
+            "페이지 범위를 가져오는 게 아닙니다.)"
+        )
+
+    if chapters[chapter_id].get("skip"):
+        raise FileNotFoundError(
+            f"chapter_id {chapter_id!r}는 skip(비본문: 표지·목차·색인 등)으로 "
+            "표시돼 추출 대상이 아닙니다. 본문 챕터만 처리하세요."
+        )
+
     raw = workspace.get_chapter_raw(work_id, chapter_id)  # 없으면 FileNotFoundError
 
     if state.get("extraction_mode", "text") == "ocr":

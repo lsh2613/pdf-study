@@ -134,6 +134,24 @@ def test_ocr_mode_set_chapters_and_get_content(make_workspace, ko_with_toc):
     assert all(Path(p["path"]).exists() for p in pages)
 
 
+def test_get_chapter_content_rejects_unregistered_id_with_hint(make_workspace, ko_short):
+    """등록 안 된 chapter_id('p11-p18' 같은 페이지범위)는 유효 id 목록 + 안내로 거부.
+
+    OCR 흐름에서 에이전트가 페이지 이미지 id를 chapter_id로 착각해 호출하던 버그.
+    """
+    wid, _ = make_workspace(ko_short)
+    analysis.scan_pdf_impl(wid)
+    analysis.set_chapters_impl(wid, [
+        {"chapter_id": "ch1", "title": "A", "page_range": [1, 12]},
+    ])
+    with pytest.raises(FileNotFoundError) as ei:
+        analysis.get_chapter_content_impl(wid, "p11-p18")
+    msg = str(ei.value)
+    assert "p11-p18" in msg
+    assert "ch1" in msg                 # 유효 chapter_id 안내
+    assert "scan_page_images" in msg    # 페이지 직접 보기 안내
+
+
 def test_set_chapters_rejects_out_of_range(make_workspace, ko_short):
     wid, _ = make_workspace(ko_short)
     analysis.scan_pdf_impl(wid)
