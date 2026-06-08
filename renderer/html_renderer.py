@@ -196,6 +196,23 @@ def _demote_headings(html_text: str) -> str:
     )
 
 
+def _unescape_if_double_escaped(text: str) -> str:
+    r"""summary가 진짜 줄바꿈 없이 리터럴 `\n`(역슬래시+n)만 갖고 있으면 복구한다.
+
+    일부 에이전트가 줄바꿈을 실제 개행이 아니라 `\n` 두 글자로 넣어 저장하는데,
+    그러면 마크다운 렌더러가 헤딩·목록·문단을 못 잡고 `\n`·`##`가 글자로 노출된다.
+    **진짜 개행이 하나도 없고 리터럴 시퀀스만 있을 때만** 변환하므로, 정상적으로
+    개행이 들어간 요약(코드블록 안의 `\n` 포함)은 건드리지 않는다.
+    """
+    if "\n" in text:
+        return text  # 진짜 개행이 있으면 정상 — 그대로 둔다
+    if "\\n" in text or "\\t" in text:
+        return (text.replace("\\r\\n", "\n")
+                    .replace("\\n", "\n")
+                    .replace("\\t", "\t"))
+    return text
+
+
 # templates 디렉터리 (이 파일과 동일 패키지의 templates/html)
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates" / "html"
 _STATIC_ASSET_FILES = ("style.css", "grading.js", "storage.js")
@@ -237,6 +254,8 @@ def _load_all(work_id: str) -> dict[str, Any]:
         # summaries(요약) + quiz(문제)는 분리 저장되지만 다운스트림은 한 dict로 본다.
         if summary_data is not None or quiz_data is not None:
             summary_data = summary_data or {}
+            if isinstance(summary_data.get("summary"), str):
+                summary_data["summary"] = _unescape_if_double_escaped(summary_data["summary"])
             summary_data["questions"] = (quiz_data or {}).get("questions") or {}
 
         chapters.append({

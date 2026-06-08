@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 from pdf_study import server
-from pdf_study.renderer.html_renderer import _FallbackMd, _summary_section
+from pdf_study.renderer.html_renderer import (
+    _FallbackMd,
+    _summary_section,
+    _unescape_if_double_escaped,
+)
 
 
 def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):
@@ -206,6 +210,24 @@ def test_summary_headings_demoted_under_section():
     assert "<h2>요약</h2>" in html       # 섹션 제목은 h2 유지
     assert "<h3>개요</h3>" in html       # 본문 ##(h2) → h3
     assert "<h2>개요</h2>" not in html
+
+
+def test_double_escaped_newlines_recovered():
+    r"""summary가 진짜 개행 없이 리터럴 `\n`만 가지면 복구해 마크다운이 살아난다."""
+    broken = "03. 사용자\\n\\n### 1. 식별\\n**호스트**를 묶는다.\\n- 글로벌\\n- DB"
+    fixed = _unescape_if_double_escaped(broken)
+    html = _summary_section({"summary": fixed, "key_points": []})
+    assert "<h4>1. 식별</h4>" in html        # ### → h3 → 섹션 아래로 demote → h4
+    assert "<strong>호스트</strong>" in html
+    assert "<li>글로벌</li>" in html
+    assert "\\n" not in html                   # 리터럴 역슬래시-n 누출 없음
+
+
+def test_normal_summary_newlines_untouched():
+    r"""진짜 개행이 있는 정상 요약(코드블록 내 \n 포함)은 변환하지 않는다."""
+    normal = "본문\n\n```py\nprint('a\\nb')\n```"
+    assert _unescape_if_double_escaped(normal) == normal
+    assert _unescape_if_double_escaped("그냥 한 줄") == "그냥 한 줄"
 
 
 def test_fallback_md_renders_without_markdown_it():

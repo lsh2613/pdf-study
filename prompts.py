@@ -154,12 +154,13 @@ _SUMMARIZER_KO = """\
 [출력 형식 — JSON]
 반드시 다음 스키마의 **JSON 객체 하나만** 반환하세요. 객체 전체를 감싸는
 코드펜스(```)는 금지하지만, summary 값 **안에서는** 마크다운(코드블록 포함)을
-자유롭게 쓰세요. summary는 JSON 문자열이므로 줄바꿈은 `\\n`으로 이스케이프됩니다.
+자유롭게 쓰세요. summary의 줄바꿈은 **실제 줄바꿈(개행)**으로 넣으세요 —
+`\\n` 같은 글자를 직접 타이핑하지 마세요(JSON 직렬화는 도구가 알아서 합니다).
 
 {{
   "chapter_id": "<주어진 chapter_id 그대로>",
   "title": "<주어진 title 그대로>",
-  "summary": "<위 권장 길이 표를 참고해 본문 분량에 맞춘 한국어 요약 (마크다운, 그림 인라인)>",
+  "summary": "<위 권장 길이 표를 참고해 본문 분량에 맞춘 한국어 요약 (마크다운)>",
   "key_points": ["...", "..."],
   "body_text": "<OCR 모드에서만: 페이지 이미지에서 전사한 본문 전체. text 모드는 생략>",
   "questions": {{
@@ -211,13 +212,13 @@ Read the given chapter and produce ① summary, ② key points, ③ verification
 [Output format — JSON]
 Return **exactly one JSON object** matching the schema below. Do not wrap the
 whole object in a code fence, but **inside** the summary value use Markdown
-freely (including code blocks). summary is a JSON string, so newlines are
-escaped as `\\n`.
+freely (including code blocks). Put **real line breaks** in summary — do NOT
+type literal `\\n` characters (the tool handles JSON serialization).
 
 {{
   "chapter_id": "<as given>",
   "title": "<as given>",
-  "summary": "<English summary scaled to body size per the table above (Markdown, inline figures)>",
+  "summary": "<English summary scaled to body size per the table above (Markdown)>",
   "key_points": ["...", "..."],
   "body_text": "<OCR mode only: full verbatim body transcribed from page images. Omit in text mode>",
   "questions": {{
