@@ -142,28 +142,34 @@ study_output/
   "chapter_id": "ch1",
   "title": "트랜잭션",
   "page_range": [12, 47],
-  "text": "트랜잭션은 데이터베이스 시스템에서...",   // text 모드만. OCR 모드엔 없음
-  "char_count": 18420                           // OCR 모드는 0 (서버가 본문을 안 읽음)
+  "text": "트랜잭션은 데이터베이스 시스템에서...",   // 본문 전체 (text·OCR 공통)
+  "char_count": 18420
 }
 ```
 
 - 그림(figure)은 추출하지 않으므로 raw에 `image_refs` 같은 이미지 필드는 없다.
 
-- **OCR 모드**: 위에서 `text`가 없고 `char_count=0`. 대신 `get_chapter_content`가
-  호출 시 page_range를 lazy 렌더해 응답에 `page_images`를 채운다(디스크 raw엔
-  저장 안 함):
+- **text 모드**: `set_chapters` 시점에 `text`(라이브러리 추출 본문)와 실제
+  `char_count`가 채워진다.
+- **OCR 모드**: `set_chapters` 직후엔 `text`가 없고 `char_count=0`이다(서버가 본문을
+  안 읽음). `get_chapter_content`가 호출 시 page_range를 lazy 렌더해 응답에
+  `page_images`를 채우고(디스크 raw엔 저장 안 함):
   ```json
   "page_images": [
     {"id": "p12", "path": "raw_data/pages/p12.jpg", "page": 12}, ...
   ]
   ```
-  sub-agent는 이 이미지를 순서대로 읽어 본문을 OCR한 뒤 요약/문제를 만든다.
+  sub-agent가 이 이미지를 OCR해 요약/문제 + **전사 본문(`body_text`)**을 돌려주면,
+  `save_chapter_result`가 그 본문을 raw의 `text`로 **backfill**하고 `char_count`를
+  실제 길이로 갱신한다 → 최종 raw는 text 모드와 **동일한 형태**가 된다.
 
 ### chapters/ — sub-agent 결과 (요약/문제 분리 저장)
 
-summarizer sub-agent의 한 payload(`{summary, key_points, questions}`)는
+summarizer sub-agent의 한 payload(`{summary, key_points, questions, body_text?}`)는
 `save_chapter_result`가 **두 파일로 나눠** 저장한다. 둘은 항상 같은 호출에서
 함께 생성된다(결합 유지). 렌더러는 둘을 다시 한 dict로 합쳐 읽는다.
+OCR 모드의 `body_text`(전사 본문)는 summaries에 넣지 않고 `chapters_raw`의 `text`로
+backfill된다(위 참조).
 
 #### chapters/summaries/ch{N}.json (요약 + 핵심포인트)
 

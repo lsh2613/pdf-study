@@ -417,15 +417,23 @@ def save_chapter_result(
 ) -> Path:
     """summarizer sub-agent의 챕터 결과를 분리 저장 + state 갱신.
 
-    한 payload({summary, key_points, questions})를 두 파일로 나눠 쓴다:
-      - summaries/ch{N}.json : questions를 제외한 요약 정보(title/summary/key_points)
+    한 payload({summary, key_points, questions, body_text?})를 두 파일로 나눠 쓴다:
+      - summaries/ch{N}.json : questions·body_text를 제외한 요약 정보(title/summary/key_points)
       - quiz/ch{N}.json      : 기본 문제({chapter_id, questions})
     (둘은 항상 같은 호출에서 함께 생성된다 — 결합 유지)
+
+    OCR 모드: 서브에이전트가 페이지 이미지에서 읽어낸 본문을 `body_text`로 함께
+    보내면, 그것을 chapters_raw/ch{N}.json의 `text`로 backfill해 text 모드와 동일한
+    형태로 보존한다(char_count도 갱신). text 모드는 raw에 이미 추출 본문이 있으므로
+    덮어쓰지 않는다.
 
     동시성: state.json 갱신은 _get_lock으로 직렬화. 파일 자체 쓰기는
     atomic rename이라 챕터 파일끼리도 충돌 없음.
     """
-    summary_part = {k: v for k, v in data.items() if k != "questions"}
+    body_text = data.get("body_text")
+    summary_part = {
+        k: v for k, v in data.items() if k not in ("questions", "body_text")
+    }
     quiz_part = {
         "chapter_id": data.get("chapter_id", chapter_id),
         "questions": data.get("questions") or {},
@@ -441,6 +449,15 @@ def save_chapter_result(
             raise KeyError(f"chapter not in state: {chapter_id}")
         entry["summary_status"] = "completed"
         entry["error"] = None
+        # OCR 모드: 읽어낸 본문을 raw_data의 text로 보존 (text 모드와 동일 형태)
+        if body_text and state.get("extraction_mode") == "ocr":
+            raw_path = chapters_raw_dir(work_id) / f"{chapter_id}.json"
+            if raw_path.exists():
+                raw = json.loads(raw_path.read_text(encoding="utf-8"))
+                raw["text"] = body_text
+                raw["char_count"] = len(body_text)
+                _atomic_write_json(raw_path, raw)
+                entry["char_count"] = len(body_text)
         save_state(work_id, state)
 
     return out

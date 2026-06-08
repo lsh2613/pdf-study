@@ -408,6 +408,8 @@ def save_chapter_result(
     """summarizer sub-agent의 챕터 결과 JSON을 저장합니다.
 
     스키마는 get_subagent_prompts의 summarizer_prompt에 명시. 동시성 안전.
+    OCR 모드에서 결과에 `body_text`(이미지에서 전사한 본문 전체)가 있으면
+    chapters_raw/ch{N}.json의 `text`로 보존된다(text 모드와 동일 형태).
     """
     path = workspace.save_chapter_result(work_id, chapter_id, data)
     return _ok({"saved_path": str(path)}, next_action=(

@@ -1,6 +1,7 @@
 """analysis.scan_pdf_impl + set_chapters_impl E2E 테스트 (fixture PDF)."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,55 @@ def test_ocr_mode_set_chapters_and_get_content(make_workspace, ko_with_toc):
     pages = content["page_images"]
     assert [p["page"] for p in pages] == [1, 2, 3, 4, 5, 6]
     assert all(Path(p["path"]).exists() for p in pages)
+
+
+def test_ocr_body_text_backfilled_to_raw(make_workspace, ko_with_toc):
+    """OCR: 서브에이전트가 읽은 본문(body_text)을 raw_data의 text로 보존."""
+    wid, _ = make_workspace(ko_with_toc)
+    analysis.scan_pdf_impl(wid)
+    analysis.set_chapters_impl(
+        wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 6]}],
+        "sequential", "ocr", language="ko",
+    )
+    # 처리 전: raw엔 text 없음, char_count 0
+    raw0 = workspace.get_chapter_raw(wid, "ch1")
+    assert "text" not in raw0 and raw0["char_count"] == 0
+
+    body = "이미지에서 읽어낸 본문 전체입니다."
+    workspace.save_chapter_result(wid, "ch1", {
+        "chapter_id": "ch1", "title": "전체",
+        "summary": "요약", "key_points": ["p"],
+        "body_text": body,
+        "questions": {"multiple_choice": [], "short_answer": [], "reflection": []},
+    })
+    # raw에 text + char_count backfill
+    raw1 = workspace.get_chapter_raw(wid, "ch1")
+    assert raw1["text"] == body
+    assert raw1["char_count"] == len(body)
+    assert workspace.load_state(wid)["chapters"]["ch1"]["char_count"] == len(body)
+    # summaries 파일엔 body_text가 새지 않는다
+    summ = json.loads(
+        (workspace.summaries_dir(wid) / "ch1.json").read_text(encoding="utf-8"))
+    assert "body_text" not in summ
+    assert summ["summary"] == "요약"
+
+
+def test_text_mode_body_text_does_not_overwrite_raw(make_workspace, ko_with_toc):
+    """text 모드: raw엔 이미 추출 본문이 있으므로 body_text로 덮어쓰지 않는다."""
+    wid, _ = make_workspace(ko_with_toc)
+    scan = analysis.scan_pdf_impl(wid)
+    chs = scan["recommendations"]["suggested_chapters"][:1]
+    analysis.set_chapters_impl(wid, chs, "sequential", "text")
+    cid = chs[0]["chapter_id"]
+    orig = workspace.get_chapter_raw(wid, cid)["text"]
+    assert orig  # 추출 본문 존재
+
+    workspace.save_chapter_result(wid, cid, {
+        "chapter_id": cid, "summary": "s", "key_points": [],
+        "body_text": "AGENT OVERRIDE",
+        "questions": {"multiple_choice": [], "short_answer": [], "reflection": []},
+    })
+    assert workspace.get_chapter_raw(wid, cid)["text"] == orig
 
 
 def test_get_chapter_content_rejects_unregistered_id_with_hint(

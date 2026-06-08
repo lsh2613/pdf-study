@@ -174,8 +174,9 @@ server.set_chapters(work_id, chapters, execution_mode, extraction_mode, book_inf
 ```
 
 - 코드: `analysis.py:set_chapters_impl`, `pdf/chapter.extract_chapter`
-- 결과 디스크 상태: `chapters_raw/ch{N}.json` (skip 제외),
-  `book_info.json` (ocr 모드 raw엔 `text` 없음). 그림(figure) 추출은 하지 않는다.
+- 결과 디스크 상태: `chapters_raw/ch{N}.json` (skip 제외), `book_info.json`.
+  ocr 모드 raw엔 이 시점엔 `text`가 없다(`char_count=0`) — 이후 Stage 5에서
+  서브에이전트가 읽은 `body_text`가 raw의 `text`로 backfill된다. 그림 추출은 안 한다.
 - next_action: `get_subagent_prompts(work_id)`
 
 ### Stage 4 · `get_subagent_prompts` — sub-agent용 프롬프트 발급
@@ -215,12 +216,14 @@ Task tool만 진짜 병렬, Gemini/Codex는 메인 모델이 순차 처리).
 (2) summarizer sub-agent (메인 LLM이 위 프롬프트로 호출)
        - text 모드: text를 읽어 요약/문제 생성
        - ocr  모드: page_images를 순서대로 읽어 본문 OCR(글자수로 스케일 적용)
-       - 결과 JSON: {summary(마크다운), key_points, questions:{mc,sa,rf}}
+       - 결과 JSON: {summary(마크다운), key_points, questions:{mc,sa,rf},
+                     body_text?(ocr이면 전사 본문)}
 
 (3) save_chapter_result(work_id, chapter_id, data)
        └─ workspace.save_chapter_result
             - chapters/summaries/ch{N}.json + chapters/quiz/ch{N}.json
-              두 파일로 분리 저장 (각각 atomic write)
+              두 파일로 분리 저장 (body_text는 summaries에서 제외)
+            - (ocr & body_text) chapters_raw/ch{N}.json의 text로 backfill + char_count 갱신
             - state lock 안에서 summary_status="completed"
 
 (4) (extension 활성 시)
