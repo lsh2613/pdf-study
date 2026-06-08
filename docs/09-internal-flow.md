@@ -275,9 +275,10 @@ server.finalize_study(work_id, output_format="", keep_work_dir=True, force=False
        │    - state, book_info, chapters/{summaries,quiz,extension_questions}/
        │      ch{N}.json, raw_data/chapters_raw/ch{N}.json 모두 로드
        │      (summaries+quiz는 한 dict로 병합)
+       │      + _unescape_if_double_escaped로 리터럴 \n(이중 이스케이프) 자가복구
        │    - state.chapters[*]에서 skip=True 인 챕터는 제외
        ├─ _copy_assets       → style.css, storage.js, grading.js, study_html.py, README.md
-       ├─ _summary_section   → 요약 마크다운을 markdown-it로 HTML 변환
+       ├─ _summary_section   → 요약 마크다운을 markdown-it(없으면 _FallbackMd)로 HTML 변환
        └─ 멀티 챕터:
             - index.html(책 정보 + 챕터 카드)
             - ch{N}.html (각 챕터, 사이드바·완료 버튼 포함)

@@ -19,7 +19,7 @@ pdf_study/
 ├── renderer/
 │   ├── __init__.py
 │   ├── base.py             # Renderer 인터페이스 (render(work_id, out_dir))
-│   ├── html_renderer.py    # 요약 마크다운→HTML(markdown-it). 그림은 다루지 않음
+│   ├── html_renderer.py    # 요약 마크다운→HTML(markdown-it, 없으면 _FallbackMd). 그림 없음
 │   └── md_tui_renderer.py  # 챕터별 폴더 + summary.md + quiz.json + TUI launcher
 └── templates/
     ├── html/
