@@ -85,19 +85,17 @@ study_output/
   "text_quality": "medium",
   "page_offset": 18,                  // 물리 = 책 + offset, 미측정이면 null
   "page_offset_confidence": "high",   // "high" | "low" | "none"
-  "current_phase": "chapter_processing",
-  "phases": {
+  "current_phase": "chapter_processing",  // 소비되는 건 이 문자열뿐 (get_work_state·에러메시지)
+  "phases": {                             // 진행 텔레메트리 — 분기 로직엔 쓰지 않음
     "scanning": "completed",
     "chapter_setup": "completed",
     "chapter_processing": "in_progress",
-    "extension_processing": "in_progress",
     "rendering": "pending"
   },
   "chapters": {
     "ch1": {
       "title": "트랜잭션",
       "page_range": [12, 47],
-      "printed_range": [1, 36],
       "char_count": 18420,
       "skip": false,
       "summary_status": "completed",

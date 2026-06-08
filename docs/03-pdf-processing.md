@@ -48,11 +48,22 @@ MCP의 역할은 **PDF 페이지를 JPEG로 래스터화**하는 것까지다.
   - 반복 공백 정규화
   - 페이지 번호만 있는 줄 제거
 - OCR 오류 교정은 sub-agent(LLM)가 요약 과정에서 자연 처리
-- 텍스트 품질 점수(`high`/`medium`/`low`/`no_text_layer`/`garbled`)는 `reader`가
-  여전히 계산하지만 **챕터 분리 라우팅·거부에는 쓰지 않는다**(정보용). 텍스트
-  레이어가 없거나 깨져도 거부하지 않고 **목차 vision 경로**로 간다 — 글자 밀도·
-  모지바케율은 "글자가 읽히는가"를 잴 뿐 "배치 순서가 맞는가"(목차 신뢰의 핵심)는
-  못 재기 때문. 그래서 목차는 내장 목차/이미지로만 정한다.
+- 텍스트 품질 점수(`high`/`medium`/`low`/`no_text_layer`/`garbled`)는 `scan_pdf`가
+  20p 샘플로 계산해 `state.text_quality`에 저장한다. 이 값은 **챕터 분리(목차)
+  라우팅에는 쓰지 않는다** — 글자 밀도·모지바케율은 "글자가 읽히는가"를 잴 뿐
+  "배치 순서가 맞는가"(목차 신뢰의 핵심)는 못 재기 때문. 그래서 목차는 텍스트
+  레이어가 없거나 깨져도 거부하지 않고 내장 목차/이미지(vision)로만 정한다.
+- **단, 본문 추출 모드에는 쓴다(text 모드 가드, 2단 방어):** `text_quality`가
+  `garbled`(인코딩 깨짐) 또는 `no_text_layer`(텍스트 거의 없음)이면 라이브러리 추출
+  본문이 쓰레기가 되므로 `set_chapters`에서 text 모드를 두 지점에서 OCR로 강제한다.
+  - **Layer 1(사전 차단):** 모드 미지정 거부 시 `data.choices`를 **OCR 2조합으로만**
+    좁혀 제시 → 사용자가 text를 애초에 못 고름(`extraction_modes=["ocr"]`,
+    `forced_extraction_mode="ocr"`).
+  - **Layer 2(사후 거부):** 그래도 `extraction_mode="text"`로 호출하면 impl 진입 전
+    `ok=False`로 거부하고 OCR 재호출을 강제한다(`data.forced_extraction_mode="ocr"`).
+
+  → 이로써 mojibake 판정(`reader.mojibake_score` → `evaluate_text_quality`의 `garbled`)이
+  실제 결정에 연결된다. `low`/`medium`/`high`는 통과(오탐 방지).
 
 ### 페이지 인덱스 컨벤션
 

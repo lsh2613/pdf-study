@@ -114,12 +114,12 @@ server.scan_pdf(work_id, scan_size, force_vision=False)
   └─ analysis.scan_pdf_impl(work_id, scan_size, force_vision)
        ├─ workspace.update_phase("scanning", "in_progress")
        ├─ reader.open_pdf(pdf_path) → doc
-       │    ├─ reader.extract_metadata(doc)          # book metadata
-       │    ├─ reader.evaluate_text_quality(doc)     # quality(정보용, 라우팅 안 함)
-       │    ├─ reader.extract_text_range(doc, 1, N)  # 언어·목차위치용 (내부, 비노출)
-       │    ├─ lang.detect_language(sample_text)     # ko/en (best-effort)
-       │    ├─ reader.detect_page_offset(doc)        # 꼬리말 번호 다수결 → offset
-       │    ├─ reader.get_outline(doc)               # 내장 목차(북마크) — 1순위
+       │    ├─ reader.extract_metadata(doc)          # book metadata (페이지 안 읽음)
+       │    ├─ reader.evaluate_text_quality(doc, scan_size)  # 30p 1회 → text_quality(mojibake)+sample_text
+       │    ├─ if no_text_layer: language·offset 단락(생략)  # 스캔본 — 불필요한 읽기 회피
+       │    │  else: lang.detect_language(quality.sample_text)  # 샘플 재사용(재독 X)
+       │    │        reader.detect_page_offset(doc)            # 꼬리말 번호 다수결 → offset
+       │    ├─ reader.get_outline(doc)               # 내장 목차(북마크) — 1순위 (페이지 안 읽음)
        │    │    └─ _outline_to_chapters(...)        # 최상위 항목 → 물리 page_range
        │    └─ (내장 목차 없음/force_vision) reader.locate_toc_pages → render_pages
        │                                             → toc_page_images
@@ -143,7 +143,10 @@ server.scan_pdf(work_id, scan_size, force_vision=False)
 - 응답: `book_metadata, language, page_offset, outline_present, toc_page_images,
   recommendations.{primary_mode, suggested_chapters, chunk_fallback, alternatives,
   user_choices, next_step_guidance}`. **scanned_text는 노출하지 않는다**(텍스트 불신).
-- 텍스트 품질로 거부하지 않는다 — 텍스트 레이어가 없거나 깨져도 vision 경로로 간다.
+- 목차 결정은 텍스트 품질로 거부하지 않는다 — 없거나 깨져도 vision 경로로 간다.
+  (품질은 본문 추출 모드 가드에만 쓰임 — Stage 3.) 단, `no_text_layer`면 언어·offset
+  측정은 의미가 없어 **단락**한다(language=None, offset=none). 내장 목차(`get_outline`)는
+  페이지를 읽지 않는 북마크 메타다.
 
 ### Stage 3 · `set_chapters` — 챕터 구조 + 처리 모드 확정 + 추출
 
