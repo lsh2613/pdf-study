@@ -104,11 +104,9 @@ def build_ko_with_toc(out_path: Path) -> Path:
 
     검증 포인트:
         - language = "ko"
-        - text_quality = "high" 또는 "medium"
-        - toc_finder.find_toc_candidates → is_candidate=True, entries 3개
-        - recommendations.primary_mode = "from_toc"
+        - 내장 목차(set_toc, 물리 p.5/13/21) → recommendations.primary_mode = "from_outline"
         - 멀티 챕터 finalize → index.html + ch{1,2,3}.html + 사이드바
-        - 이미지 추출: 풀페이지 배경/작은 아이콘 거름, 본문 그림 통과
+        - 이미지: 풀페이지 배경/작은 아이콘은 본문 렌더에 그대로 둠
     """
     assets = _ensure_assets()
     doc = fitz.open()
