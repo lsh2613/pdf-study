@@ -279,19 +279,24 @@ def scan_pdf_impl(
         page_count = doc.page_count
         book_metadata = reader.extract_metadata(doc)
 
-        # 텍스트 품질은 정보용으로만 둔다(라우팅·거부에는 쓰지 않음).
-        quality = reader.evaluate_text_quality(doc)
+        # 텍스트 레이어 품질 평가(mojibake 판정). scan_size(기본 30)p를 한 번 읽어
+        # 그 sample_text를 언어 감지에 재사용한다 → 품질·언어가 같은 읽기를 공유.
+        quality = reader.evaluate_text_quality(doc, scan_size)
         text_quality = quality["quality"]
-
-        # 언어 감지·목차 위치 탐색을 위한 best-effort 텍스트(내부용, 응답 비노출).
         scan_end = min(scan_size, page_count) if page_count else 0
-        sample_text = (
-            reader.extract_text_range(doc, 1, scan_end) if scan_end > 0 else ""
-        )
-        language = lang.detect_language(sample_text)
 
-        # 인쇄 페이지번호 ↔ PDF 물리 인덱스 오프셋 측정 (꼬리말 번호 다수결)
-        offset_info = reader.detect_page_offset(doc)
+        if text_quality == "no_text_layer":
+            # 텍스트 레이어가 없으면(스캔본) 언어·offset 측정이 무의미하다.
+            # → 측정을 건너뛰어 불필요한 페이지 읽기(최대 page_count p 꼬리말 스캔 +
+            #   언어 샘플)를 회피. 언어는 이후 set_chapters(ocr)에서 LLM이 이미지로
+            #   파악해 전달하고, offset도 없음(none)으로 둔다.
+            language = None
+            offset_info = {"offset": None, "confidence": "none"}
+        else:
+            # 언어 감지: 품질 평가가 이미 읽은 샘플 텍스트 재사용 (재독 없음).
+            language = lang.detect_language(quality["sample_text"])
+            # 인쇄 페이지번호 ↔ PDF 물리 인덱스 오프셋 (꼬리말 번호 다수결)
+            offset_info = reader.detect_page_offset(doc)
 
         # (1) 내장 목차 우선. force_vision이면 건너뛴다.
         outline = [] if force_vision else reader.get_outline(doc)

@@ -256,6 +256,9 @@ def set_chapters(
       받으세요.** 하나라도 미지정/오타면 거부되며 응답.data.choices에 아래 4조합과
       특징이 담깁니다. **4개 모두 유효하니 임의로 합치거나 빼지 말고 전부** 그대로
       제시한 뒤 고른 조합을 전달하세요.
+      ※ 단, scan_pdf의 text_quality가 garbled(mojibake)/no_text_layer면 text 추출이
+        무의미하므로 data.choices를 **OCR 2조합으로만** 좁혀 돌려줍니다
+        (data.forced_extraction_mode="ocr"). 이때는 그 2개만 제시하세요.
         - ① Sequential + Text: 안정적·빠르고 저렴 (디지털 PDF, 무난한 기본)
         - ② Parallel + Text: 최대 5개 챕터 동시로 가장 빠름 (디지털 PDF)
         - ③ Sequential + OCR: 비전 LLM 직독으로 정확하나 느리고 비쌈 (스캔본)
@@ -275,44 +278,112 @@ def set_chapters(
 
     extraction_mode="ocr"에서는 본문 텍스트를 추출하지 않습니다.
     서브에이전트가 get_chapter_content가 렌더한 페이지 이미지를 직접 읽습니다.
+
+    ※ text 모드 가드: scan_pdf가 측정한 text_quality가 "garbled"(인코딩 깨짐) 또는
+      "no_text_layer"(텍스트 거의 없음)이면 text 추출이 무의미하므로 거부하고
+      extraction_mode='ocr'로 다시 호출하도록 강제합니다(data.forced_extraction_mode="ocr").
     다음 단계: get_subagent_prompts(work_id)
     """
     if execution_mode not in ("sequential", "parallel") or \
             extraction_mode not in ("text", "ocr"):
-        return _err(
-            "execution_mode와 extraction_mode를 모두 지정해야 합니다. 기본값을 "
-            "임의로 정하지 말고, 아래 4가지 조합과 특징을 사용자에게 그대로 보여준 뒤 "
-            "원하는 하나를 골라 두 값을 전달해 다시 호출하세요. 4개 모두 유효하니 "
-            "임의로 빼지 말고 전부 제시할 것.\n"
-            "① Sequential + Text — 한 챕터씩 순차 + 라이브러리 텍스트 추출. "
-            "안정적·빠르고 저렴 (디지털 PDF, 무난한 기본값).\n"
-            "② Parallel + Text — 최대 5개 챕터 동시 + 텍스트 추출. 가장 빠름 "
-            "(병렬 디스패치 가능한 클라이언트).\n"
-            "③ Sequential + OCR — 순차 + 비전 LLM이 페이지 이미지 직독. 정확하나 "
-            "느리고 비용 큼 (스캔본).\n"
-            "④ Parallel + OCR — 최대 5개 동시 + 비전 LLM OCR. ③보다 빠르나 비용 "
-            "가장 큼 (스캔본).\n"
-            "execution_mode는 'sequential'|'parallel', extraction_mode는 'text'|'ocr'.\n"
-            + analysis.CHOICE_POLICY,
-            data={
-                "choices": [
-                    {"execution_mode": "sequential", "extraction_mode": "text",
-                     "label": "Sequential + Text",
-                     "desc": "디지털 PDF · 안정적·빠르고 저렴 (무난한 기본)"},
-                    {"execution_mode": "parallel", "extraction_mode": "text",
-                     "label": "Parallel + Text",
-                     "desc": "디지털 PDF · 최대 5개 동시로 가장 빠름"},
-                    {"execution_mode": "sequential", "extraction_mode": "ocr",
-                     "label": "Sequential + OCR",
-                     "desc": "스캔본·깨진 PDF · 정확하나 느리고 비쌈"},
-                    {"execution_mode": "parallel", "extraction_mode": "ocr",
-                     "label": "Parallel + OCR",
-                     "desc": "스캔본·깨진 PDF · 병렬 OCR로 빠르나 비용 가장 큼"},
-                ],
+        # text_quality가 garbled(mojibake)/no_text_layer면 text 추출이 무의미하므로
+        # 선택지에서 text 조합을 빼고 **OCR 조합만** 제시한다(애초에 못 고르게).
+        # scan_pdf가 텍스트 레이어로 측정해 둔 값이라 재독 불필요.
+        try:
+            tq = workspace.load_state(work_id).get("text_quality")
+        except Exception:
+            tq = None
+        force_ocr = tq in ("garbled", "no_text_layer")
+
+        combos = [
+            {"execution_mode": "sequential", "extraction_mode": "text",
+             "label": "Sequential + Text",
+             "desc": "디지털 PDF · 안정적·빠르고 저렴 (무난한 기본)"},
+            {"execution_mode": "parallel", "extraction_mode": "text",
+             "label": "Parallel + Text",
+             "desc": "디지털 PDF · 최대 5개 동시로 가장 빠름"},
+            {"execution_mode": "sequential", "extraction_mode": "ocr",
+             "label": "Sequential + OCR",
+             "desc": "스캔본·깨진 PDF · 정확하나 느리고 비쌈"},
+            {"execution_mode": "parallel", "extraction_mode": "ocr",
+             "label": "Parallel + OCR",
+             "desc": "스캔본·깨진 PDF · 병렬 OCR로 빠르나 비용 가장 큼"},
+        ]
+
+        if force_ocr:
+            reason = (
+                "텍스트 레이어 인코딩이 깨져 있어(mojibake)"
+                if tq == "garbled"
+                else "텍스트 레이어가 거의 없어"
+            )
+            choices = [c for c in combos if c["extraction_mode"] == "ocr"]
+            msg = (
+                f"이 PDF는 {reason} text 추출이 무의미합니다(text_quality={tq}). "
+                "따라서 **OCR 조합만 선택할 수 있습니다** — text 조합은 제시하지 마세요. "
+                "아래 2가지 중 하나를 사용자에게 보여주고 골라 두 값을 전달해 다시 "
+                "호출하세요.\n"
+                "③ Sequential + OCR — 순차 + 비전 LLM이 페이지 이미지 직독. 정확하나 "
+                "느리고 비용 큼.\n"
+                "④ Parallel + OCR — 최대 5개 동시 + 비전 LLM OCR. ③보다 빠르나 비용 "
+                "가장 큼.\n"
+                "extraction_mode는 'ocr' 고정, execution_mode만 'sequential'|'parallel'에서 "
+                "선택. OCR은 텍스트 언어 감지가 불가하니 language도 함께 전달하세요.\n"
+            )
+            data = {
+                "choices": choices,
+                "execution_modes": ["sequential", "parallel"],
+                "extraction_modes": ["ocr"],
+                "text_quality": tq,
+                "forced_extraction_mode": "ocr",
+            }
+        else:
+            msg = (
+                "execution_mode와 extraction_mode를 모두 지정해야 합니다. 기본값을 "
+                "임의로 정하지 말고, 아래 4가지 조합과 특징을 사용자에게 그대로 보여준 뒤 "
+                "원하는 하나를 골라 두 값을 전달해 다시 호출하세요. 4개 모두 유효하니 "
+                "임의로 빼지 말고 전부 제시할 것.\n"
+                "① Sequential + Text — 한 챕터씩 순차 + 라이브러리 텍스트 추출. "
+                "안정적·빠르고 저렴 (디지털 PDF, 무난한 기본값).\n"
+                "② Parallel + Text — 최대 5개 챕터 동시 + 텍스트 추출. 가장 빠름 "
+                "(병렬 디스패치 가능한 클라이언트).\n"
+                "③ Sequential + OCR — 순차 + 비전 LLM이 페이지 이미지 직독. 정확하나 "
+                "느리고 비용 큼 (스캔본).\n"
+                "④ Parallel + OCR — 최대 5개 동시 + 비전 LLM OCR. ③보다 빠르나 비용 "
+                "가장 큼 (스캔본).\n"
+                "execution_mode는 'sequential'|'parallel', extraction_mode는 'text'|'ocr'.\n"
+            )
+            data = {
+                "choices": combos,
                 "execution_modes": ["sequential", "parallel"],
                 "extraction_modes": ["text", "ocr"],
-            },
-        )
+            }
+
+        return _err(msg + analysis.CHOICE_POLICY, data=data)
+
+    # text 모드 가드: 텍스트 레이어가 깨졌거나(garbled) 사실상 없으면(no_text_layer)
+    # 라이브러리 추출 본문이 쓰레기가 된다 → OCR로 강제 전환하도록 거부한다.
+    # scan_pdf가 이미 20p 샘플로 text_quality(mojibake 판정 포함)를 계산해 state에
+    # 저장해 두므로 페이지를 다시 읽지 않고 그 값만 본다.
+    if extraction_mode == "text":
+        tq = workspace.load_state(work_id).get("text_quality")
+        if tq in ("garbled", "no_text_layer"):
+            reason = (
+                "텍스트 레이어 인코딩이 깨져 있어(mojibake)"
+                if tq == "garbled"
+                else "텍스트 레이어가 거의 없어"
+            )
+            return _err(
+                f"이 PDF는 {reason} text 모드 추출 결과를 신뢰할 수 없습니다 "
+                f"(text_quality={tq}). extraction_mode='ocr'로 다시 호출하세요 — "
+                "비전 LLM이 페이지 이미지를 직접 읽어 깨진 글자까지 문맥으로 복원합니다. "
+                "(OCR은 텍스트 언어 감지가 불가하니 language도 함께 전달하세요.) "
+                "execution_mode는 고른 값을 그대로 유지하면 됩니다.",
+                data={
+                    "text_quality": tq,
+                    "forced_extraction_mode": "ocr",
+                    "execution_mode": execution_mode,
+                },
+            )
 
     data = analysis.set_chapters_impl(
         work_id, chapters, execution_mode, extraction_mode,

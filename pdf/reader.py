@@ -227,16 +227,20 @@ def extract_page_text(doc: fitz.Document, page_number: int) -> str:
     return _clean_text(raw)
 
 
-def evaluate_text_quality(doc: fitz.Document, sample_size: int = 20) -> dict[str, Any]:
-    """텍스트 레이어 품질 평가.
+def evaluate_text_quality(doc: fitz.Document, sample_size: int = 30) -> dict[str, Any]:
+    """텍스트 레이어 품질 평가 (+ 언어 감지에 재사용할 sample_text 반환).
+
+    sample_size는 scan_pdf의 scan_size와 동일하게 맞춰(기본 30) 품질 평가와 언어
+    감지가 **같은 한 번의 30p 읽기**를 공유한다(별도 추출 패스 없음).
 
     Returns:
         {
             "quality": "high" | "medium" | "low" | "no_text_layer" | "garbled",
             "avg_chars_per_page": float,
-            "avg_mojibake": float,
-            "sampled_pages": int,
+            "sample_text": str,   # 샘플한 페이지들의 정리된 본문 (언어 감지 재사용용)
         }
+        (avg_mojibake는 garbled 분류에만 내부적으로 쓰고 반환하지 않는다.)
+        sample_text를 함께 돌려줘 호출자가 언어 감지에 재사용 → 별도 추출 패스 제거.
 
     임계값:
         no_text_layer: avg_chars < 50  (OCR 권장)
@@ -247,12 +251,8 @@ def evaluate_text_quality(doc: fitz.Document, sample_size: int = 20) -> dict[str
     """
     n = min(sample_size, doc.page_count)
     if n == 0:
-        return {
-            "quality": "no_text_layer",
-            "avg_chars_per_page": 0.0,
-            "avg_mojibake": 0.0,
-            "sampled_pages": 0,
-        }
+        return {"quality": "no_text_layer", "avg_chars_per_page": 0.0,
+                "sample_text": ""}
 
     # 처음 / 중간 / 끝 부근을 고루 샘플링
     if doc.page_count <= sample_size:
@@ -268,13 +268,17 @@ def evaluate_text_quality(doc: fitz.Document, sample_size: int = 20) -> dict[str
 
     total_chars = 0
     mojibake_scores: list[float] = []
+    sample_parts: list[str] = []
     for idx in sample_indices:
         try:
             raw = doc.load_page(idx).get_text("text")
         except Exception as e:
             logger.warning("page %d text extraction failed: %s", idx, e)
             continue
-        total_chars += len(_clean_text(raw))
+        cleaned = _clean_text(raw)
+        total_chars += len(cleaned)
+        if cleaned:
+            sample_parts.append(cleaned)
         # 모지바케 점수는 _clean_text 전 raw로 — U+FFFD 등 신호 보존.
         # 표본이 충분한 페이지만 평균에 반영해 빈 페이지의 0점 희석 방지.
         if sum(1 for c in raw if not c.isspace()) >= _MOJIBAKE_MIN_CHARS:
@@ -296,12 +300,8 @@ def evaluate_text_quality(doc: fitz.Document, sample_size: int = 20) -> dict[str
     else:
         quality = "high"
 
-    return {
-        "quality": quality,
-        "avg_chars_per_page": round(avg, 1),
-        "avg_mojibake": round(avg_mojibake, 3),
-        "sampled_pages": len(sample_indices),
-    }
+    return {"quality": quality, "avg_chars_per_page": round(avg, 1),
+            "sample_text": "\n\n".join(sample_parts)}
 
 
 def extract_text_range(doc: fitz.Document, start_page: int, end_page: int) -> str:
@@ -362,15 +362,12 @@ def detect_page_offset(doc: fitz.Document, sample_cap: int = 400) -> dict[str, A
         {
             "offset": int | None,      # 물리 = 인쇄 + offset
             "confidence": "high" | "low" | "none",
-            "support": int,            # 최빈 offset 지지 표 수
-            "samples": int,            # 인쇄번호를 읽은 페이지 수
-            "runner_up": int,          # 2등 표 수 (참고)
         }
+        (support/samples/runner_up는 confidence 판정에만 내부적으로 쓰고 반환하지 않는다.)
     """
     n = doc.page_count
     if n == 0:
-        return {"offset": None, "confidence": "none", "support": 0,
-                "samples": 0, "runner_up": 0}
+        return {"offset": None, "confidence": "none"}
 
     # 페이지가 매우 많으면 균등 표본만 (대용량 PDF 보호)
     if n <= sample_cap:
@@ -380,19 +377,16 @@ def detect_page_offset(doc: fitz.Document, sample_cap: int = 400) -> dict[str, A
         indices = sorted({int(i * step) for i in range(sample_cap)})
 
     counts: dict[int, int] = {}
-    samples = 0
     for idx in indices:
         raw = doc.load_page(idx).get_text("text")
         printed = _footer_printed_number(raw)
         if printed is None:
             continue
-        samples += 1
         cand = (idx + 1) - printed  # 물리(1-based) − 인쇄
         counts[cand] = counts.get(cand, 0) + 1
 
     if not counts:
-        return {"offset": None, "confidence": "none", "support": 0,
-                "samples": 0, "runner_up": 0}
+        return {"offset": None, "confidence": "none"}
 
     ordered = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
     offset, support = ordered[0]
@@ -403,13 +397,7 @@ def detect_page_offset(doc: fitz.Document, sample_cap: int = 400) -> dict[str, A
     else:
         confidence = "low"
 
-    return {
-        "offset": offset,
-        "confidence": confidence,
-        "support": support,
-        "samples": samples,
-        "runner_up": runner_up,
-    }
+    return {"offset": offset, "confidence": confidence}
 
 
 # ---------------------------------------------------------------------------

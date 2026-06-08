@@ -235,12 +235,13 @@ def create_workspace(
         "user_context": user_context or "",
         "page_count": None,
         "text_quality": None,
+        # current_phase 문자열만 소비된다(get_work_state 응답·에러 메시지). phases는
+        # update_phase가 갱신하는 진행 텔레메트리이며 분기 로직엔 쓰지 않는다.
         "current_phase": "init",
         "phases": {
             "scanning": "pending",
             "chapter_setup": "pending",
             "chapter_processing": "pending",
-            "extension_processing": "pending",
             "rendering": "pending",
         },
         "chapters": {},

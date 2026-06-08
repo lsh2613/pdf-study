@@ -124,6 +124,73 @@ def test_set_chapters_requires_extraction_mode(tmp_path, ko_short):
     _assert_mode_choices(r)
 
 
+def test_mode_choices_narrowed_to_ocr_when_no_text_layer(tmp_path, scanned_empty):
+    """스캔본(no_text_layer)이면 모드 미지정 거부 시 OCR 2조합만 제시한다."""
+    wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
+                                   "page_range": [1, 3]}])  # 모드 생략
+    _check_envelope(r)
+    assert r["ok"] is False
+    combos = {(c["execution_mode"], c["extraction_mode"]) for c in r["data"]["choices"]}
+    assert combos == {("sequential", "ocr"), ("parallel", "ocr")}
+    assert r["data"]["extraction_modes"] == ["ocr"]
+    assert r["data"]["forced_extraction_mode"] == "ocr"
+    assert "AskUserQuestion" in r["error"]
+
+
+def test_mode_choices_narrowed_to_ocr_when_garbled(tmp_path, ko_short):
+    """garbled(mojibake)면 모드 미지정 거부 시 OCR 조합만 제시한다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    workspace.update_state(wid, text_quality="garbled")
+    r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
+                                   "page_range": [1, 12]}],
+                            execution_mode="sequential")  # extraction 생략
+    combos = {(c["execution_mode"], c["extraction_mode"]) for c in r["data"]["choices"]}
+    assert combos == {("sequential", "ocr"), ("parallel", "ocr")}
+    assert r["data"]["extraction_modes"] == ["ocr"]
+
+
+def test_set_chapters_text_mode_blocked_on_no_text_layer(tmp_path, scanned_empty):
+    """스캔본(text_quality=no_text_layer)에 text 모드를 고르면 거부 + OCR 강제."""
+    wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    assert workspace.load_state(wid)["text_quality"] == "no_text_layer"
+    r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
+                                   "page_range": [1, 3]}],
+                            execution_mode="sequential", extraction_mode="text")
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["forced_extraction_mode"] == "ocr"
+    assert r["data"]["execution_mode"] == "sequential"  # 선택한 디스패치는 유지
+    assert "ocr" in r["error"].lower()
+
+
+def test_set_chapters_text_mode_blocked_on_garbled(tmp_path, ko_short):
+    """text_quality=garbled면(인코딩 깨짐) text 모드 거부 + OCR 강제."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    workspace.update_state(wid, text_quality="garbled")  # 깨진 텍스트 레이어 가정
+    r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
+                                   "page_range": [1, 12]}],
+                            execution_mode="parallel", extraction_mode="text")
+    assert r["ok"] is False
+    assert r["data"]["text_quality"] == "garbled"
+    assert r["data"]["forced_extraction_mode"] == "ocr"
+
+
+def test_set_chapters_text_mode_ok_when_quality_good(tmp_path, ko_short):
+    """정상 텍스트 레이어(medium/high)면 text 모드가 통과한다(오탐 방지)."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    assert workspace.load_state(wid)["text_quality"] in ("low", "medium", "high")
+    r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
+                                   "page_range": [1, 12]}],
+                            execution_mode="sequential", extraction_mode="text")
+    assert r["ok"] is True, r
+
+
 # ---------------------------------------------------------------------------
 # scan_pdf — 텍스트 레이어 없어도 거부하지 않고 vision 경로
 # ---------------------------------------------------------------------------
@@ -138,6 +205,28 @@ def test_scan_pdf_scanned_routes_to_vision_not_rejected(tmp_path, scanned_empty)
     assert r["data"]["toc_page_images"]
     # 텍스트는 응답에 노출되지 않는다
     assert "scanned_text" not in r["data"]
+
+
+def test_scan_skips_offset_and_language_on_no_text_layer(tmp_path, scanned_empty, monkeypatch):
+    """스캔본(no_text_layer)에선 offset/language 측정을 건너뛴다(불필요한 페이지 읽기 회피)."""
+    from pdf_study import analysis
+
+    calls = {"offset": 0}
+    orig = analysis.reader.detect_page_offset
+
+    def counted(*a, **k):
+        calls["offset"] += 1
+        return orig(*a, **k)
+
+    monkeypatch.setattr(analysis.reader, "detect_page_offset", counted)
+    wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    st = workspace.load_state(wid)
+    assert st["text_quality"] == "no_text_layer"
+    assert st["language"] is None
+    assert st["page_offset"] is None
+    assert st["page_offset_confidence"] == "none"
+    assert calls["offset"] == 0  # detect_page_offset 자체가 호출되지 않음
 
 
 def test_scan_pdf_outline_routes_to_from_outline(tmp_path, ko_with_toc):
