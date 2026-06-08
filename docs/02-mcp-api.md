@@ -99,6 +99,14 @@ finalize_study(work_id: str, output_format: str = "", keep_work_dir: bool = True
   이탈(예: chapter_id에 페이지 범위 문자열 사용)하지 않게 한다.
 - 에러 메시지도 가이드다 — 예: 잘못된 chapter_id는 유효 id 목록과 "특정 페이지는
   toc_page_images를 직접 열라"는 복구 안내를 함께 돌려준다.
+- **선택지 제시 정책 (`analysis.CHOICE_POLICY`)**: 사용자에게 선택을 받는 모든 지점
+  (set_chapters 모드, scan_pdf의 user_choices, finalize의 output_format)은 응답에
+  "구조화된 선택 도구가 있으면 그걸로 data.choices를 그대로 옵션화하라(예: Claude
+  Code의 **AskUserQuestion**), label·설명을 요약·변형하거나 MCP에 없는 '추천·기본값'
+  표현을 임의로 덧붙이지 마라"는 정책을 함께 싣는다. MCP는 클라이언트 도구를 강제할
+  수 없으므로(예: Gemini CLI엔 AskUserQuestion이 없음) 이는 *제안*이며, 메인 에이전트가
+  여전히 산문으로 풀어쓸 수는 있다 — 그래도 `data.choices`(label/desc 구조)를 그대로
+  넘기면 충실도가 가장 높다.
 
 ## 메인 LLM 워크플로
 

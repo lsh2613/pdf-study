@@ -101,6 +101,8 @@ def _assert_mode_choices(r):
     assert all(c.get("label") and c.get("desc") for c in r["data"]["choices"])
     assert r["data"]["execution_modes"] == ["sequential", "parallel"]
     assert r["data"]["extraction_modes"] == ["text", "ocr"]
+    # 구조화 선택 도구(AskUserQuestion) 사용 + verbatim 정책이 안내에 포함
+    assert "AskUserQuestion" in r["error"]
 
 
 def test_set_chapters_requires_execution_mode(tmp_path, ko_short):
@@ -260,7 +262,9 @@ def test_finalize_requires_output_format(tmp_path, ko_short):
     _check_envelope(r)
     assert r["ok"] is False
     assert "output_format" in r["error"]
-    assert r["data"]["choices"] == ["html", "md_tui"]
+    assert {c["value"] for c in r["data"]["choices"]} == {"html", "md_tui"}
+    # 구조화 선택 도구(AskUserQuestion) 사용 정책이 안내에 포함
+    assert "AskUserQuestion" in r["error"]
 
 
 def test_finalize_rejects_unknown_format(tmp_path, ko_short):

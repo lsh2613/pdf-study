@@ -262,6 +262,9 @@ def set_chapters(
         - ④ Parallel + OCR: 병렬 OCR로 ③보다 빠르나 비용 가장 큼 (스캔본)
       ※ 목차 분석은 모드와 무관하게 항상 내장 목차/이미지로 처리됩니다. 여기서
         고르는 건 **본문 추출/디스패치** 방식뿐입니다.
+      ※ 물을 땐 클라이언트의 구조화 선택 도구(예: Claude Code의 AskUserQuestion)로
+        data.choices를 그대로 옵션화하세요. label·설명을 요약·변형하거나 MCP에 없는
+        '추천·기본값' 표현을 임의로 덧붙이지 마세요.
     - 각 chapter에 optional "skip": true 를 주면 그 챕터는 본문 추출과
       sub-agent 디스패치, 렌더링 모두에서 제외됩니다. **찾아보기·색인·
       판권·저자 소개 같은 비본문 페이지가 섞여 들어왔을 때 사용**하세요.
@@ -289,7 +292,8 @@ def set_chapters(
             "느리고 비용 큼 (스캔본).\n"
             "④ Parallel + OCR — 최대 5개 동시 + 비전 LLM OCR. ③보다 빠르나 비용 "
             "가장 큼 (스캔본).\n"
-            "execution_mode는 'sequential'|'parallel', extraction_mode는 'text'|'ocr'.",
+            "execution_mode는 'sequential'|'parallel', extraction_mode는 'text'|'ocr'.\n"
+            + analysis.CHOICE_POLICY,
             data={
                 "choices": [
                     {"execution_mode": "sequential", "extraction_mode": "text",
@@ -557,12 +561,16 @@ def finalize_study(
     """
     if not output_format:
         return _err(
-            "output_format이 지정되지 않았습니다. 기본값을 임의로 정하지 말고, "
-            "MCP가 준 data.choices 두 선택지를 **그대로** 사용자에게 제시해(임의로 "
-            "바꾸거나 빼지 말 것) 'html: 정적 웹사이트로 열람 / "
+            "output_format이 지정되지 않았습니다. 'html: 정적 웹사이트로 열람 / "
             "md_tui: 챕터별 Markdown + 학습 TUI' 중 무엇을 원하는지 물어본 뒤 "
-            "그 선택을 output_format으로 전달해 다시 호출하세요.",
-            data={"choices": list(RENDERERS)},
+            "그 선택을 output_format으로 전달해 다시 호출하세요.\n"
+            + analysis.CHOICE_POLICY,
+            data={"choices": [
+                {"value": "html", "label": "HTML",
+                 "desc": "정적 웹사이트 — 브라우저로 열람 + 진도 저장 서버"},
+                {"value": "md_tui", "label": "Markdown + TUI",
+                 "desc": "챕터별 Markdown + 터미널 학습 TUI"},
+            ]},
         )
     renderer_cls = RENDERERS.get(output_format)
     if renderer_cls is None:
