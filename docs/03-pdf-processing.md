@@ -18,7 +18,7 @@
 페이지 이미지를 읽는 것**이다(문맥으로 `SERIALIZABLE` 같은 깨진 토큰까지 복원).
 
 - `reader.render_pages(doc, start, end, dir, dpi=150, quality=80)` 가 페이지를
-  **JPEG**로 렌더(`.work/pdf_analysis/pages/p{N}.jpg`, 페이지 단위라 scan↔챕터
+  **JPEG**로 렌더(`.work/raw_data/pages/p{N}.jpg`, 페이지 단위라 scan↔챕터
   재사용·캐시). PyMuPDF `get_pixmap` + PIL만 사용.
 - `scan_pdf`: 첫 N페이지만 렌더(`scan_page_images`)해 **목차는 메인 에이전트가
   그 이미지로 직접 분석**한다(`toc_finder` 스크립트 파싱은 OCR 모드에서 돌리지
@@ -146,7 +146,7 @@ book_info가 없으면 PDF 메타만 사용.
 
 ### 워크스페이스 저장
 
-`.work/pdf_analysis/book_info.json`으로 저장. `finalize_study`가 index.html 상단에 렌더링.
+`.work/raw_data/book_info.json`으로 저장. `finalize_study`가 index.html 상단에 렌더링.
 
 ## 챕터 분리 모드 (4가지)
 

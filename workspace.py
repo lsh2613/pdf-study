@@ -3,13 +3,15 @@
 폴더 레이아웃 (output_dir 안에 생성):
     .work/
     ├── state.json
-    ├── pdf_analysis/
+    ├── raw_data/
     │   ├── outline.json
     │   ├── book_info.json
     │   ├── chapters_raw/ch{N}.json
     │   └── pages/p{N}.jpg          # OCR 모드: 페이지 통째 렌더 (lazy)
-    ├── chapters/ch{N}.json
-    └── extensions/ch{N}.json
+    └── chapters/
+        ├── summaries/ch{N}.json           # 요약 + 핵심포인트
+        ├── quiz/ch{N}.json                # 기본 문제 (mc/sa/rf)
+        └── extension_questions/ch{N}.json # 확장 문제
 
 work_id 컨벤션: YYYYMMDD-HHMMSS (단순 타임스탬프).
 """
@@ -113,33 +115,45 @@ def state_path(work_id: str) -> Path:
     return get_work_dir(work_id) / "state.json"
 
 
-def pdf_analysis_dir(work_id: str) -> Path:
-    return get_work_dir(work_id) / "pdf_analysis"
+def raw_data_dir(work_id: str) -> Path:
+    return get_work_dir(work_id) / "raw_data"
 
 
 def chapters_raw_dir(work_id: str) -> Path:
-    return pdf_analysis_dir(work_id) / "chapters_raw"
+    return raw_data_dir(work_id) / "chapters_raw"
 
 
 def pages_dir(work_id: str) -> Path:
     """OCR 모드에서 페이지를 JPEG로 렌더해 두는 곳 (p{N}.jpg)."""
-    return pdf_analysis_dir(work_id) / "pages"
+    return raw_data_dir(work_id) / "pages"
 
 
 def chapters_dir(work_id: str) -> Path:
+    """챕터별 sub-agent 산출물의 부모 폴더 (summaries/quiz/extension_questions)."""
     return get_work_dir(work_id) / "chapters"
 
 
-def extensions_dir(work_id: str) -> Path:
-    return get_work_dir(work_id) / "extensions"
+def summaries_dir(work_id: str) -> Path:
+    """요약 + 핵심포인트 (summary, key_points)."""
+    return chapters_dir(work_id) / "summaries"
+
+
+def quiz_dir(work_id: str) -> Path:
+    """기본 문제 (multiple_choice / short_answer / reflection)."""
+    return chapters_dir(work_id) / "quiz"
+
+
+def extension_questions_dir(work_id: str) -> Path:
+    """확장 문제 (extension)."""
+    return chapters_dir(work_id) / "extension_questions"
 
 
 def book_info_path(work_id: str) -> Path:
-    return pdf_analysis_dir(work_id) / "book_info.json"
+    return raw_data_dir(work_id) / "book_info.json"
 
 
 def outline_path(work_id: str) -> Path:
-    return pdf_analysis_dir(work_id) / "outline.json"
+    return raw_data_dir(work_id) / "outline.json"
 
 
 # ---------------------------------------------------------------------------
@@ -197,10 +211,11 @@ def create_workspace(
     work_dir = out / ".work"
 
     # 하위 디렉터리 미리 생성
-    (work_dir / "pdf_analysis" / "chapters_raw").mkdir(parents=True, exist_ok=True)
-    (work_dir / "pdf_analysis" / "pages").mkdir(parents=True, exist_ok=True)
-    (work_dir / "chapters").mkdir(parents=True, exist_ok=True)
-    (work_dir / "extensions").mkdir(parents=True, exist_ok=True)
+    (work_dir / "raw_data" / "chapters_raw").mkdir(parents=True, exist_ok=True)
+    (work_dir / "raw_data" / "pages").mkdir(parents=True, exist_ok=True)
+    (work_dir / "chapters" / "summaries").mkdir(parents=True, exist_ok=True)
+    (work_dir / "chapters" / "quiz").mkdir(parents=True, exist_ok=True)
+    (work_dir / "chapters" / "extension_questions").mkdir(parents=True, exist_ok=True)
 
     if work_id is None:
         work_id = make_work_id()
@@ -398,13 +413,24 @@ def save_chapter_result(
     chapter_id: str,
     data: dict[str, Any],
 ) -> Path:
-    """summarizer sub-agent의 챕터 결과를 chapters/에 저장 + state 갱신.
+    """summarizer sub-agent의 챕터 결과를 분리 저장 + state 갱신.
+
+    한 payload({summary, key_points, questions})를 두 파일로 나눠 쓴다:
+      - summaries/ch{N}.json : questions를 제외한 요약 정보(title/summary/key_points)
+      - quiz/ch{N}.json      : 기본 문제({chapter_id, questions})
+    (둘은 항상 같은 호출에서 함께 생성된다 — 결합 유지)
 
     동시성: state.json 갱신은 _get_lock으로 직렬화. 파일 자체 쓰기는
     atomic rename이라 챕터 파일끼리도 충돌 없음.
     """
-    out = chapters_dir(work_id) / f"{chapter_id}.json"
-    _atomic_write_json(out, data)
+    summary_part = {k: v for k, v in data.items() if k != "questions"}
+    quiz_part = {
+        "chapter_id": data.get("chapter_id", chapter_id),
+        "questions": data.get("questions") or {},
+    }
+    out = summaries_dir(work_id) / f"{chapter_id}.json"
+    _atomic_write_json(out, summary_part)
+    _atomic_write_json(quiz_dir(work_id) / f"{chapter_id}.json", quiz_part)
 
     with _get_lock(work_id):
         state = load_state(work_id)
@@ -424,7 +450,7 @@ def save_extension_result(
     data: dict[str, Any],
 ) -> Path:
     """extension sub-agent 결과 저장 + state 갱신."""
-    out = extensions_dir(work_id) / f"{chapter_id}.json"
+    out = extension_questions_dir(work_id) / f"{chapter_id}.json"
     _atomic_write_json(out, data)
 
     with _get_lock(work_id):

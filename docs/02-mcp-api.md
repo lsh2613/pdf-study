@@ -84,7 +84,7 @@ list_pending_chapters(work_id: str) -> dict
 finalize_study(work_id: str, output_format: str = "", keep_work_dir: bool = True, force: bool = False) -> dict
 # output_format: "html"(정적 사이트) | "md_tui"(챕터별 폴더 + summary.md + 학습 TUI).
 # 기본값 없음 — 임의 지정 금지, 반드시 사용자에게 물어볼 것. 미지정 시 ok=False로 거부.
-# 둘 다 동일한 중립 JSON(chapters/, extensions/)에서 렌더되므로, 같은 work_id로
+# 둘 다 동일한 중립 JSON(chapters/{summaries,quiz,extension_questions})에서 렌더되므로, 같은 work_id로
 # output_format만 바꿔 두 번 호출하면 두 포맷을 모두 생성할 수 있다.
 ```
 

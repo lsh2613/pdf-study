@@ -1,7 +1,7 @@
 """Markdown + TUI 렌더러: 챕터별 폴더 + summary.md + quiz.json + TUI launcher.
 
 설계 메모 (docs/05-data-schemas.md, docs/07-study-ui.md):
-- 출력 포맷 중립 JSON(chapters/, extensions/)을 읽어 챕터별 폴더로 전개.
+- 출력 포맷 중립 JSON(chapters/{summaries,quiz,extension_questions})을 읽어 챕터별 폴더로 전개.
 - summary.md = 읽기 전용(요약/핵심포인트), quiz.json = TUI 전용(4유형 문제+정답).
 - 엔진(study_tui.py)은 출력 루트에 1벌 복사, 각 챕터엔 엔진을 호출하는 얇은 launcher.
 - 옵션 비활성 유형은 quiz.json에서 생략 (sub-agent도 생성하지 않으므로 빈 유형 없음).

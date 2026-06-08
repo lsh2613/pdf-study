@@ -1,4 +1,4 @@
-"""HTML 렌더러: state + book_info + chapters + extensions → 정적 사이트.
+"""HTML 렌더러: state + book_info + chapters/{summaries,quiz,extension_questions} → 정적 사이트.
 
 설계 메모:
 - Jinja2 의존 추가하지 않고 stdlib `html.escape` + f-string 합성.
@@ -56,8 +56,9 @@ def _esc(s: Any) -> str:
 def _load_all(work_id: str) -> dict[str, Any]:
     state = workspace.load_state(work_id)
     book_info = workspace.load_book_info(work_id) or {}
-    chapters_dir = workspace.chapters_dir(work_id)
-    extensions_dir = workspace.extensions_dir(work_id)
+    summaries_dir = workspace.summaries_dir(work_id)
+    quiz_dir = workspace.quiz_dir(work_id)
+    ext_dir = workspace.extension_questions_dir(work_id)
     raw_dir = workspace.chapters_raw_dir(work_id)
 
     all_ids = sorted(state.get("chapters", {}).keys(), key=_chapter_sort_key)
@@ -66,13 +67,20 @@ def _load_all(work_id: str) -> dict[str, Any]:
     chapters: list[dict[str, Any]] = []
     for cid in chapter_ids:
         meta = state["chapters"][cid]
-        ch_path = chapters_dir / f"{cid}.json"
-        ext_path = extensions_dir / f"{cid}.json"
+        sum_path = summaries_dir / f"{cid}.json"
+        quiz_path = quiz_dir / f"{cid}.json"
+        ext_path = ext_dir / f"{cid}.json"
         raw_path = raw_dir / f"{cid}.json"
 
-        summary_data = json.loads(ch_path.read_text(encoding="utf-8")) if ch_path.exists() else None
+        summary_data = json.loads(sum_path.read_text(encoding="utf-8")) if sum_path.exists() else None
+        quiz_data = json.loads(quiz_path.read_text(encoding="utf-8")) if quiz_path.exists() else None
         ext_data = json.loads(ext_path.read_text(encoding="utf-8")) if ext_path.exists() else None
         raw_data = json.loads(raw_path.read_text(encoding="utf-8")) if raw_path.exists() else None
+
+        # summaries(요약) + quiz(문제)는 분리 저장되지만 다운스트림은 한 dict로 본다.
+        if summary_data is not None or quiz_data is not None:
+            summary_data = summary_data or {}
+            summary_data["questions"] = (quiz_data or {}).get("questions") or {}
 
         chapters.append({
             "chapter_id": cid,

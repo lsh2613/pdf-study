@@ -25,8 +25,8 @@
         ▼
 ┌──────────────────────────────────────────────────────────────┐
 │ 작업 디스크 레이아웃: <output_dir>/.work/                    │
-│   state.json / pdf_analysis/ / chapters/ / extensions/ /     │
-│   pdf_analysis/chapters_raw/ / pdf_analysis/pages/ (OCR)     │
+│   state.json / raw_data/ / chapters/{summaries,quiz,        │
+│   extension_questions}/ / raw_data/{chapters_raw,pages}/     │
 └──────────────────────────────────────────────────────────────┘
         │ finalize_study 후
         ▼
@@ -70,7 +70,7 @@ server.init_work(...)
         ▼
 workspace.create_workspace(..., work_id=work_id)
    - PDF 존재·옵션·execution_mode·extraction_mode 검증
-   - <output_dir>/.work/ 하위 폴더 생성 (pdf_analysis/pages/ 포함)
+   - <output_dir>/.work/ 하위 폴더 생성 (raw_data/pages/ 포함)
    - state.json 초기화 (extraction_mode, phases=pending, chapters={})
    - register(work_id → work_dir)  in-memory registry
 ```
@@ -142,7 +142,7 @@ server.scan_pdf(work_id, scan_size)
        ├─ workspace.update_state(page_count, text_quality, language,
        │                         page_offset, page_offset_confidence)
        ├─ workspace.update_phase("scanning", "completed")
-       └─ workspace.save_outline(...)   # .work/pdf_analysis/outline.json
+       └─ workspace.save_outline(...)   # .work/raw_data/outline.json
 ```
 
 - 코드: `analysis.py:scan_pdf_impl`, `_build_recommendations`,
@@ -223,7 +223,8 @@ Task tool만 진짜 병렬, Gemini/Codex는 메인 모델이 순차 처리).
 
 (3) save_chapter_result(work_id, chapter_id, data)
        └─ workspace.save_chapter_result
-            - chapters/ch{N}.json 저장 (atomic write)
+            - chapters/summaries/ch{N}.json + chapters/quiz/ch{N}.json
+              두 파일로 분리 저장 (각각 atomic write)
             - state lock 안에서 summary_status="completed"
 
 (4) (extension 활성 시)
@@ -232,7 +233,7 @@ Task tool만 진짜 병렬, Gemini/Codex는 메인 모델이 순차 처리).
        - 실패해도 빈 results + ok=True (graceful degrade)
 
 (5) extension sub-agent → save_extension_result
-       └─ extensions/ch{N}.json + extension_status="completed"
+       └─ chapters/extension_questions/ch{N}.json + extension_status="completed"
 ```
 
 - 코드: `server.py:get_chapter_content/save_chapter_result/
@@ -272,8 +273,9 @@ server.finalize_study(work_id, output_format="", keep_work_dir=True, force=False
   ├─ RENDERERS[output_format]()  # "html"→HtmlRenderer, "md_tui"→MdTuiRenderer
   └─ HtmlRenderer.render(work_id, output_dir)   # md_tui면 MdTuiRenderer
        ├─ _load_all
-       │    - state, book_info, chapters/ch{N}.json,
-       │      extensions/ch{N}.json, chapters_raw/ch{N}.json 모두 로드
+       │    - state, book_info, chapters/{summaries,quiz,extension_questions}/
+       │      ch{N}.json, raw_data/chapters_raw/ch{N}.json 모두 로드
+       │      (summaries+quiz는 한 dict로 병합)
        │    - state.chapters[*]에서 skip=True 인 챕터는 제외
        ├─ _copy_assets       → style.css, storage.js, grading.js, study_html.py, README.md
        ├─ _summary_section   → 요약 마크다운을 markdown-it로 HTML 변환
@@ -347,14 +349,15 @@ T0  init_work
     └─ state.json
 T1  scan_pdf
     └─ state.json (language, text_quality, page_count 채움)
-    └─ pdf_analysis/outline.json
+    └─ raw_data/outline.json
 T2  set_chapters
     ├─ state.json (chapters 채움, skip=true는 skipped 상태)
-    ├─ pdf_analysis/book_info.json
-    └─ pdf_analysis/chapters_raw/ch{N}.json   (skip 제외)
+    ├─ raw_data/book_info.json
+    └─ raw_data/chapters_raw/ch{N}.json   (skip 제외)
 T3  챕터 루프
-    ├─ chapters/ch{N}.json                    (summarizer 결과)
-    └─ extensions/ch{N}.json                  (extension 결과)
+    ├─ chapters/summaries/ch{N}.json          (요약 + 핵심포인트)
+    ├─ chapters/quiz/ch{N}.json               (기본 문제)
+    └─ chapters/extension_questions/ch{N}.json (extension 결과)
        + state.json의 status 갱신 (lock 보호 + atomic)
 T4  finalize_study (output_format=html)
     └─ <output_dir>/

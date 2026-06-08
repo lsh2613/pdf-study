@@ -72,7 +72,7 @@ def test_skip_skips_raw_extraction(tmp_path, ko_with_toc):
         {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
     ])
     # ch1은 raw 파일 생김, ch2는 안 생김
-    raw_dir = out / ".work/pdf_analysis/chapters_raw"
+    raw_dir = out / ".work/raw_data/chapters_raw"
     assert (raw_dir / "ch1.json").exists()
     assert not (raw_dir / "ch2.json").exists()
 

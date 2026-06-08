@@ -12,13 +12,15 @@
 ```
 .work/
 ├── state.json
-├── pdf_analysis/
+├── raw_data/
 │   ├── outline.json
 │   ├── book_info.json
 │   ├── chapters_raw/ch{N}.json
 │   └── pages/p{N}.jpg         # OCR 모드: 페이지를 통째로 렌더한 이미지 (lazy)
-├── chapters/ch{N}.json
-└── extensions/ch{N}.json
+└── chapters/
+    ├── summaries/ch{N}.json           # 요약 + 핵심포인트
+    ├── quiz/ch{N}.json                # 기본 문제 (mc/sa/rf)
+    └── extension_questions/ch{N}.json # 확장 문제
 ```
 
 ### 최종 출력 (study_output/) — output_format="html" 기준
@@ -152,12 +154,18 @@ study_output/
   저장 안 함):
   ```json
   "page_images": [
-    {"id": "p12", "path": "pdf_analysis/pages/p12.jpg", "page": 12}, ...
+    {"id": "p12", "path": "raw_data/pages/p12.jpg", "page": 12}, ...
   ]
   ```
   sub-agent는 이 이미지를 순서대로 읽어 본문을 OCR한 뒤 요약/문제를 만든다.
 
-### chapters/ch{N}.json (sub-agent 결과)
+### chapters/ — sub-agent 결과 (요약/문제 분리 저장)
+
+summarizer sub-agent의 한 payload(`{summary, key_points, questions}`)는
+`save_chapter_result`가 **두 파일로 나눠** 저장한다. 둘은 항상 같은 호출에서
+함께 생성된다(결합 유지). 렌더러는 둘을 다시 한 dict로 합쳐 읽는다.
+
+#### chapters/summaries/ch{N}.json (요약 + 핵심포인트)
 
 `summary`는 **마크다운 문자열**이다(`##` 소제목·**굵게**·목록·코드·표 가능). 이미지
 (그림)는 넣지 않는다([04-content-generation.md](./04-content-generation.md#요약-형식--마크다운)).
@@ -167,7 +175,15 @@ study_output/
   "chapter_id": "ch1",
   "title": "트랜잭션",
   "summary": "## 개요\n트랜잭션은 **원자성**을 보장한다.\n\n- 격리 수준\n...",
-  "key_points": ["...", "..."],
+  "key_points": ["...", "..."]
+}
+```
+
+#### chapters/quiz/ch{N}.json (기본 문제)
+
+```json
+{
+  "chapter_id": "ch1",
   "questions": {
     "multiple_choice": [
       {
@@ -184,7 +200,7 @@ study_output/
 }
 ```
 
-### extensions/ch{N}.json
+### chapters/extension_questions/ch{N}.json
 
 ```json
 {
