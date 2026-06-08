@@ -58,7 +58,9 @@
 ```
 사용자 발화에서 메인 LLM이 추출:
   pdf_path, (옵션) output_dir, execution_mode, extraction_mode, enable_*, user_context
-        │  execution_mode·extraction_mode는 기본값 없음 → 미지정 시 ok=False 거부
+        │  execution_mode·extraction_mode는 기본값 없음 → 하나라도 미지정/오타면
+        │  ok=False 거부. data.choices에 4조합(Sequential/Parallel × Text/OCR)과
+        │  특징이 담겨, 메인 LLM이 4개 모두 사용자에게 제시 후 고른 값으로 재호출.
         ▼
 server.init_work(...)
    - output_dir이 비었으면 default = <Path.cwd()>/result/<pdf_basename>/

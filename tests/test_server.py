@@ -25,23 +25,33 @@ def test_init_work_rejects_all_disabled(tmp_path, ko_short):
     assert "question type" in r["error"]
 
 
-def test_init_work_requires_execution_mode(tmp_path, ko_short):
-    """execution_mode 미지정 시 거부 + 사용자에게 물어보라는 안내."""
-    r = server.init_work(str(ko_short), str(tmp_path / "out"))  # mode 생략
+def _assert_mode_choices(r):
+    """미지정 거부 응답이 4가지 조합과 특징을 모두 담는지 검증."""
     _check_envelope(r)
     assert r["ok"] is False
-    assert "execution_mode" in r["error"]
-    assert r["data"]["choices"] == ["sequential", "parallel"]
+    assert "execution_mode" in r["error"] and "extraction_mode" in r["error"]
+    combos = {(c["execution_mode"], c["extraction_mode"]) for c in r["data"]["choices"]}
+    assert combos == {
+        ("sequential", "text"), ("parallel", "text"),
+        ("sequential", "ocr"), ("parallel", "ocr"),
+    }
+    # 각 조합에 사람이 읽을 라벨/특징이 붙어 있어야 한다
+    assert all(c.get("label") and c.get("desc") for c in r["data"]["choices"])
+    assert r["data"]["execution_modes"] == ["sequential", "parallel"]
+    assert r["data"]["extraction_modes"] == ["text", "ocr"]
+
+
+def test_init_work_requires_execution_mode(tmp_path, ko_short):
+    """execution_mode 미지정 시 거부 + 4조합 안내."""
+    r = server.init_work(str(ko_short), str(tmp_path / "out"))  # mode 생략
+    _assert_mode_choices(r)
 
 
 def test_init_work_requires_extraction_mode(tmp_path, ko_short):
-    """execution_mode는 줬지만 extraction_mode 미지정 시 거부 + 안내."""
+    """execution_mode는 줬지만 extraction_mode 미지정 시 거부 + 4조합 안내."""
     r = server.init_work(str(ko_short), str(tmp_path / "out"),
                          execution_mode="sequential")  # extraction_mode 생략
-    _check_envelope(r)
-    assert r["ok"] is False
-    assert "extraction_mode" in r["error"]
-    assert r["data"]["choices"] == ["text", "ocr"]
+    _assert_mode_choices(r)
 
 
 def test_init_work_rejects_missing_pdf(tmp_path):

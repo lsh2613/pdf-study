@@ -12,13 +12,16 @@ init_work(
     pdf_path: str,
     output_dir: str = "",
     execution_mode: str = "",            # "sequential" | "parallel" — 기본값 없음.
-                                          # 임의 지정 금지, 반드시 사용자에게 물어볼 것.
-                                          # 미지정 시 ok=False로 거부.
-    extraction_mode: str = "",           # "text" | "ocr" — 기본값 없음. 임의 지정
-                                          # 금지, 반드시 사용자에게 물어볼 것. 미지정 거부.
-                                          # text: 라이브러리로 텍스트 추출(디지털 PDF).
-                                          # ocr: 비전 LLM이 페이지 이미지를 직접 읽음
-                                          #      (스캔본·글꼴 깨진 PDF).
+    extraction_mode: str = "",           # "text" | "ocr" — 기본값 없음.
+                                          # 둘 다 임의 지정 금지, 반드시 사용자에게 물어볼 것.
+                                          # 하나라도 미지정/오타면 ok=False로 거부하며
+                                          # data.choices에 아래 4조합+특징을 돌려준다.
+                                          # 4개 모두 유효하니 빼지 말고 전부 제시할 것:
+                                          #   ① Sequential+Text: 디지털 PDF·안정·빠르고 저렴(기본)
+                                          #   ② Parallel+Text  : 디지털 PDF·최대 5개 동시로 가장 빠름
+                                          #   ③ Sequential+OCR : 스캔본·정확하나 느리고 비쌈
+                                          #   ④ Parallel+OCR   : 스캔본·병렬 OCR로 빠르나 비용 최대
+                                          # text=라이브러리 추출 / ocr=비전 LLM이 페이지 이미지 직독.
     enable_multiple_choice: bool = True,
     enable_short_answer: bool = True,
     enable_reflection: bool = True,

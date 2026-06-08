@@ -102,37 +102,55 @@ def init_work(
       아래에 `result/<pdf_basename>/` 형태로 자동 생성됩니다 (PDF 파일명에서
       안전하지 않은 문자는 `_`로 치환). 같은 PDF로 재실행하면 같은 폴더에
       **덮어씌워지므로**, 이전 결과를 보존하려면 명시적으로 다른 경로를 주세요.
-    - execution_mode: "sequential" | "parallel". **기본값 없음 — 임의로 정하지
-      말고 반드시 사용자에게 물어 선택을 받으세요.** 미지정 시 거부됩니다.
-        - sequential: 한 챕터씩 순차 처리 (안정적, 느림)
-        - parallel: 최대 5개 챕터 동시 처리 (빠름, sub-agent 병렬 디스패치)
-    - extraction_mode: "text" | "ocr". **기본값 없음 — 임의로 정하지 말고 반드시
-      사용자에게 물어 선택을 받으세요.** 미지정 시 거부됩니다.
-        - text: 디지털/전자책 PDF(텍스트 복사·검색이 잘 되는 PDF)에 적합.
-          빠르고 비용 적음. 단 스캔본·글꼴 깨진 PDF는 본문이 손상될 수 있음.
-        - ocr: 스캔본·이미지 기반·텍스트가 깨지는 PDF에 적합. 비전 LLM(sub-agent)이
-          페이지 이미지를 직접 읽어 정확하나 느리고 비용 큼.
+    - execution_mode("sequential"|"parallel") · extraction_mode("text"|"ocr"):
+      **둘 다 기본값 없음 — 임의로 정하지 말고 반드시 사용자에게 물어 선택을
+      받으세요.** 둘 중 하나라도 미지정/오타면 거부되며, 응답에 아래 4가지 조합과
+      특징(data.choices)이 담깁니다. **4개 모두 유효하니 임의로 빼지 말고 전부**
+      사용자에게 제시한 뒤 고른 조합의 두 값을 그대로 전달해 재호출하세요.
+        - ① Sequential + Text: 디지털 PDF · 안정적·빠르고 저렴 (무난한 기본)
+        - ② Parallel + Text: 디지털 PDF · 최대 5개 챕터 동시로 가장 빠름
+        - ③ Sequential + OCR: 스캔본·깨진 PDF · 비전 LLM 직독으로 정확하나 느리고 비쌈
+        - ④ Parallel + OCR: 스캔본·깨진 PDF · 병렬 OCR로 ③보다 빠르나 비용 가장 큼
+      (execution: sequential=순차·안정 / parallel=최대 5개 동시 디스패치.
+       extraction: text=라이브러리 추출(스캔본 손상위험) / ocr=페이지 이미지 직독.)
     - enable_*: 4가지 문제 유형 활성/비활성 (모두 False 금지)
     - user_context: 학습자 정보 (학년/배경 등). sub-agent 프롬프트에 주입.
     다음 단계: scan_pdf(work_id)
     """
-    if execution_mode not in ("sequential", "parallel"):
+    if execution_mode not in ("sequential", "parallel") or \
+            extraction_mode not in ("text", "ocr"):
         return _err(
-            "execution_mode가 지정되지 않았습니다. 기본값을 임의로 정하지 말고, "
-            "사용자에게 '직렬(sequential): 한 챕터씩 순차 처리 / "
-            "병렬(parallel): 최대 5개 챕터 동시 처리' 중 무엇을 원하는지 물어본 뒤 "
-            "그 선택을 execution_mode로 전달해 다시 호출하세요.",
-            data={"choices": ["sequential", "parallel"]},
-        )
-    if extraction_mode not in ("text", "ocr"):
-        return _err(
-            "extraction_mode가 지정되지 않았습니다. 기본값을 임의로 정하지 말고, "
-            "사용자에게 '텍스트(text): 디지털 PDF에서 라이브러리로 텍스트 추출 — "
-            "빠르고 저렴하나 스캔본·글꼴 깨진 PDF는 본문 손상 위험 / "
-            "OCR(ocr): 비전 LLM이 페이지 이미지를 직접 읽음 — 스캔본·깨진 PDF에 "
-            "강하나 느리고 비용 큼' 중 무엇을 원하는지 물어본 뒤 그 선택을 "
-            "extraction_mode로 전달해 다시 호출하세요.",
-            data={"choices": ["text", "ocr"]},
+            "execution_mode와 extraction_mode를 모두 지정해야 합니다. 기본값을 "
+            "임의로 정하지 말고, 아래 4가지 조합과 특징을 사용자에게 그대로 보여준 뒤 "
+            "원하는 하나를 골라 두 값(execution_mode, extraction_mode)을 전달해 다시 "
+            "호출하세요. 4개 모두 유효한 조합이니 임의로 빼지 말고 전부 제시할 것.\n"
+            "① Sequential + Text — 디지털/전자책 PDF용. 한 챕터씩 순차 처리 + "
+            "라이브러리 텍스트 추출. 안정적이고 빠르며 저렴 (가장 무난한 기본값).\n"
+            "② Parallel + Text — 디지털/전자책 PDF용. 최대 5개 챕터 동시 처리 + "
+            "텍스트 추출. 병렬 디스패치가 가능한 클라이언트에서 가장 빠름.\n"
+            "③ Sequential + OCR — 스캔본·글꼴 깨진 PDF용. 순차 처리 + 비전 LLM이 "
+            "페이지 이미지를 직접 읽음. 정확하나 느리고 비용 큼.\n"
+            "④ Parallel + OCR — 스캔본·깨진 PDF용. 최대 5개 챕터 동시 + 비전 LLM "
+            "OCR. OCR을 병렬로 돌려 ③보다 빠르나 비용이 가장 큼.\n"
+            "execution_mode는 'sequential'|'parallel', extraction_mode는 'text'|'ocr'.",
+            data={
+                "choices": [
+                    {"execution_mode": "sequential", "extraction_mode": "text",
+                     "label": "Sequential + Text",
+                     "desc": "디지털 PDF · 안정적·빠르고 저렴 (무난한 기본)"},
+                    {"execution_mode": "parallel", "extraction_mode": "text",
+                     "label": "Parallel + Text",
+                     "desc": "디지털 PDF · 최대 5개 동시로 가장 빠름"},
+                    {"execution_mode": "sequential", "extraction_mode": "ocr",
+                     "label": "Sequential + OCR",
+                     "desc": "스캔본·깨진 PDF · 정확하나 느리고 비쌈"},
+                    {"execution_mode": "parallel", "extraction_mode": "ocr",
+                     "label": "Parallel + OCR",
+                     "desc": "스캔본·깨진 PDF · 병렬 OCR로 빠르나 비용 가장 큼"},
+                ],
+                "execution_modes": ["sequential", "parallel"],
+                "extraction_modes": ["text", "ocr"],
+            },
         )
 
     work_id = workspace.make_work_id()
