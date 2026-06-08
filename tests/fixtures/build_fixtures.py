@@ -210,6 +210,14 @@ def build_ko_with_toc(out_path: Path) -> Path:
             _add_body_figure(p, assets["fig"])
         _add_text(p, fitz.Rect(50, 800, 545, 830), f"{i}", size=9)
 
+    # 내장 목차(북마크) — 챕터 경계 1순위 소스. [level, title, 물리 page].
+    # 챕터는 물리 p.5/13/21에서 시작 → scan_pdf가 from_outline으로 추천한다.
+    doc.set_toc([
+        [1, "제1장 트랜잭션", 5],
+        [1, "제2장 인덱싱", 13],
+        [1, "제3장 분산 시스템", 21],
+    ])
+
     doc.save(str(out_path), garbage=4, deflate=True, clean=True)
     doc.close()
     return out_path

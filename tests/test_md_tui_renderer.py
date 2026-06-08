@@ -31,12 +31,13 @@ def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):
 
 
 def _build_multi(ko_with_toc, tmp_path, *, opts=None):
-    opts = {"execution_mode": "sequential", "extraction_mode": "text", **(opts or {})}
+    opts = opts or {}
     r = server.init_work(str(ko_with_toc), str(tmp_path / "out"), **opts)
     wid = r["data"]["work_id"]
     s = server.scan_pdf(wid)
     chs = s["data"]["recommendations"]["suggested_chapters"]
-    server.set_chapters(wid, chs, {"title": "테스트 책", "author": "T"})
+    server.set_chapters(wid, chs, execution_mode="sequential", extraction_mode="text",
+                        book_info={"title": "테스트 책", "author": "T"})
     for c in chs:
         cid = c["chapter_id"]
         server.save_chapter_result(wid, cid, _fake_summary(cid))

@@ -152,6 +152,65 @@ def get_pdf_info(pdf_path: str | Path) -> dict[str, Any]:
         doc.close()
 
 
+def get_outline(doc: fitz.Document) -> list[dict[str, Any]]:
+    """PDF 내장 목차(북마크) 추출.
+
+    doc.get_toc()는 [[level, title, page(1-based 물리)], ...]을 돌려준다.
+    북마크는 **물리 페이지를 직접** 가리키므로 offset 보정·OCR 없이 정확하다.
+    내장 목차가 있으면 이게 챕터 경계의 1순위 소스(무비용).
+
+    Returns:
+        [{"level": int, "title": str, "page": int}, ...]  (page는 1-based 물리)
+        유효 항목이 없으면 빈 리스트.
+    """
+    try:
+        raw = doc.get_toc(simple=True)
+    except Exception as e:  # pragma: no cover - 손상된 PDF 방어
+        logger.warning("get_toc failed: %s", e)
+        return []
+    out: list[dict[str, Any]] = []
+    for entry in raw:
+        if len(entry) < 3:
+            continue
+        level, title, page = entry[0], entry[1], entry[2]
+        title = (title or "").strip()
+        if page is None or int(page) < 1 or not title:
+            continue
+        out.append({"level": int(level), "title": title, "page": int(page)})
+    return out
+
+
+_TOC_KEYWORDS = ("목차", "차례", "contents", "table of contents")
+
+
+def locate_toc_pages(doc: fitz.Document, max_scan: int = 30) -> list[int] | None:
+    """인쇄된 목차 페이지의 **위치**(1-based)를 best-effort로 찾는다.
+
+    텍스트가 깨졌어도 '목차/Contents' 키워드는 대개 살아남으므로, 페이지 번호
+    (숫자)가 아니라 '어느 페이지가 목차인가'만 찾는 용도다. 실제 챕터↔페이지
+    숫자 추출은 vision(에이전트)이 toc_page_images를 읽어서 한다.
+
+    Returns:
+        목차로 보이는 페이지 번호 리스트(1-based, 연속). 못 찾으면 None.
+    """
+    n = min(max_scan, doc.page_count)
+    hits: list[int] = []
+    for p in range(1, n + 1):
+        try:
+            text = doc.load_page(p - 1).get_text("text").lower()
+        except Exception:  # pragma: no cover
+            continue
+        if any(kw in text for kw in _TOC_KEYWORDS):
+            hits.append(p)
+    if not hits:
+        return None
+    # 목차가 여러 장에 걸칠 수 있으나, 키워드 오검출로 과도하게 넓어지는 것을
+    # 막기 위해 첫 hit부터 최대 6장으로 제한.
+    start = hits[0]
+    end = min(hits[-1], start + 5)
+    return list(range(start, end + 1))
+
+
 def extract_page_text(doc: fitz.Document, page_number: int) -> str:
     """1-based 페이지 번호로 텍스트 추출 + 노이즈 정리.
 

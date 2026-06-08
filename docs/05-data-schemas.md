@@ -71,8 +71,8 @@ study_output/
   "pdf_path": "/path/to/book.pdf",
   "output_dir": "/path/to/study_output",
   "started_at": "2026-05-30T15:23:00+09:00",
-  "execution_mode": "sequential",
-  "extraction_mode": "text",          // "text"(텍스트 추출) | "ocr"(페이지 이미지)
+  "execution_mode": "sequential",     // set_chapters 전이면 null (init엔 미정)
+  "extraction_mode": "text",          // "text"(텍스트 추출) | "ocr"(페이지 이미지). set_chapters에서 확정, 그 전엔 null
   "language": "ko",
   "question_options": {
     "multiple_choice": true,

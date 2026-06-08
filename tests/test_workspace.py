@@ -28,7 +28,7 @@ def test_create_workspace_initial_state(tmp_path, fake_pdf):
     )
     state = workspace.load_state(wid)
     assert state["execution_mode"] == "parallel"
-    assert state["extraction_mode"] == "text"  # 기본값
+    assert state["extraction_mode"] is None  # 모드는 set_chapters에서 확정(init엔 미정)
     assert state["user_context"] == "학부생 대상"
     assert state["question_options"] == {
         "multiple_choice": True, "short_answer": True,

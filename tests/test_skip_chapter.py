@@ -17,15 +17,20 @@ from pdf_study import analysis
 
 
 def _setup(tmp_path, pdf):
-    r = server.init_work(str(pdf), str(tmp_path / "out"),
-                         execution_mode="sequential", extraction_mode="text")
+    r = server.init_work(str(pdf), str(tmp_path / "out"))
     return r["data"]["work_id"], tmp_path / "out"
+
+
+def _sc(wid, chapters):
+    """set_chapters 호출 — 모드는 본문 처리용 기본값으로 고정."""
+    return server.set_chapters(wid, chapters,
+                               execution_mode="sequential", extraction_mode="text")
 
 
 def test_skip_marks_status_skipped(tmp_path, ko_with_toc):
     wid, _ = _setup(tmp_path, ko_with_toc)
     server.scan_pdf(wid)
-    server.set_chapters(wid, [
+    _sc(wid, [
         {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
     ])
@@ -40,7 +45,7 @@ def test_skip_marks_status_skipped(tmp_path, ko_with_toc):
 def test_skip_excluded_from_pending(tmp_path, ko_with_toc):
     wid, _ = _setup(tmp_path, ko_with_toc)
     server.scan_pdf(wid)
-    server.set_chapters(wid, [
+    _sc(wid, [
         {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
     ])
@@ -53,7 +58,7 @@ def test_skip_excluded_from_pending(tmp_path, ko_with_toc):
 def test_skip_excluded_from_subagent_chapter_ids(tmp_path, ko_with_toc):
     wid, _ = _setup(tmp_path, ko_with_toc)
     server.scan_pdf(wid)
-    server.set_chapters(wid, [
+    _sc(wid, [
         {"chapter_id": "ch1", "title": "본문 1", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "본문 2", "page_range": [13, 20]},
         {"chapter_id": "ch3", "title": "찾아보기", "page_range": [27, 28], "skip": True},
@@ -67,7 +72,7 @@ def test_skip_excluded_from_subagent_chapter_ids(tmp_path, ko_with_toc):
 def test_skip_skips_raw_extraction(tmp_path, ko_with_toc):
     wid, out = _setup(tmp_path, ko_with_toc)
     server.scan_pdf(wid)
-    server.set_chapters(wid, [
+    _sc(wid, [
         {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
     ])
@@ -80,7 +85,7 @@ def test_skip_skips_raw_extraction(tmp_path, ko_with_toc):
 def test_skip_chapter_not_rendered(tmp_path, ko_with_toc):
     wid, out = _setup(tmp_path, ko_with_toc)
     server.scan_pdf(wid)
-    server.set_chapters(wid, [
+    _sc(wid, [
         {"chapter_id": "ch1", "title": "본문 1", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "본문 2", "page_range": [13, 20]},
         {"chapter_id": "ch3", "title": "찾아보기", "page_range": [27, 28], "skip": True},
@@ -122,7 +127,7 @@ def test_set_chapters_impl_marks_skipped_in_result(tmp_path, ko_with_toc):
     result = analysis.set_chapters_impl(wid, [
         {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
-    ])
+    ], "sequential", "text")
     by_id = {c["chapter_id"]: c for c in result["chapters"]}
     assert by_id["ch1"].get("skipped") is not True
     assert by_id["ch2"].get("skipped") is True

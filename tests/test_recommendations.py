@@ -1,183 +1,104 @@
-"""analysis._build_recommendations 분기 단위 테스트 (PDF 없이)."""
+"""analysis._build_recommendations + _outline_to_chapters 단위 테스트 (PDF 없이)."""
 from __future__ import annotations
 
 from pdf_study import analysis
 
 
-def _toc(is_cand: bool, entries=None, keyword=True):
-    return {
-        "has_toc_keyword": keyword,
-        "is_candidate": is_cand,
-        "entries": entries or [],
-    }
+def _outline_chs():
+    return [
+        {"chapter_id": "ch1", "title": "1장", "page_range": [5, 19]},
+        {"chapter_id": "ch2", "title": "2장", "page_range": [20, 39]},
+        {"chapter_id": "ch3", "title": "3장", "page_range": [40, 80]},
+    ]
 
 
-def test_no_text_layer_is_rejected():
-    r = analysis._build_recommendations(
-        page_count=10,
-        toc_result=_toc(False),
-        text_quality="no_text_layer",
-    )
-    assert r["rejected"] is True
-    assert r["primary_mode"] is None
-    assert "ocrmypdf" in r["reason"] or "OCR" in r["reason"]
+# ---------------------------------------------------------------------------
+# _build_recommendations
+# ---------------------------------------------------------------------------
 
-
-def test_garbled_is_rejected_with_triple_guidance_and_sample():
-    r = analysis._build_recommendations(
-        page_count=80,
-        toc_result=_toc(False),
-        text_quality="garbled",
-        text_sample="용석눈힎개正딝개mvFtpD갈돌개" * 5,
-    )
-    assert r["rejected"] is True
-    assert r["primary_mode"] is None
-    assert r["suggested_chapters"] == []
-    # 무손실 재추출(qpdf) + OCR(ocrmypdf) + 그대로 진행(allow_garbled) 세 갈래 안내
-    assert "qpdf" in r["reason"]
-    assert "ocrmypdf" in r["reason"]
-    assert "allow_garbled" in r["reason"]
-    # 사용자 확인용 깨진 텍스트 샘플이 실려야 한다
-    assert "용석눈힎개" in r["text_sample"]
-    assert len(r["text_sample"]) <= analysis.GARBLED_SAMPLE_CHARS
-
-
-def test_garbled_allow_override_proceeds_with_normal_routing():
-    # 사용자가 샘플 확인 후 강행 → 거부하지 않고 페이지 수 기반 라우팅
-    r = analysis._build_recommendations(
-        page_count=80,
-        toc_result=_toc(False),
-        text_quality="garbled",
-        allow_garbled=True,
-    )
+def test_outline_present_routes_to_from_outline():
+    r = analysis._build_recommendations(page_count=80, outline_chapters=_outline_chs())
     assert r["rejected"] is False
-    assert r["primary_mode"] == "ask_user"   # 80p·목차없음 → 기존 흐름 그대로
-    assert r["suggested_chapters"]
-
-
-def test_toc_present_routes_to_from_toc():
-    entries = [
-        {"title": "1장", "page": 5},
-        {"title": "2장", "page": 20},
-        {"title": "3장", "page": 40},
+    assert r["primary_mode"] == "from_outline"
+    assert [c["title"] for c in r["suggested_chapters"]] == ["1장", "2장", "3장"]
+    # outline 경로는 vision 재분석을 선택지에 포함 (틀리면 force_vision)
+    assert r["user_choices"] == [
+        "proceed", "reanalyze_with_vision", "manual_pdf_pages", "chunks",
     ]
-    r = analysis._build_recommendations(
-        page_count=80,
-        toc_result=_toc(True, entries),
-        text_quality="high",
-    )
-    assert r["primary_mode"] == "from_toc"
-    chs = r["suggested_chapters"]
-    assert len(chs) == 3
-    assert chs[0]["page_range"] == [5, 19]
-    assert chs[1]["page_range"] == [20, 39]
-    assert chs[-1]["page_range"][1] == 80
+    assert "force_vision=True" in r["next_step_guidance"]
 
 
-def test_from_toc_applies_offset_printed_to_physical():
-    # 목차의 인쇄번호(책 1·6·52)에 offset 18 → 물리 19·24·70 (MySQL 패턴)
-    entries = [
-        {"title": "01 소개", "page": 1},
-        {"title": "02 설치", "page": 6},
-        {"title": "03 권한", "page": 52},
-    ]
+def test_no_outline_routes_to_vision():
+    r = analysis._build_recommendations(page_count=120, outline_chapters=None)
+    assert r["rejected"] is False
+    assert r["primary_mode"] == "analyze_toc_from_images"
+    assert r["suggested_chapters"] == []
+    assert r["chunk_fallback"]               # 최후 수단 청크는 분리 제공
+    assert r["user_choices"] == ["proceed", "manual_pdf_pages", "chunks"]
+    g = r["next_step_guidance"]
+    # 텍스트/스크립트 추정 금지 + 이미지 직독 강제
+    assert "스크립트" in g and "toc_page_images" in g
+
+
+def test_no_outline_does_not_reject_low_quality():
+    # 텍스트 품질과 무관 — 거부 없음(스캔본도 vision으로)
+    r = analysis._build_recommendations(page_count=10, outline_chapters=None)
+    assert r.get("rejected") in (False, None)
+    assert r["primary_mode"] == "analyze_toc_from_images"
+
+
+def test_outline_offset_annotates_printed_range():
+    # 물리 5/20/40, offset 18 → front matter는 클램프, 본문은 책 페이지로 변환
     r = analysis._build_recommendations(
-        page_count=93,
-        toc_result=_toc(True, entries),
-        text_quality="high",
-        page_offset=18,
-        offset_confidence="high",
+        page_count=80, outline_chapters=_outline_chs(),
+        page_offset=18, offset_confidence="high",
     )
     chs = r["suggested_chapters"]
-    assert chs[0]["page_range"] == [19, 23]   # 물리
-    assert chs[0]["printed_range"] == [1, 5]  # 책
-    assert chs[1]["page_range"] == [24, 69]
-    assert chs[2]["page_range"] == [70, 93]
-    assert chs[2]["printed_range"][0] == 52
+    # ch1 물리[5,19] → 책[-13,1] → 끝≥1이라 시작만 1로 클램프
+    assert chs[0]["printed_range"] == [1, 1]
+    assert chs[1]["printed_range"] == [2, 21]
     assert r["page_offset"] == 18
     assert r["offset_confidence"] == "high"
-    # 발췌본 메타: 이 파일에 실제 존재하는 책 페이지 범위 = [1, 93-18=75]
-    assert r["physical_range"] == [1, 93]
-    assert r["printed_range_available"] == [1, 75]
+    assert r["physical_range"] == [1, 80]
+    assert r["printed_range_available"] == [1, 62]   # 80 - 18
 
 
-def test_from_toc_drops_chapters_beyond_excerpt():
-    """발췌본: 목차엔 전체 책 챕터가 다 있어도, 물리 범위를 넘는 챕터는 드롭.
-
-    Real MySQL 발췌본 패턴 — 파일은 책 1~75p(PDF 19~93)만, 목차엔 04장(책 76+)
-    이후가 더 적혀 있다. offset 18 기준 물리 시작이 93을 넘는 항목은 제외돼야 함.
-    """
-    entries = [
-        {"title": "01 소개", "page": 1},      # 물리 19  (포함)
-        {"title": "02 설치", "page": 6},      # 물리 24  (포함)
-        {"title": "03 권한", "page": 52},     # 물리 70  (포함)
-        {"title": "04 아키텍처", "page": 76},  # 물리 94 > 93 → 드롭
-        {"title": "08 인덱스", "page": 200},   # 물리 218 → 드롭
-    ]
-    r = analysis._build_recommendations(
-        page_count=93,
-        toc_result=_toc(True, entries),
-        text_quality="high",
-        page_offset=18,
-        offset_confidence="high",
-    )
-    chs = r["suggested_chapters"]
-    assert len(chs) == 3                       # 04·08 제외
-    assert [c["title"] for c in chs] == ["01 소개", "02 설치", "03 권한"]
-    assert chs[-1]["page_range"] == [70, 93]   # 마지막 챕터 끝 = page_count
-    assert r["printed_range_available"] == [1, 75]
-
-
-def test_chunks_printed_range_marks_front_matter_none():
-    # offset 18: 물리 1-30 청크는 책 번호 < 1 구간(front matter) 포함 → 일부 클램프
-    r = analysis._build_recommendations(
-        page_count=93,
-        toc_result=_toc(False),
-        text_quality="high",
-        page_offset=18,
-        offset_confidence="high",
-    )
-    first = r["suggested_chapters"][0]      # 물리 [1,30]
-    # 책 페이지 = 물리-18 → [-17, 12]; 끝이 ≥1 이라 시작만 1로 클램프
-    assert first["page_range"] == [1, 30]
-    assert first["printed_range"] == [1, 12]
-
-
-def test_short_pdf_routes_to_single_unit():
-    r = analysis._build_recommendations(
-        page_count=30,
-        toc_result=_toc(False),
-        text_quality="medium",
-    )
-    assert r["primary_mode"] == "single_unit"
-    # offset 미전달(None) → printed_range도 None
-    assert r["suggested_chapters"] == [
-        {"chapter_id": "ch1", "title": "전체",
-         "page_range": [1, 30], "printed_range": None}
-    ]
+def test_no_offset_marks_printed_range_none():
+    r = analysis._build_recommendations(page_count=80, outline_chapters=_outline_chs())
     assert r["page_offset"] is None
     assert r["offset_confidence"] == "none"
-    assert r["user_choices"] == ["proceed", "manual_pdf_pages", "chunks"]
+    assert all(c["printed_range"] is None for c in r["suggested_chapters"])
+    assert r["printed_range_available"] is None
 
 
-def test_large_pdf_routes_to_chunks():
-    r = analysis._build_recommendations(
-        page_count=300,
-        toc_result=_toc(False),
-        text_quality="medium",
-    )
-    assert r["primary_mode"] == "chunks"
-    chs = r["suggested_chapters"]
-    assert len(chs) == 10  # 300 / 30
-    assert chs[0]["page_range"] == [1, 30]
+# ---------------------------------------------------------------------------
+# _outline_to_chapters
+# ---------------------------------------------------------------------------
+
+def test_outline_to_chapters_top_level_only_and_ranges():
+    outline = [
+        {"level": 1, "title": "1장", "page": 5},
+        {"level": 2, "title": "1.1 절", "page": 6},   # 하위 절 → 제외
+        {"level": 1, "title": "2장", "page": 13},
+        {"level": 1, "title": "3장", "page": 21},
+    ]
+    chs = analysis._outline_to_chapters(outline, page_count=28)
+    assert [c["title"] for c in chs] == ["1장", "2장", "3장"]
+    assert chs[0]["page_range"] == [5, 12]
+    assert chs[1]["page_range"] == [13, 20]
+    assert chs[2]["page_range"] == [21, 28]   # 마지막 끝 = page_count
 
 
-def test_medium_pdf_no_toc_routes_to_ask_user():
-    r = analysis._build_recommendations(
-        page_count=80,
-        toc_result=_toc(False),
-        text_quality="medium",
-    )
-    assert r["primary_mode"] == "ask_user"
-    # chunks fallback이 suggested에 미리 들어 있어야 메인 LLM이 바로 쓸 수 있음
-    assert r["suggested_chapters"]
+def test_outline_to_chapters_drops_beyond_excerpt():
+    outline = [
+        {"level": 1, "title": "1장", "page": 5},
+        {"level": 1, "title": "2장", "page": 13},
+        {"level": 1, "title": "4장", "page": 200},  # page_count 초과 → 드롭
+    ]
+    chs = analysis._outline_to_chapters(outline, page_count=28)
+    assert [c["title"] for c in chs] == ["1장", "2장"]
+    assert chs[-1]["page_range"] == [13, 28]
+
+
+def test_outline_to_chapters_empty():
+    assert analysis._outline_to_chapters([], page_count=10) == []

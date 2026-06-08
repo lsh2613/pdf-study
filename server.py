@@ -88,8 +88,6 @@ def _safe(label: str):
 def init_work(
     pdf_path: str,
     output_dir: str = "",
-    execution_mode: str = "",
-    extraction_mode: str = "",
     enable_multiple_choice: bool = True,
     enable_short_answer: bool = True,
     enable_reflection: bool = True,
@@ -102,57 +100,13 @@ def init_work(
       아래에 `result/<pdf_basename>/` 형태로 자동 생성됩니다 (PDF 파일명에서
       안전하지 않은 문자는 `_`로 치환). 같은 PDF로 재실행하면 같은 폴더에
       **덮어씌워지므로**, 이전 결과를 보존하려면 명시적으로 다른 경로를 주세요.
-    - execution_mode("sequential"|"parallel") · extraction_mode("text"|"ocr"):
-      **둘 다 기본값 없음 — 임의로 정하지 말고 반드시 사용자에게 물어 선택을
-      받으세요.** 둘 중 하나라도 미지정/오타면 거부되며, 응답에 아래 4가지 조합과
-      특징(data.choices)이 담깁니다. **4개 모두 유효하니 임의로 빼지 말고 전부**
-      사용자에게 제시한 뒤 고른 조합의 두 값을 그대로 전달해 재호출하세요.
-        - ① Sequential + Text: 디지털 PDF · 안정적·빠르고 저렴 (무난한 기본)
-        - ② Parallel + Text: 디지털 PDF · 최대 5개 챕터 동시로 가장 빠름
-        - ③ Sequential + OCR: 스캔본·깨진 PDF · 비전 LLM 직독으로 정확하나 느리고 비쌈
-        - ④ Parallel + OCR: 스캔본·깨진 PDF · 병렬 OCR로 ③보다 빠르나 비용 가장 큼
-      (execution: sequential=순차·안정 / parallel=최대 5개 동시 디스패치.
-       extraction: text=라이브러리 추출(스캔본 손상위험) / ocr=페이지 이미지 직독.)
     - enable_*: 4가지 문제 유형 활성/비활성 (모두 False 금지)
     - user_context: 학습자 정보 (학년/배경 등). sub-agent 프롬프트에 주입.
+
+    처리 모드(순차/병렬 · text/ocr)는 이 단계에서 받지 않습니다 — 목차를 분석해
+    챕터를 확정한 뒤 **set_chapters에서** 사용자에게 물어 정합니다.
     다음 단계: scan_pdf(work_id)
     """
-    if execution_mode not in ("sequential", "parallel") or \
-            extraction_mode not in ("text", "ocr"):
-        return _err(
-            "execution_mode와 extraction_mode를 모두 지정해야 합니다. 기본값을 "
-            "임의로 정하지 말고, 아래 4가지 조합과 특징을 사용자에게 그대로 보여준 뒤 "
-            "원하는 하나를 골라 두 값(execution_mode, extraction_mode)을 전달해 다시 "
-            "호출하세요. 4개 모두 유효한 조합이니 임의로 빼지 말고 전부 제시할 것.\n"
-            "① Sequential + Text — 디지털/전자책 PDF용. 한 챕터씩 순차 처리 + "
-            "라이브러리 텍스트 추출. 안정적이고 빠르며 저렴 (가장 무난한 기본값).\n"
-            "② Parallel + Text — 디지털/전자책 PDF용. 최대 5개 챕터 동시 처리 + "
-            "텍스트 추출. 병렬 디스패치가 가능한 클라이언트에서 가장 빠름.\n"
-            "③ Sequential + OCR — 스캔본·글꼴 깨진 PDF용. 순차 처리 + 비전 LLM이 "
-            "페이지 이미지를 직접 읽음. 정확하나 느리고 비용 큼.\n"
-            "④ Parallel + OCR — 스캔본·깨진 PDF용. 최대 5개 챕터 동시 + 비전 LLM "
-            "OCR. OCR을 병렬로 돌려 ③보다 빠르나 비용이 가장 큼.\n"
-            "execution_mode는 'sequential'|'parallel', extraction_mode는 'text'|'ocr'.",
-            data={
-                "choices": [
-                    {"execution_mode": "sequential", "extraction_mode": "text",
-                     "label": "Sequential + Text",
-                     "desc": "디지털 PDF · 안정적·빠르고 저렴 (무난한 기본)"},
-                    {"execution_mode": "parallel", "extraction_mode": "text",
-                     "label": "Parallel + Text",
-                     "desc": "디지털 PDF · 최대 5개 동시로 가장 빠름"},
-                    {"execution_mode": "sequential", "extraction_mode": "ocr",
-                     "label": "Sequential + OCR",
-                     "desc": "스캔본·깨진 PDF · 정확하나 느리고 비쌈"},
-                    {"execution_mode": "parallel", "extraction_mode": "ocr",
-                     "label": "Parallel + OCR",
-                     "desc": "스캔본·깨진 PDF · 병렬 OCR로 빠르나 비용 가장 큼"},
-                ],
-                "execution_modes": ["sequential", "parallel"],
-                "extraction_modes": ["text", "ocr"],
-            },
-        )
-
     work_id = workspace.make_work_id()
     resolved_dir = (output_dir or "").strip()
     if not resolved_dir:
@@ -168,8 +122,6 @@ def init_work(
             "extension": enable_extension,
         },
         user_context=user_context,
-        execution_mode=execution_mode,
-        extraction_mode=extraction_mode,
         work_id=work_id,
     )
     return _ok(
@@ -244,38 +196,38 @@ def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
 def scan_pdf(
     work_id: str,
     scan_size: int = 30,
-    allow_garbled: bool = False,
+    force_vision: bool = False,
 ) -> dict[str, Any]:
-    """PDF 메타 + 텍스트 품질 + 언어 + 본문 목차 후보 + 챕터 분리 추천.
+    """PDF 메타 + 챕터 경계 소스(내장 목차 또는 목차 페이지 이미지) + offset.
 
-    응답.data.recommendations.primary_mode 가 "from_toc" | "single_unit" |
-    "chunks" | "ask_user" 중 하나.
+    챕터 경계는 텍스트 레이어를 신뢰하지 않고 두 소스에서만 얻습니다:
+    응답.data.recommendations.primary_mode 가
+      - "from_outline": PDF 내장 목차(북마크)로 챕터를 구성. suggested_chapters에
+        담겨 옵니다. **사용자에게 보여 확인**받고, 맞으면 그대로 set_chapters.
+        **틀리면 scan_pdf(work_id, force_vision=True)로 재호출**하면 목차 페이지를
+        이미지로 렌더해 vision으로 다시 읽습니다.
+      - "analyze_toc_from_images": 내장 목차가 없음. 응답.data.toc_page_images
+        (목차 페이지 JPEG 경로)를 vision으로 직접 읽어 챕터를 구성하세요.
+        **PDF 텍스트나 파이썬 스크립트로 목차를 추정하지 마세요.**
 
-    **페이지 오프셋 + 3택 흐름 (필수)**:
+    **페이지 오프셋 + 선택지 흐름 (필수)**:
     recommendations에 page_offset(물리 = 책 + offset), offset_confidence,
-    각 suggested_chapter의 page_range(PDF 물리)·printed_range(책 페이지),
-    user_choices, next_step_guidance가 담깁니다. next_step_guidance를 따라
-    분석된 챕터를 **PDF·책 페이지 둘 다** 표기해 사용자에게 보여주고 반드시
-    ① 이대로 진행 ② 직접 입력(반드시 PDF 물리 페이지로 받기) ③ 청크 단위
-    중 선택을 받으세요. offset_confidence가 high가 아니거나 from_toc 경계가
-    의심되면 첫 챕터 제목이 계산된 PDF 페이지에 실제 나오는지 본문을 읽어
-    보정하세요.
-
-    추천 reason이 ocrmypdf 안내라면 텍스트 레이어가 없는 PDF이므로 OCR 후
-    재시도해주세요. 인코딩이 깨진(모지바케) PDF면 거부되며 text_sample에
-    샘플이 담깁니다 — ① 무손실 재추출 ② OCR ③ 그대로 진행(allow_garbled=True
-    재호출) 중 선택을 받으세요.
-    다음 단계: set_chapters(work_id, chapters, book_info)
+    각 챕터의 page_range(PDF 물리)·printed_range(책 페이지), user_choices,
+    next_step_guidance가 담깁니다. next_step_guidance를 그대로 따라 챕터를
+    **PDF·책 페이지 둘 다** 표기해 보여주고, MCP가 준 user_choices를 **그대로**
+    제시해(임의로 항목을 만들거나 빼지 말 것) 선택을 받으세요.
+    다음 단계: set_chapters(work_id, chapters, execution_mode, extraction_mode, book_info)
     """
     data = analysis.scan_pdf_impl(
-        work_id, scan_size=scan_size, allow_garbled=allow_garbled,
+        work_id, scan_size=scan_size, force_vision=force_vision,
     )
     rec = data.get("recommendations", {})
     if rec.get("rejected"):
         return _err(rec.get("reason") or "scan rejected", data=data)
     next_action = (
-        f'set_chapters(work_id="{work_id}", chapters=<recommendations.suggested_chapters>, '
-        f'book_info={{...}})'
+        f'set_chapters(work_id="{work_id}", chapters=<from_outline면 '
+        "recommendations.suggested_chapters, 아니면 toc_page_images를 vision으로 읽어 "
+        '구성>, execution_mode=<사용자 선택>, extraction_mode=<사용자 선택>, book_info={...})'
     )
     return _ok(data, next_action=next_action)
 
@@ -289,29 +241,79 @@ def scan_pdf(
 def set_chapters(
     work_id: str,
     chapters: list[dict[str, Any]],
+    execution_mode: str = "",
+    extraction_mode: str = "",
     book_info: dict[str, Any] | None = None,
     language: str = "",
 ) -> dict[str, Any]:
-    """챕터 구조를 확정하고 챕터별 본문/이미지를 추출합니다.
+    """챕터 구조 + 처리 모드를 확정하고 챕터별 본문/이미지를 추출합니다.
 
     - chapters: [{"chapter_id","title","page_range":[start,end]}, ...] (1-based)
       page_range는 항상 **PDF 물리 페이지** 기준. printed_range(책 페이지)는
       옵셔널 표시용 메타로, 주면 보존하되 검증하지 않습니다.
+    - execution_mode("sequential"|"parallel") · extraction_mode("text"|"ocr"):
+      **둘 다 기본값 없음 — 임의로 정하지 말고 반드시 사용자에게 물어 선택을
+      받으세요.** 하나라도 미지정/오타면 거부되며 응답.data.choices에 아래 4조합과
+      특징이 담깁니다. **4개 모두 유효하니 임의로 합치거나 빼지 말고 전부** 그대로
+      제시한 뒤 고른 조합을 전달하세요.
+        - ① Sequential + Text: 안정적·빠르고 저렴 (디지털 PDF, 무난한 기본)
+        - ② Parallel + Text: 최대 5개 챕터 동시로 가장 빠름 (디지털 PDF)
+        - ③ Sequential + OCR: 비전 LLM 직독으로 정확하나 느리고 비쌈 (스캔본)
+        - ④ Parallel + OCR: 병렬 OCR로 ③보다 빠르나 비용 가장 큼 (스캔본)
+      ※ 목차 분석은 모드와 무관하게 항상 내장 목차/이미지로 처리됩니다. 여기서
+        고르는 건 **본문 추출/디스패치** 방식뿐입니다.
     - 각 chapter에 optional "skip": true 를 주면 그 챕터는 본문 추출과
       sub-agent 디스패치, 렌더링 모두에서 제외됩니다. **찾아보기·색인·
-      판권·저자 소개 같은 비본문 페이지가 목차 후보에 섞여 들어왔을 때
-      사용**하세요.
-    - book_info: 메인 LLM이 scanned_text(또는 OCR 모드의 scan_page_images)와
-      PDF 메타로 보강한 책 정보
-    - language: "ko" | "en". **OCR 모드에서는 텍스트 언어 감지가 불가능하므로,
-      scan_page_images를 읽고 파악한 본문 언어를 반드시 전달**하세요. (text
-      모드는 scan_pdf가 자동 감지하므로 생략 가능)
+      판권·저자 소개 같은 비본문 페이지가 섞여 들어왔을 때 사용**하세요.
+    - book_info: 메인 LLM이 PDF 메타·목차로 보강한 책 정보
+    - language: "ko" | "en". **OCR(extraction_mode="ocr")에서는 텍스트 언어 감지가
+      불가능하므로, 목차/페이지 이미지를 읽고 파악한 본문 언어를 반드시 전달**하세요.
+      (text 모드는 scan_pdf가 자동 감지하므로 생략 가능)
 
-    OCR 모드(extraction_mode="ocr")에서는 본문 텍스트를 추출하지 않습니다.
+    extraction_mode="ocr"에서는 본문 텍스트를 추출하지 않습니다.
     서브에이전트가 get_chapter_content가 렌더한 페이지 이미지를 직접 읽습니다.
     다음 단계: get_subagent_prompts(work_id)
     """
-    data = analysis.set_chapters_impl(work_id, chapters, book_info, language=language)
+    if execution_mode not in ("sequential", "parallel") or \
+            extraction_mode not in ("text", "ocr"):
+        return _err(
+            "execution_mode와 extraction_mode를 모두 지정해야 합니다. 기본값을 "
+            "임의로 정하지 말고, 아래 4가지 조합과 특징을 사용자에게 그대로 보여준 뒤 "
+            "원하는 하나를 골라 두 값을 전달해 다시 호출하세요. 4개 모두 유효하니 "
+            "임의로 빼지 말고 전부 제시할 것.\n"
+            "① Sequential + Text — 한 챕터씩 순차 + 라이브러리 텍스트 추출. "
+            "안정적·빠르고 저렴 (디지털 PDF, 무난한 기본값).\n"
+            "② Parallel + Text — 최대 5개 챕터 동시 + 텍스트 추출. 가장 빠름 "
+            "(병렬 디스패치 가능한 클라이언트).\n"
+            "③ Sequential + OCR — 순차 + 비전 LLM이 페이지 이미지 직독. 정확하나 "
+            "느리고 비용 큼 (스캔본).\n"
+            "④ Parallel + OCR — 최대 5개 동시 + 비전 LLM OCR. ③보다 빠르나 비용 "
+            "가장 큼 (스캔본).\n"
+            "execution_mode는 'sequential'|'parallel', extraction_mode는 'text'|'ocr'.",
+            data={
+                "choices": [
+                    {"execution_mode": "sequential", "extraction_mode": "text",
+                     "label": "Sequential + Text",
+                     "desc": "디지털 PDF · 안정적·빠르고 저렴 (무난한 기본)"},
+                    {"execution_mode": "parallel", "extraction_mode": "text",
+                     "label": "Parallel + Text",
+                     "desc": "디지털 PDF · 최대 5개 동시로 가장 빠름"},
+                    {"execution_mode": "sequential", "extraction_mode": "ocr",
+                     "label": "Sequential + OCR",
+                     "desc": "스캔본·깨진 PDF · 정확하나 느리고 비쌈"},
+                    {"execution_mode": "parallel", "extraction_mode": "ocr",
+                     "label": "Parallel + OCR",
+                     "desc": "스캔본·깨진 PDF · 병렬 OCR로 빠르나 비용 가장 큼"},
+                ],
+                "execution_modes": ["sequential", "parallel"],
+                "extraction_modes": ["text", "ocr"],
+            },
+        )
+
+    data = analysis.set_chapters_impl(
+        work_id, chapters, execution_mode, extraction_mode,
+        book_info=book_info, language=language,
+    )
     n_skip = sum(1 for c in data["chapters"] if c.get("skipped"))
     n_body = data["chapter_count"] - n_skip
     return _ok(data, next_action=(
@@ -321,7 +323,7 @@ def set_chapters(
         "프롬프트와 chapter_ids·workflow를 받으세요. 이후 챕터 처리는 반드시 "
         "**등록된 chapter_id(ch1·ch2…)** 로만 get_chapter_content를 호출하세요 — "
         "'p11-p18' 같은 페이지 범위 문자열을 chapter_id로 쓰지 마세요(특정 페이지를 "
-        "보려면 scan_page_images 경로를 직접 여세요)."
+        "보려면 scan_pdf의 toc_page_images 경로를 직접 여세요)."
     ))
 
 
@@ -556,7 +558,8 @@ def finalize_study(
     if not output_format:
         return _err(
             "output_format이 지정되지 않았습니다. 기본값을 임의로 정하지 말고, "
-            "사용자에게 'html: 정적 웹사이트로 열람 / "
+            "MCP가 준 data.choices 두 선택지를 **그대로** 사용자에게 제시해(임의로 "
+            "바꾸거나 빼지 말 것) 'html: 정적 웹사이트로 열람 / "
             "md_tui: 챕터별 Markdown + 학습 TUI' 중 무엇을 원하는지 물어본 뒤 "
             "그 선택을 output_format으로 전달해 다시 호출하세요.",
             data={"choices": list(RENDERERS)},

@@ -57,10 +57,9 @@
 
 ```
 사용자 발화에서 메인 LLM이 추출:
-  pdf_path, (옵션) output_dir, execution_mode, extraction_mode, enable_*, user_context
-        │  execution_mode·extraction_mode는 기본값 없음 → 하나라도 미지정/오타면
-        │  ok=False 거부. data.choices에 4조합(Sequential/Parallel × Text/OCR)과
-        │  특징이 담겨, 메인 LLM이 4개 모두 사용자에게 제시 후 고른 값으로 재호출.
+  pdf_path, (옵션) output_dir, enable_*, user_context
+        │  처리 모드(순차/병렬·text/ocr)는 init에서 받지 않는다 — 목차를 확정한
+        │  뒤 set_chapters에서 사용자에게 물어 정한다.
         ▼
 server.init_work(...)
    - output_dir이 비었으면 default = <Path.cwd()>/result/<pdf_basename>/
@@ -69,9 +68,9 @@ server.init_work(...)
         │
         ▼
 workspace.create_workspace(..., work_id=work_id)
-   - PDF 존재·옵션·execution_mode·extraction_mode 검증
+   - PDF 존재·옵션 검증 (모드는 미정=None으로 초기화)
    - <output_dir>/.work/ 하위 폴더 생성 (raw_data/pages/ 포함)
-   - state.json 초기화 (extraction_mode, phases=pending, chapters={})
+   - state.json 초기화 (execution_mode=None, extraction_mode=None, phases=pending)
    - register(work_id → work_dir)  in-memory registry
 ```
 
@@ -108,37 +107,30 @@ workspace.resume_workspace(output_dir)
 - 디스크의 `completed` 챕터는 그대로 보존되므로, 메인 LLM은 pending 챕터만
   이어서 처리한 뒤 finalize하면 된다. (Stage 5~7 재진입)
 
-### Stage 2 · `scan_pdf` — PDF 분석 + 챕터 분리 추천
+### Stage 2 · `scan_pdf` — 챕터 경계 소스(내장 목차 또는 목차 이미지) + 추천
 
 ```
-server.scan_pdf(work_id, scan_size)
-  └─ analysis.scan_pdf_impl(work_id, scan_size)
+server.scan_pdf(work_id, scan_size, force_vision=False)
+  └─ analysis.scan_pdf_impl(work_id, scan_size, force_vision)
        ├─ workspace.update_phase("scanning", "in_progress")
-       ├─ reader.get_pdf_info(pdf_path)              # page_count, book metadata
        ├─ reader.open_pdf(pdf_path) → doc
-       │    ├─ reader.evaluate_text_quality(doc)     # quality + avg_chars/p
-       │    ├─ reader.extract_text_range(doc, 1, N)  # 첫 N페이지 통합 텍스트
-       │    └─ doc.close()
+       │    ├─ reader.extract_metadata(doc)          # book metadata
+       │    ├─ reader.evaluate_text_quality(doc)     # quality(정보용, 라우팅 안 함)
+       │    ├─ reader.extract_text_range(doc, 1, N)  # 언어·목차위치용 (내부, 비노출)
+       │    ├─ lang.detect_language(sample_text)     # ko/en (best-effort)
        │    ├─ reader.detect_page_offset(doc)        # 꼬리말 번호 다수결 → offset
-       ├─ lang.detect_language(scanned_text)         # ko/en
-       ├─ toc_finder.find_toc_candidates(scanned_text)
-       │    └─ 4가지 정규식 매칭 + 단조 LIS 필터
-       ├─ (OCR 모드만) reader.render_pages(doc, 1, N, pages/) → scan_page_images
-       ├─ _build_recommendations(page_count, toc_result, text_quality, offset, ocr_mode)
-       │    ├─ (ocr_mode=False)
-       │    │    ├─ no_text_layer        → rejected + ocrmypdf/extraction_mode=ocr 안내
-       │    │    ├─ garbled(모지바케)     → rejected + 무손실 재추출/OCR 이중 안내
-       │    │    └─ toc.is_candidate     → from_toc (인쇄→물리 offset 보정)
-       │    ├─ (ocr_mode=True) 거부·텍스트 toc 모두 우회. 서버는 챕터 제안 안 함:
-       │    │                  primary_mode="analyze_toc_from_images",
-       │    │                  suggested_chapters=[], 청크는 chunk_fallback에 분리.
-       │    │                  목차·offset은 LLM이 scan_page_images로 직접
-       │    ├─ page_count < 50      → single_unit
-       │    ├─ page_count ≥ 200     → chunks (30p 단위)
-       │    └─ 그 외                → ask_user (chunks 기본 fallback)
-       │    + 비거부면 page_offset·printed_range·user_choices(이대로/직접입력/
-       │      청크)·next_step_guidance(두 번호 표기 + 경계 본문 대조 보정,
-       │      ocr이면 scan_page_images로 목차·offset·언어 읽기 안내) 주입
+       │    ├─ reader.get_outline(doc)               # 내장 목차(북마크) — 1순위
+       │    │    └─ _outline_to_chapters(...)        # 최상위 항목 → 물리 page_range
+       │    └─ (내장 목차 없음/force_vision) reader.locate_toc_pages → render_pages
+       │                                             → toc_page_images
+       ├─ _build_recommendations(page_count, outline_chapters|None, offset, conf)
+       │    ├─ outline 있음 → primary_mode="from_outline" (suggested_chapters 채움)
+       │    │                 + force_vision 재분석을 포함한 4택 안내
+       │    └─ 없음         → primary_mode="analyze_toc_from_images"
+       │                      suggested_chapters=[], 청크는 chunk_fallback에 분리.
+       │                      "텍스트/스크립트 추정 금지, toc_page_images 직독" 안내
+       │    + 공통: page_offset·printed_range·physical_range·printed_range_available·
+       │      user_choices·next_step_guidance(두 번호 표기 + MCP choices 그대로 제시) 주입
        ├─ workspace.update_state(page_count, text_quality, language,
        │                         page_offset, page_offset_confidence)
        ├─ workspace.update_phase("scanning", "completed")
@@ -146,21 +138,25 @@ server.scan_pdf(work_id, scan_size)
 ```
 
 - 코드: `analysis.py:scan_pdf_impl`, `_build_recommendations`,
-  `_toc_entries_to_chapters`, `reader.render_pages`
-- 응답: `extraction_mode, book_metadata, scanned_text, scan_page_images(ocr),
-  language, toc_candidates, recommendations.{primary_mode, suggested_chapters,
-  alternatives, reason, next_step_guidance}`
-- `rejected=True` 면 서버는 `ok=False`로 변환하여 메인 LLM에게 OCR 안내 전달.
-  **ocr 모드는 텍스트 품질로 거부하지 않는다**(스캔본이 바로 대상).
+  `_outline_to_chapters`, `reader.get_outline`, `reader.locate_toc_pages`,
+  `reader.render_pages`
+- 응답: `book_metadata, language, page_offset, outline_present, toc_page_images,
+  recommendations.{primary_mode, suggested_chapters, chunk_fallback, alternatives,
+  user_choices, next_step_guidance}`. **scanned_text는 노출하지 않는다**(텍스트 불신).
+- 텍스트 품질로 거부하지 않는다 — 텍스트 레이어가 없거나 깨져도 vision 경로로 간다.
 
-### Stage 3 · `set_chapters` — 챕터 구조 확정 + 추출
+### Stage 3 · `set_chapters` — 챕터 구조 + 처리 모드 확정 + 추출
 
-메인 LLM이 `recommendations.suggested_chapters`를 그대로 쓸지,
-사용자에게 확인할지, `skip: true`(찾아보기·색인·판권)를 추가할지 결정한다.
+메인 LLM이 `recommendations.suggested_chapters`(from_outline)를 그대로 쓸지,
+toc_page_images를 vision으로 읽어 직접 구성할지, `skip: true`(찾아보기·색인·판권)를
+추가할지 결정하고, **처리 모드(execution_mode/extraction_mode)를 사용자에게 물어 전달**한다
+(둘 중 하나라도 미지정이면 4조합 choices로 ok=False 거부).
 
 ```
-server.set_chapters(work_id, chapters, book_info, language)
-  └─ analysis.set_chapters_impl(work_id, chapters, book_info, language)
+server.set_chapters(work_id, chapters, execution_mode, extraction_mode, book_info, language)
+  └─ analysis.set_chapters_impl(work_id, chapters, execution_mode, extraction_mode, ...)
+       ├─ execution_mode/extraction_mode 검증
+       ├─ workspace.update_state(execution_mode=..., extraction_mode=...)  # 여기서 확정
        ├─ _validate_chapter_def(ch, page_count)           # 페이지 범위 검증
        ├─ (ocr 모드 & language 주어지면) workspace.update_state(language=...)
        ├─ workspace.set_chapters_in_state(work_id, normalized)
@@ -328,11 +324,10 @@ POST /api/progress/<chapter_id>   → 같은 규칙
 | `__main__.py` | 0 | `python -m pdf_study` 진입점 |
 | `server.py` | 0–7 | FastMCP 인스턴스 + 12개 도구(resume_work 포함). 모든 응답 envelope 보장 |
 | `workspace.py` | 1·3·5·6 | `.work/` 폴더 + state.json + work_id별 lock + atomic write |
-| `pdf/reader.py` | 2·3·5 | PyMuPDF 래퍼 (메타·텍스트·품질·offset, 1↔0-based 경계, **render_pages** 페이지→JPEG) |
-| `pdf/toc_finder.py` | 2 | 본문에서 목차 후보 추출 (text 모드) |
+| `pdf/reader.py` | 2·3·5 | PyMuPDF 래퍼 (메타·offset·**get_outline**(내장 목차)·**locate_toc_pages**·**render_pages** 페이지→JPEG, 1↔0-based 경계) |
 | `pdf/chapter.py` | 2·3 | 청크 분할, 챕터 텍스트 추출 (text 모드) |
-| `lang.py` | 2 | 한글/라틴 비율로 ko/en 감지 (text 모드) |
-| `analysis.py` | 2·3·5 | scan_pdf_impl / set_chapters_impl / get_chapter_content_impl 통합 로직 (text·ocr 분기) |
+| `lang.py` | 2 | 한글/라틴 비율로 ko/en 감지 (best-effort) |
+| `analysis.py` | 2·3·5 | scan_pdf_impl(outline/vision) / set_chapters_impl(모드 확정) / get_chapter_content_impl |
 | `prompts.py` | 4 | sub-agent KO/EN 템플릿 + workflow + chapter_ids 분리 |
 | `exa_client.py` | 5 | Exa Web Research MCP HTTP 호출 + 평문 파서 |
 | `renderer/html_renderer.py` | 7 | 정적 사이트 합성 (요약 마크다운→HTML·사이드바·floating 완료 토글·옵션 비활성 섹션 생략. 그림 없음) |
@@ -378,11 +373,13 @@ T5  study_html.py 실행
 ## 메인 LLM이 따라야 할 호출 순서 (요약)
 
 ```
-init_work (execution_mode·extraction_mode 모두 사용자에게 물어 결정)
+init_work (처리 모드는 받지 않음)
   → scan_pdf
-  → (text 모드 & rejected이면 OCR 안내 또는 extraction_mode="ocr" 재시작, 종료)
-  → (ocr 모드면 scan_page_images를 읽어 목차·offset·언어 파악)
-  → set_chapters (skip 챕터는 "skip": true, ocr이면 language= 전달)
+  → (from_outline이면 suggested_chapters를 사용자에게 보여 확인, 틀리면
+     scan_pdf(force_vision=True)로 재분석)
+  → (analyze_toc_from_images면 toc_page_images를 vision으로 읽어 목차·offset·언어 파악)
+  → set_chapters (execution_mode·extraction_mode를 사용자에게 물어 전달,
+     skip 챕터는 "skip": true, ocr이면 language= 전달)
   → get_subagent_prompts
   → for each chapter_id (workflow_instructions에 따라 sequential / parallel):
        get_chapter_content   (text: text / ocr: page_images)

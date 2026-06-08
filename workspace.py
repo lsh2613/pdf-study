@@ -177,8 +177,8 @@ def create_workspace(
     output_dir: str | os.PathLike,
     options: dict[str, bool],
     user_context: str = "",
-    execution_mode: str = "sequential",
-    extraction_mode: str = "text",
+    execution_mode: str | None = None,
+    extraction_mode: str | None = None,
     work_id: str | None = None,
 ) -> str:
     """워크스페이스 생성 → work_id 반환.
@@ -187,19 +187,21 @@ def create_workspace(
     이미 .work/state.json이 있으면 새 work_id로 덮어쓴다 (재초기화).
     work_id를 인자로 받으면(외부에서 미리 발급) 그 값으로 등록. 없으면 새로 발급.
 
+    execution_mode·extraction_mode는 **set_chapters에서 확정**하므로 init 시점에는
+    보통 None(미정)이다. 값을 주면 검증 후 기록한다.
+
     Raises:
-        ValueError: pdf_path 미존재, execution_mode/extraction_mode 잘못됨,
-            모든 문제 비활성.
+        ValueError: pdf_path 미존재, 주어진 모드가 잘못됨, 모든 문제 비활성.
     """
     pdf = Path(pdf_path)
     if not pdf.exists():
         raise ValueError(f"PDF not found: {pdf_path}")
 
-    if execution_mode not in VALID_EXECUTION_MODES:
+    if execution_mode is not None and execution_mode not in VALID_EXECUTION_MODES:
         raise ValueError(
             f"execution_mode must be one of {VALID_EXECUTION_MODES}, got {execution_mode!r}"
         )
-    if extraction_mode not in VALID_EXTRACTION_MODES:
+    if extraction_mode is not None and extraction_mode not in VALID_EXTRACTION_MODES:
         raise ValueError(
             f"extraction_mode must be one of {VALID_EXTRACTION_MODES}, got {extraction_mode!r}"
         )

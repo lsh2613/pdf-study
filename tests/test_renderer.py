@@ -27,12 +27,13 @@ def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):
 
 def _build_multi(ko_with_toc, tmp_path, *, opts=None):
     """ko_with_toc.pdf 기반으로 multi-chapter site를 만들어 output_dir 반환."""
-    opts = {"execution_mode": "sequential", "extraction_mode": "text", **(opts or {})}
+    opts = opts or {}
     r = server.init_work(str(ko_with_toc), str(tmp_path / "out"), **opts)
     wid = r["data"]["work_id"]
     s = server.scan_pdf(wid)
     chs = s["data"]["recommendations"]["suggested_chapters"]
-    server.set_chapters(wid, chs, {"title": "테스트용 한국어 책", "author": "T"})
+    server.set_chapters(wid, chs, execution_mode="sequential", extraction_mode="text",
+                        book_info={"title": "테스트용 한국어 책", "author": "T"})
     for c in chs:
         cid = c["chapter_id"]
         server.save_chapter_result(wid, cid, _fake_summary(cid))
@@ -51,13 +52,13 @@ def _build_multi(ko_with_toc, tmp_path, *, opts=None):
 
 
 def _build_single(ko_short, tmp_path, *, opts=None):
-    opts = {"execution_mode": "sequential", "extraction_mode": "text", **(opts or {})}
+    opts = opts or {}
     r = server.init_work(str(ko_short), str(tmp_path / "out"), **opts)
     wid = r["data"]["work_id"]
     server.scan_pdf(wid)
     server.set_chapters(wid, [
         {"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}
-    ])
+    ], execution_mode="sequential", extraction_mode="text")
     server.save_chapter_result(wid, "ch1", _fake_summary("ch1"))
     if server.get_subagent_prompts(wid)["data"]["enabled_types"]["extension"]:
         server.save_extension_result(wid, "ch1", {

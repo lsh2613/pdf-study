@@ -9,8 +9,8 @@ pdf_study/
 ├── server.py               # FastMCP 도구 12개 (resume_work 포함)
 ├── pdf/
 │   ├── __init__.py
-│   ├── reader.py           # PyMuPDF + 텍스트 추출 + 품질 평가 + book metadata + offset + render_pages(OCR)
-│   ├── toc_finder.py       # 본문 내 목차 패턴 탐색
+│   ├── reader.py           # PyMuPDF: 메타·offset·get_outline(내장 목차)·locate_toc_pages·render_pages(→JPEG)
+│   ├── toc_finder.py       # 본문 내 목차 정규식 탐색 (메인 흐름에서 미사용 — 레거시)
 │   └── chapter.py          # 챕터 분할 (set_chapters 처리)
 ├── analysis.py             # scan_pdf, set_chapters 통합 로직
 ├── workspace.py            # .work/ 폴더 관리, state.json read/write + lock
