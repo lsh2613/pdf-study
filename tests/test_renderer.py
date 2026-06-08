@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pdf_study import server
-from pdf_study.renderer.html_renderer import _summary_section
+from pdf_study.renderer.html_renderer import _FallbackMd, _summary_section
 
 
 def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):
@@ -206,6 +206,24 @@ def test_summary_headings_demoted_under_section():
     assert "<h2>요약</h2>" in html       # 섹션 제목은 h2 유지
     assert "<h3>개요</h3>" in html       # 본문 ##(h2) → h3
     assert "<h2>개요</h2>" not in html
+
+
+def test_fallback_md_renders_without_markdown_it():
+    """markdown-it-py가 없어도 내장 폴백이 마크다운을 HTML로 변환(raw 노출 방지)."""
+    fb = _FallbackMd()
+    out = fb.render(
+        "## 제목\n본문 **굵게** 와 `코드`.\n- 항목1\n- 항목2\n\n"
+        "| A | B |\n|---|---|\n| 1 | 2 |\n\n```py\nx = 1\n```"
+    )
+    assert "<h2>제목</h2>" in out
+    assert "<strong>굵게</strong>" in out and "<code>코드</code>" in out
+    assert "<ul>" in out and "<li>항목1</li>" in out
+    assert "<table>" in out and "<td>1</td>" in out
+    assert "<pre><code" in out and "x = 1" in out
+    # 마크다운 원문이 그대로 새어나오지 않아야
+    assert "**굵게**" not in out and "## 제목" not in out
+    # 인라인 전용 진입점
+    assert fb.renderInline("`x` **y**") == "<code>x</code> <strong>y</strong>"
 
 
 def test_no_figures_section_rendered():

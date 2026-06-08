@@ -5,7 +5,8 @@
 - assets/는 templates/html의 static 파일 복사.
 - 단일 챕터는 index.html 생략 → main.html 하나에 책 정보 상단 부착.
 - 옵션 비활성 유형은 섹션 자체를 생략 (sub-agent도 생성하지 않으므로 빈 섹션 없음).
-- 요약은 마크다운 → HTML(markdown-it)로 렌더한다. 그림(figure)은 더 이상 다루지 않는다.
+- 요약은 마크다운 → HTML로 렌더한다(markdown-it-py, 없으면 내장 폴백). 그림(figure)은
+  더 이상 다루지 않는다.
 """
 from __future__ import annotations
 
@@ -17,17 +18,173 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from markdown_it import MarkdownIt
-
 from .. import workspace
 from ..prompts import _chapter_sort_key  # 내부 헬퍼 재사용
 from .base import Renderer
 
 logger = logging.getLogger(__name__)
 
-# 요약 마크다운 → HTML. html=False라 본문 내 원시 HTML은 이스케이프되어 안전.
-# 표(GFM)만 추가로 활성화. (rich TUI와 동일 파서 계열이라 렌더 결과가 일관됨)
-_MD = MarkdownIt("commonmark", {"html": False}).enable("table")
+
+# ---------------------------------------------------------------------------
+# 마크다운 → HTML
+#
+# 정상 경로: markdown-it-py를 쓴다. 이건 rich(핵심 의존성)가 항상 끌고 오는
+# 전이 의존성이라 서버 venv엔 사실상 늘 깔려 있어, **사용자가 따로 설치할 필요가
+# 없다**. 그래도 어떤 이유로든 없을 때를 대비해(=절대 설치를 강요하지 않도록),
+# study_tui.py가 rich 없이 평문 셰임으로 폴백하듯, 여기서도 내장 폴백 변환기로
+# 떨어진다. 폴백도 raw 마크다운을 그대로 노출하지 않고 읽을 수 있는 HTML로 바꾼다.
+# ---------------------------------------------------------------------------
+
+class _FallbackMd:
+    """markdown-it-py가 없을 때 쓰는 최소 마크다운→HTML 변환기.
+
+    완전한 CommonMark는 아니지만 요약에서 흔한 문법(제목·굵게·기울임·인라인
+    코드·코드펜스·목록·인용·링크·표)을 HTML로 바꿔 'raw 텍스트 노출'을 막는다.
+    markdown-it과 동일한 render()/renderInline() 인터페이스를 흉내 낸다.
+    """
+
+    _CODE = re.compile(r"`([^`]+)`")
+    _LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+    _BOLD = re.compile(r"\*\*(.+?)\*\*")
+    _ITAL = re.compile(r"(?<![\*\w])\*(?!\s)(.+?)(?<!\s)\*(?!\*)")
+    _ITAL_US = re.compile(r"(?<![_\w])_(?!\s)(.+?)(?<!\s)_(?!_)")
+
+    def renderInline(self, src: str) -> str:
+        return self._inline(src or "")
+
+    def _inline(self, text: str) -> str:
+        # 1) 인라인 코드 보호 (escape 후 placeholder로 치환)
+        codes: list[str] = []
+
+        def _stash(m: re.Match) -> str:
+            codes.append(html.escape(m.group(1)))
+            return f"\x00{len(codes) - 1}\x00"
+
+        text = self._CODE.sub(_stash, text)
+        # 2) 나머지 escape
+        text = html.escape(text)
+        # 3) 링크 → a 태그
+        text = self._LINK.sub(
+            lambda m: f'<a href="{m.group(2)}" target="_blank" rel="noopener">{m.group(1)}</a>',
+            text,
+        )
+        # 4) 굵게 → 기울임
+        text = self._BOLD.sub(r"<strong>\1</strong>", text)
+        text = self._ITAL.sub(r"<em>\1</em>", text)
+        text = self._ITAL_US.sub(r"<em>\1</em>", text)
+        # 5) 코드 복원
+        text = re.sub(r"\x00(\d+)\x00",
+                      lambda m: f"<code>{codes[int(m.group(1))]}</code>", text)
+        return text
+
+    @staticmethod
+    def _cells(row: str) -> list[str]:
+        return [c.strip() for c in row.strip().strip("|").split("|")]
+
+    def render(self, src: str) -> str:  # noqa: C901 - 단순 블록 스캐너
+        lines = (src or "").replace("\r\n", "\n").split("\n")
+        out: list[str] = []
+        para: list[str] = []
+        list_tag: str | None = None
+        i, n = 0, len(lines)
+
+        def flush_para() -> None:
+            if para:
+                out.append("<p>" + self._inline(" ".join(para).strip()) + "</p>")
+                para.clear()
+
+        def close_list() -> None:
+            nonlocal list_tag
+            if list_tag:
+                out.append(f"</{list_tag}>")
+                list_tag = None
+
+        while i < n:
+            raw = lines[i]
+            s = raw.strip()
+
+            # 코드펜스
+            m = re.match(r"^```(\w*)\s*$", s)
+            if m:
+                flush_para(); close_list()
+                lang, i = m.group(1), i + 1
+                buf: list[str] = []
+                while i < n and not re.match(r"^```\s*$", lines[i].strip()):
+                    buf.append(lines[i]); i += 1
+                i += 1  # 닫는 펜스 skip
+                cls = f' class="language-{lang}"' if lang else ""
+                out.append(f"<pre><code{cls}>" + html.escape("\n".join(buf)) + "\n</code></pre>")
+                continue
+
+            if not s:
+                flush_para(); close_list(); i += 1; continue
+
+            # 제목
+            m = re.match(r"^(#{1,6})\s+(.*)$", s)
+            if m:
+                flush_para(); close_list()
+                lvl = len(m.group(1))
+                out.append(f"<h{lvl}>{self._inline(m.group(2).strip())}</h{lvl}>")
+                i += 1; continue
+
+            # 인용
+            if s.startswith(">"):
+                flush_para(); close_list()
+                buf = []
+                while i < n and lines[i].strip().startswith(">"):
+                    buf.append(re.sub(r"^>\s?", "", lines[i].strip())); i += 1
+                out.append("<blockquote>" + self._inline(" ".join(buf).strip()) + "</blockquote>")
+                continue
+
+            # 표 (GFM): 헤더 + 구분선
+            if "|" in s and i + 1 < n and "-" in lines[i + 1] and \
+                    re.match(r"^\s*\|?[\s:|-]+\|?\s*$", lines[i + 1]):
+                flush_para(); close_list()
+                header = self._cells(s); i += 2
+                rows = []
+                while i < n and "|" in lines[i] and lines[i].strip():
+                    rows.append(self._cells(lines[i])); i += 1
+                thead = "".join(f"<th>{self._inline(c)}</th>" for c in header)
+                body = "".join(
+                    "<tr>" + "".join(f"<td>{self._inline(c)}</td>" for c in r) + "</tr>"
+                    for r in rows
+                )
+                out.append(f"<table><thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table>")
+                continue
+
+            # 순서 없는 목록
+            m = re.match(r"^[-*+]\s+(.*)$", s)
+            if m:
+                flush_para()
+                if list_tag != "ul":
+                    close_list(); out.append("<ul>"); list_tag = "ul"
+                out.append("<li>" + self._inline(m.group(1).strip()) + "</li>")
+                i += 1; continue
+
+            # 순서 있는 목록
+            m = re.match(r"^\d+\.\s+(.*)$", s)
+            if m:
+                flush_para()
+                if list_tag != "ol":
+                    close_list(); out.append("<ol>"); list_tag = "ol"
+                out.append("<li>" + self._inline(m.group(1).strip()) + "</li>")
+                i += 1; continue
+
+            para.append(s); i += 1
+
+        flush_para(); close_list()
+        return "\n".join(out)
+
+
+try:
+    from markdown_it import MarkdownIt
+
+    # html=False라 본문 내 원시 HTML은 이스케이프되어 안전. 표(GFM)만 추가 활성화.
+    # (rich TUI와 동일 파서 계열이라 렌더 결과가 일관됨)
+    _MD: Any = MarkdownIt("commonmark", {"html": False}).enable("table")
+except ImportError:  # rich가 정상 설치되면 늘 존재하지만, 만일을 위한 폴백
+    logger.warning("markdown-it-py 미설치 — 내장 폴백 마크다운 변환기 사용")
+    _MD = _FallbackMd()
 
 # 요약 본문 안의 헤딩은 섹션 제목('요약' h2) 아래로 한 단계 낮춰 계층을 맞춘다.
 _HEADING_RE = re.compile(r"(</?)h([1-6])\b")
