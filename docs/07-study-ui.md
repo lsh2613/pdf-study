@@ -169,7 +169,7 @@ progress 파일 스키마는 [05-data-schemas.md](./05-data-schemas.md#progress-
 ## md_tui 출력 (output_format="md_tui")
 
 HTML 정적 사이트 대신, 챕터별 폴더 + 요약 마크다운 + 터미널 학습 TUI를 생성한다.
-HTML과 동일한 중립 JSON(chapters/{summaries,quiz,extension_questions})에서 렌더되며, 선택은
+HTML과 동일한 중립 JSON(chapters/{summaries,quiz,extension_quiz})에서 렌더되며, 선택은
 `finalize_study(output_format="md_tui")`로만 갈린다 (서버/파이프라인 변경 없음).
 
 ### 실행

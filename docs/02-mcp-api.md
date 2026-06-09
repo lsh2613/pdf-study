@@ -63,9 +63,13 @@ set_chapters(work_id: str, chapters: list[dict], execution_mode: str = "",
 # text 모드: data에 text(본문).
 # ocr  모드: data에 page_images(챕터 페이지를 렌더한 JPEG 절대경로) — sub-agent가
 #            순서대로 읽어 본문을 OCR. (그림 추출/렌더링은 제공하지 않는다.)
+# get_chapter_content는 호출 시 해당 챕터 summary_status를 in_progress로 마킹(진행 모니터링).
 get_chapter_content(work_id: str, chapter_id: str) -> dict
 get_subagent_prompts(work_id: str) -> dict
+# 저장 전 필수값 검증: summary·key_points + 활성 mc/sa/rf가 비어있으면 ok=False(data.missing)로
+# 거부하며 completed로 마킹하지 않는다.
 save_chapter_result(work_id: str, chapter_id: str, data: dict) -> dict
+# questions.extension이 비어있으면 ok=False로 거부.
 save_extension_result(work_id: str, chapter_id: str, data: dict) -> dict
 search_extension_context(work_id: str, chapter_id: str, query: str) -> dict
 get_work_state(work_id: str) -> dict
@@ -76,7 +80,7 @@ list_pending_chapters(work_id: str) -> dict
 finalize_study(work_id: str, output_format: str = "", keep_work_dir: bool = True, force: bool = False) -> dict
 # output_format: "html"(정적 사이트) | "md_tui"(챕터별 폴더 + summary.md + 학습 TUI).
 # 기본값 없음 — 임의 지정 금지, 반드시 사용자에게 물어볼 것. 미지정 시 ok=False로 거부.
-# 둘 다 동일한 중립 JSON(chapters/{summaries,quiz,extension_questions})에서 렌더되므로, 같은 work_id로
+# 둘 다 동일한 중립 JSON(chapters/{summaries,quiz,extension_quiz})에서 렌더되므로, 같은 work_id로
 # output_format만 바꿔 두 번 호출하면 두 포맷을 모두 생성할 수 있다.
 ```
 

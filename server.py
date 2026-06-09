@@ -34,6 +34,35 @@ def _err(error: str, data: Any = None) -> dict[str, Any]:
     return {"ok": False, "error": error, "data": data, "next_action": None}
 
 
+def _nonempty(v: Any) -> bool:
+    """필수 값 존재 판정: None/빈 문자열/빈 리스트·딕셔너리는 '없음'으로 본다."""
+    if v is None:
+        return False
+    if isinstance(v, str):
+        return bool(v.strip())
+    if isinstance(v, (list, dict, tuple)):
+        return len(v) > 0
+    return True
+
+
+def _missing_summary_fields(data: dict[str, Any], options: dict[str, bool]) -> list[str]:
+    """save_chapter_result 페이로드에서 비었거나 누락된 필수 필드 목록.
+
+    summary·key_points는 항상 필수, 기본 문제 유형은 **활성화된 것만** 비어있지
+    않아야 한다(스케일 표상 활성 유형은 챕터마다 최소 1개가 나온다).
+    """
+    missing: list[str] = []
+    if not _nonempty(data.get("summary")):
+        missing.append("summary")
+    if not _nonempty(data.get("key_points")):
+        missing.append("key_points")
+    questions = data.get("questions") or {}
+    for t in ("multiple_choice", "short_answer", "reflection"):
+        if options.get(t) and not _nonempty(questions.get(t)):
+            missing.append(f"questions.{t}")
+    return missing
+
+
 _SAFE_NAME_RE = re.compile(r"[^\w가-힣.\-]+")  # 영숫자 / 한글 / _ . - 외엔 치환
 
 
@@ -419,6 +448,8 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
       문맥으로 복원하세요.
     """
     raw = analysis.get_chapter_content_impl(work_id, chapter_id)
+    # 본문을 받아간 시점 = 요약 처리 시작 → 진행 모니터링용 in_progress 마킹
+    workspace.mark_chapter_in_progress(work_id, chapter_id, kind="summary")
     if "page_images" in raw:  # ocr 모드
         guide = (
             f"이 챕터({chapter_id})의 page_images를 **순서대로** 멀티모달로 읽어 "
@@ -481,7 +512,22 @@ def save_chapter_result(
     스키마는 get_subagent_prompts의 summarizer_prompt에 명시. 동시성 안전.
     OCR 모드에서 결과에 `body_text`(이미지에서 전사한 본문 전체)가 있으면
     chapters_raw/ch{N}.json의 `text`로 보존된다(text 모드와 동일 형태).
+
+    저장 전 필수 값(summary·key_points·활성 문제 유형)이 모두 채워졌는지 검증한다.
+    하나라도 비었으면 completed로 마킹하지 않고 ok=False로 거부 — "모두 성공"이라
+    단정했지만 실제로 누락된 결과가 조용히 completed 되는 것을 막는다.
     """
+    options = workspace.load_state(work_id).get("question_options", {})
+    missing = _missing_summary_fields(data, options)
+    if missing:
+        return _err(
+            f"챕터 결과에 필수 값이 비었거나 누락됐습니다: {missing}. "
+            "요약(summary)·핵심포인트(key_points)와 활성화된 문제 유형을 모두 채워 "
+            f'save_chapter_result(work_id="{work_id}", chapter_id="{chapter_id}", '
+            "data=...)로 다시 저장하세요. (모두 성공했다고 단정하기 전에 각 필드를 "
+            "직접 확인하세요.)",
+            data={"missing": missing, "chapter_id": chapter_id},
+        )
     path = workspace.save_chapter_result(work_id, chapter_id, data)
     return _ok({"saved_path": str(path)}, next_action=(
         f"{chapter_id} 요약/문제 저장 완료. extension이 활성이면 이 챕터의 "
@@ -503,7 +549,19 @@ def save_extension_result(
     chapter_id: str,
     data: dict[str, Any],
 ) -> dict[str, Any]:
-    """extension sub-agent의 결과 JSON을 저장합니다. 동시성 안전."""
+    """extension sub-agent의 결과 JSON을 저장합니다. 동시성 안전.
+
+    저장 전 questions.extension이 비어있지 않은지 검증한다(빈 결과가 completed로
+    조용히 마킹되는 것 방지).
+    """
+    questions = data.get("questions") or {}
+    if not _nonempty(questions.get("extension")):
+        return _err(
+            "확장 결과에 questions.extension(비어있지 않은 배열)이 필요합니다. "
+            f'save_extension_result(work_id="{work_id}", chapter_id="{chapter_id}", '
+            "data=...)로 확장 문제를 채워 다시 저장하세요.",
+            data={"missing": ["questions.extension"], "chapter_id": chapter_id},
+        )
     path = workspace.save_extension_result(work_id, chapter_id, data)
     return _ok({"saved_path": str(path)}, next_action=(
         f"{chapter_id} 확장 문제 저장 완료. 남은 chapter_id로 진행하세요. "
@@ -531,6 +589,8 @@ async def search_extension_context(
     """
     # work_id 유효성 (registry에 없으면 KeyError → _safe가 처리)
     workspace.get_work_dir(work_id)
+    # 확장 자료 검색 시점 = 확장 처리 시작 → 진행 모니터링용 in_progress 마킹
+    workspace.mark_chapter_in_progress(work_id, chapter_id, kind="extension")
     result = await exa_client.search(query)
     return _ok({
         "query": query,

@@ -20,7 +20,7 @@
 └── chapters/
     ├── summaries/ch{N}.json           # 요약 + 핵심포인트
     ├── quiz/ch{N}.json                # 기본 문제 (mc/sa/rf)
-    └── extension_questions/ch{N}.json # 확장 문제
+    └── extension_quiz/ch{N}.json # 확장 문제
 ```
 
 ### 최종 출력 (study_output/) — output_format="html" 기준
@@ -118,7 +118,13 @@ study_output/
 ```
 
 - `skip: true` 챕터(찾아보기·색인·판권 등 비본문)는 raw 추출과 sub-agent 디스패치, HTML 렌더링에서 모두 제외된다.
-- status 값: `pending` / `in_progress` / `completed` / `failed` / `skipped`. `completed`와 `skipped`는 더 처리할 필요가 없다는 의미로 동일하게 다뤄진다 (`list_pending_chapters`가 둘 다 pending에서 제외).
+- status 값: `pending` / `in_progress` / `completed` / `failed` / `skipped`.
+  - 초기: `pending`(본문) / `skipped`(skip 챕터).
+  - `in_progress`: **처리 시작 시** 마킹 — `get_chapter_content`→`summary_status`,
+    `search_extension_context`→`extension_status`. (completed/skipped는 안 건드림,
+    재시도 시 failed→in_progress) 병렬 모드에서 "지금 처리 중"을 모니터링하기 위함.
+  - `completed`: `save_chapter_result`/`save_extension_result`. `failed`: `mark_chapter_failed`.
+  - `completed`와 `skipped`는 더 처리할 필요가 없다는 의미로 동일하게 다뤄진다 (`list_pending_chapters`가 둘 다 pending에서 제외).
 
 ### book_info.json
 
@@ -166,6 +172,13 @@ study_output/
 summarizer sub-agent의 한 payload(`{summary, key_points, questions, body_text?}`)는
 `save_chapter_result`가 **두 파일로 나눠** 저장한다. 둘은 항상 같은 호출에서
 함께 생성된다(결합 유지). 렌더러는 둘을 다시 한 dict로 합쳐 읽는다.
+
+> **저장 전 필수값 검증(server 경계):** `save_chapter_result`는 `summary`·`key_points`와
+> **활성화된** 문제 유형(mc/sa/rf)이 모두 비어있지 않은지 확인하고, 하나라도
+> 누락/빈값이면 `ok=False`(`data.missing`)로 거부해 `completed`로 마킹하지 않는다.
+> `save_extension_result`도 `questions.extension`이 비어있지 않은지 검증한다.
+> (서브에이전트가 "모두 성공"이라 단정했지만 실제로 누락된 결과가 조용히 완료로
+> 기록되는 것을 막는다.)
 OCR 모드의 `body_text`(전사 본문)는 summaries에 넣지 않고 `chapters_raw`의 `text`로
 backfill된다(위 참조).
 
@@ -204,7 +217,7 @@ backfill된다(위 참조).
 }
 ```
 
-### chapters/extension_questions/ch{N}.json
+### chapters/extension_quiz/ch{N}.json
 
 ```json
 {

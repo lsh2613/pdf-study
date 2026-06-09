@@ -26,7 +26,7 @@
 ┌──────────────────────────────────────────────────────────────┐
 │ 작업 디스크 레이아웃: <output_dir>/.work/                    │
 │   state.json / raw_data/ / chapters/{summaries,quiz,        │
-│   extension_questions}/ / raw_data/{chapters_raw,pages}/     │
+│   extension_quiz}/ / raw_data/{chapters_raw,pages}/     │
 └──────────────────────────────────────────────────────────────┘
         │ finalize_study 후
         ▼
@@ -235,7 +235,7 @@ Task tool만 진짜 병렬, Gemini/Codex는 메인 모델이 순차 처리).
        - 실패해도 빈 results + ok=True (graceful degrade)
 
 (5) extension sub-agent → save_extension_result
-       └─ chapters/extension_questions/ch{N}.json + extension_status="completed"
+       └─ chapters/extension_quiz/ch{N}.json + extension_status="completed"
 ```
 
 - 코드: `server.py:get_chapter_content/save_chapter_result/
@@ -275,7 +275,7 @@ server.finalize_study(work_id, output_format="", keep_work_dir=True, force=False
   ├─ RENDERERS[output_format]()  # "html"→HtmlRenderer, "md_tui"→MdTuiRenderer
   └─ HtmlRenderer.render(work_id, output_dir)   # md_tui면 MdTuiRenderer
        ├─ _load_all
-       │    - state, book_info, chapters/{summaries,quiz,extension_questions}/
+       │    - state, book_info, chapters/{summaries,quiz,extension_quiz}/
        │      ch{N}.json, raw_data/chapters_raw/ch{N}.json 모두 로드
        │      (summaries+quiz는 한 dict로 병합)
        │      + _unescape_if_double_escaped로 리터럴 \n(이중 이스케이프) 자가복구
@@ -359,7 +359,7 @@ T2  set_chapters
 T3  챕터 루프
     ├─ chapters/summaries/ch{N}.json          (요약 + 핵심포인트)
     ├─ chapters/quiz/ch{N}.json               (기본 문제)
-    └─ chapters/extension_questions/ch{N}.json (extension 결과)
+    └─ chapters/extension_quiz/ch{N}.json (extension 결과)
        + state.json의 status 갱신 (lock 보호 + atomic)
 T4  finalize_study (output_format=html)
     └─ <output_dir>/

@@ -26,6 +26,26 @@ def _sc(wid, chapters, **kw):
     )
 
 
+def _result(summary="요약"):
+    """save_chapter_result용 유효 페이로드(summary·key_points·mc/sa/rf 모두 채움)."""
+    return {
+        "summary": summary, "key_points": ["p1", "p2"],
+        "questions": {
+            "multiple_choice": [{"id": "mc1", "question": "?", "options": ["A", "B"],
+                                 "answer_index": 0, "explanation": ""}],
+            "short_answer": [{"id": "sa1", "question": "?", "model_answer": "a"}],
+            "reflection": [{"id": "rf1", "question": "?", "model_answer": "a"}],
+        },
+    }
+
+
+def _ext():
+    """save_extension_result용 유효 페이로드(extension 1개)."""
+    return {"questions": {"extension": [
+        {"id": "ex1", "question": "?", "context": "c", "model_answer": "a", "sources": []}
+    ]}}
+
+
 # ---------------------------------------------------------------------------
 # init_work — 모드 인자를 더 이상 받지 않는다 (set_chapters에서 결정)
 # ---------------------------------------------------------------------------
@@ -191,6 +211,84 @@ def test_set_chapters_text_mode_ok_when_quality_good(tmp_path, ko_short):
     assert r["ok"] is True, r
 
 
+def test_get_chapter_content_marks_summary_in_progress(tmp_path, ko_short):
+    """get_chapter_content 호출 시 summary_status가 in_progress로, 저장 시 completed로 전이."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
+
+    server.get_chapter_content(wid, "ch1")
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "in_progress"
+
+    server.save_chapter_result(wid, "ch1", _result())
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "completed"
+
+    # 완료 후 다시 본문을 받아가도 completed는 되돌지 않는다
+    server.get_chapter_content(wid, "ch1")
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "completed"
+
+
+def test_mark_chapter_in_progress_guards_done_and_missing(tmp_path, ko_short):
+    """in_progress 마킹은 completed/skipped를 안 건드리고, 없는 챕터는 조용히 무시."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    workspace.mark_chapter_in_progress(wid, "ch1", kind="extension")
+    assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] == "in_progress"
+
+    workspace.update_chapter_status(wid, "ch1", extension_status="completed")
+    workspace.mark_chapter_in_progress(wid, "ch1", kind="extension")  # 되돌지 않음
+    assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] == "completed"
+
+    workspace.mark_chapter_in_progress(wid, "ch999", kind="summary")  # 없는 챕터 → no-op(예외 없음)
+
+
+def test_save_chapter_result_rejects_missing_summary(tmp_path, ko_short):
+    """summary 누락 시 ok=False로 거부하고 completed로 마킹하지 않는다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    bad = _result()
+    del bad["summary"]  # summary 누락(서브에이전트가 성공이라 했지만 빠뜨린 상황)
+    r = server.save_chapter_result(wid, "ch1", bad)
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert "summary" in r["data"]["missing"]
+    # 거부됐으므로 completed로 넘어가지 않는다
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+
+
+def test_save_chapter_result_rejects_empty_enabled_question_type(tmp_path, ko_short):
+    """활성화된 문제 유형이 비어 있으면 거부. 비활성 유형은 요구하지 않는다."""
+    # reflection만 비활성화 → reflection 비어도 통과, short_answer 비면 거부
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"),
+                           enable_reflection=False)["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    data = _result()
+    data["questions"]["reflection"] = []      # 비활성 → 비어도 OK
+    data["questions"]["short_answer"] = []     # 활성 → 비면 거부
+    r = server.save_chapter_result(wid, "ch1", data)
+    assert r["ok"] is False
+    assert "questions.short_answer" in r["data"]["missing"]
+    assert "questions.reflection" not in r["data"]["missing"]
+
+
+def test_save_extension_result_rejects_empty_extension(tmp_path, ko_short):
+    """questions.extension이 비어 있으면 거부."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+    r = server.save_extension_result(wid, "ch1", {"questions": {"extension": []}})
+    assert r["ok"] is False
+    assert r["data"]["missing"] == ["questions.extension"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] != "completed"
+
+
 # ---------------------------------------------------------------------------
 # scan_pdf — 텍스트 레이어 없어도 거부하지 않고 vision 경로
 # ---------------------------------------------------------------------------
@@ -285,24 +383,12 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
     assert "JSON 객체 하나만" in r5["data"]["summarizer_prompt"]
 
     # 가짜 결과 저장
-    r6 = server.save_chapter_result(wid, "ch1", {
-        "chapter_id": "ch1", "title": "전체",
-        "summary": "요약", "key_points": ["p1"],
-        "questions": {
-            "multiple_choice": [
-                {"id": "mc1", "question": "?",
-                 "options": ["A", "B"], "answer_index": 0, "explanation": ""}
-            ],
-            "short_answer": [], "reflection": [],
-        },
-    })
+    r6 = server.save_chapter_result(wid, "ch1", _result())
     _check_envelope(r6); assert r6["ok"]
     assert r6["next_action"] and "list_pending_chapters" in r6["next_action"]
 
     # extension 결과 저장
-    r7 = server.save_extension_result(wid, "ch1", {
-        "chapter_id": "ch1", "questions": {"extension": []}
-    })
+    r7 = server.save_extension_result(wid, "ch1", _ext())
     _check_envelope(r7); assert r7["ok"]
     assert r7["next_action"] and "finalize_study" in r7["next_action"]
 
@@ -343,10 +429,7 @@ def test_finalize_requires_output_format(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     server.scan_pdf(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
-    server.save_chapter_result(wid, "ch1", {
-        "chapter_id": "ch1", "summary": "", "key_points": [],
-        "questions": {"multiple_choice": [], "short_answer": [], "reflection": []}
-    })
+    server.save_chapter_result(wid, "ch1", _result())
     r = server.finalize_study(wid)  # output_format 생략
     _check_envelope(r)
     assert r["ok"] is False
@@ -360,10 +443,7 @@ def test_finalize_rejects_unknown_format(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     server.scan_pdf(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
-    server.save_chapter_result(wid, "ch1", {
-        "chapter_id": "ch1", "summary": "", "key_points": [],
-        "questions": {"multiple_choice": [], "short_answer": [], "reflection": []}
-    })
+    server.save_chapter_result(wid, "ch1", _result())
     r = server.finalize_study(wid, output_format="bogus")
     _check_envelope(r)
     assert r["ok"] is False
@@ -402,10 +482,7 @@ def test_finalize_blocks_on_pending_then_force(tmp_path, ko_short):
         {"chapter_id": "ch1", "title": "A", "page_range": [1, 6]},
         {"chapter_id": "ch2", "title": "B", "page_range": [7, 12]},
     ])
-    server.save_chapter_result(wid, "ch1", {
-        "chapter_id": "ch1", "summary": "", "key_points": [],
-        "questions": {"multiple_choice": [], "short_answer": [], "reflection": []},
-    })
+    server.save_chapter_result(wid, "ch1", _result())
 
     blocked = server.finalize_study(wid, "html")
     _check_envelope(blocked)
@@ -429,10 +506,7 @@ def test_resume_work_restores_registry_after_restart(tmp_path, ko_short):
         {"chapter_id": "ch1", "title": "A", "page_range": [1, 6]},
         {"chapter_id": "ch2", "title": "B", "page_range": [7, 12]},
     ])
-    server.save_chapter_result(wid, "ch1", {
-        "chapter_id": "ch1", "summary": "", "key_points": [],
-        "questions": {"multiple_choice": [], "short_answer": [], "reflection": []},
-    })
+    server.save_chapter_result(wid, "ch1", _result())
 
     # 서버 재시작 시뮬레이션: in-memory 레지스트리 초기화
     workspace._registry.clear()

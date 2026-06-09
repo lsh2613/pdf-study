@@ -11,7 +11,7 @@
     └── chapters/
         ├── summaries/ch{N}.json           # 요약 + 핵심포인트
         ├── quiz/ch{N}.json                # 기본 문제 (mc/sa/rf)
-        └── extension_questions/ch{N}.json # 확장 문제
+        └── extension_quiz/ch{N}.json # 확장 문제
 
 work_id 컨벤션: YYYYMMDD-HHMMSS (단순 타임스탬프).
 """
@@ -129,7 +129,7 @@ def pages_dir(work_id: str) -> Path:
 
 
 def chapters_dir(work_id: str) -> Path:
-    """챕터별 sub-agent 산출물의 부모 폴더 (summaries/quiz/extension_questions)."""
+    """챕터별 sub-agent 산출물의 부모 폴더 (summaries/quiz/extension_quiz)."""
     return get_work_dir(work_id) / "chapters"
 
 
@@ -143,9 +143,9 @@ def quiz_dir(work_id: str) -> Path:
     return chapters_dir(work_id) / "quiz"
 
 
-def extension_questions_dir(work_id: str) -> Path:
+def extension_quiz_dir(work_id: str) -> Path:
     """확장 문제 (extension)."""
-    return chapters_dir(work_id) / "extension_questions"
+    return chapters_dir(work_id) / "extension_quiz"
 
 
 def book_info_path(work_id: str) -> Path:
@@ -217,7 +217,7 @@ def create_workspace(
     (work_dir / "raw_data" / "pages").mkdir(parents=True, exist_ok=True)
     (work_dir / "chapters" / "summaries").mkdir(parents=True, exist_ok=True)
     (work_dir / "chapters" / "quiz").mkdir(parents=True, exist_ok=True)
-    (work_dir / "chapters" / "extension_questions").mkdir(parents=True, exist_ok=True)
+    (work_dir / "chapters" / "extension_quiz").mkdir(parents=True, exist_ok=True)
 
     if work_id is None:
         work_id = make_work_id()
@@ -470,7 +470,7 @@ def save_extension_result(
     data: dict[str, Any],
 ) -> Path:
     """extension sub-agent 결과 저장 + state 갱신."""
-    out = extension_questions_dir(work_id) / f"{chapter_id}.json"
+    out = extension_quiz_dir(work_id) / f"{chapter_id}.json"
     _atomic_write_json(out, data)
 
     with _get_lock(work_id):
@@ -504,6 +504,27 @@ def mark_chapter_failed(
         entry["error"] = error
         entry["retry_count"] = int(entry.get("retry_count", 0)) + 1
         save_state(work_id, state)
+
+
+def mark_chapter_in_progress(work_id: str, chapter_id: str, *, kind: str) -> None:
+    """'처리 시작'을 표시. kind는 'summary' | 'extension'.
+
+    진행 모니터링용 soft 신호다 (get_chapter_content=summary,
+    search_extension_context=extension 시점에 호출). 이미 끝난 completed/skipped는
+    건드리지 않고, state에 없는 chapter_id면 조용히 무시한다(모니터링 표시 때문에
+    실제 작업을 깨뜨리지 않기 위함). pending·failed·in_progress → in_progress.
+    """
+    if kind not in ("summary", "extension"):
+        raise ValueError(f"kind must be 'summary' or 'extension', got {kind!r}")
+    field = f"{kind}_status"
+    with _get_lock(work_id):
+        state = load_state(work_id)
+        entry = state.get("chapters", {}).get(chapter_id)
+        if entry is None:
+            return
+        if entry.get(field) not in _DONE_STATUSES:
+            entry[field] = "in_progress"
+            save_state(work_id, state)
 
 
 # ---------------------------------------------------------------------------

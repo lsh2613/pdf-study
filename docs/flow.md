@@ -82,7 +82,7 @@ server.init_work(...)
 | 파일 | 변경 |
 |---|---|
 | `.work/state.json` | **신규 생성** — work_id, pdf_path, output_dir, started_at, enable_* (`question_options`), user_context, `execution_mode=null`, `extraction_mode=null`, 모든 `phases=pending` |
-| `.work/` 디렉토리 트리 | `raw_data/`, `raw_data/pages/`, `chapters/{summaries,quiz,extension_questions}/` 빈 폴더 |
+| `.work/` 디렉토리 트리 | `raw_data/`, `raw_data/pages/`, `chapters/{summaries,quiz,extension_quiz}/` 빈 폴더 |
 
 - 응답 `data`: `{work_id, work_dir, output_dir(실제 절대경로)}`
 - `next_action`: `scan_pdf(work_id, scan_size=30)`
@@ -330,6 +330,7 @@ server.get_subagent_prompts(work_id)
             - text 모드: get_chapter_raw → text 반환
             - ocr  모드: page_range를 lazy 렌더(render_pages) → page_images(절대경로) 반환
                          (디스크 raw엔 page_images를 저장하지 않음)
+       └─ workspace.mark_chapter_in_progress(kind="summary")  # 처리 시작 → summary_status=in_progress
 
 (2) summarizer sub-agent (메인 LLM이 프롬프트로 호출)
        - text: text를 읽어 요약/문제 생성
@@ -337,17 +338,22 @@ server.get_subagent_prompts(work_id)
        - 결과 JSON: {summary(마크다운), key_points, questions:{mc,sa,rf}, body_text?(ocr)}
 
 (3) save_chapter_result(work_id, chapter_id, data)
+       └─ ★ 필수값 검증: summary·key_points + **활성화된** mc/sa/rf가 모두 비어있지
+          않은지 확인. 누락/빈값이면 ok=False(data.missing)로 거부 → completed 안 됨
+          (서브에이전트가 "성공"이라 단정했지만 누락된 결과를 조용히 통과시키지 않음)
        └─ workspace.save_chapter_result   # ↓ lock 보호 + atomic write
             - chapters/summaries/ch{N}.json + chapters/quiz/ch{N}.json 2파일 분리 저장
             - (ocr & body_text) chapters_raw/ch{N}.json의 text로 backfill + char_count 갱신
             - state lock 안에서 summary_status = completed
 
 (4) (extension 활성 시) search_extension_context(work_id, chapter_id, query)
+       └─ workspace.mark_chapter_in_progress(kind="extension")  # 처리 시작 → extension_status=in_progress
        └─ exa_client.search(query)   # Exa Web Research MCP HTTP
        - 실패해도 빈 results + ok=True (graceful degrade)
 
 (5) extension sub-agent → save_extension_result(work_id, chapter_id, data)
-       └─ chapters/extension_questions/ch{N}.json + extension_status = completed
+       └─ ★ 필수값 검증: questions.extension이 비어있지 않은지 → 비면 ok=False 거부
+       └─ chapters/extension_quiz/ch{N}.json + extension_status = completed
 ```
 
 ### 분기 D — execution_mode (디스패치 방식)
@@ -394,8 +400,8 @@ flowchart LR
 | `.work/chapters/summaries/ch{N}.json` | **신규** (summary 마크다운 + key_points) |
 | `.work/chapters/quiz/ch{N}.json` | **신규** (mc/sa/rf 문제) |
 | `.work/raw_data/chapters_raw/ch{N}.json` | (ocr) `text` backfill + `char_count` 갱신 |
-| `.work/chapters/extension_questions/ch{N}.json` | (extension) **신규** (확장 문제 + 출처) |
-| `.work/state.json` | `summary_status`/`extension_status` → `completed` (lock 보호) |
+| `.work/chapters/extension_quiz/ch{N}.json` | (extension) **신규** (확장 문제 + 출처) |
+| `.work/state.json` | 처리 시작 시 `summary_status`/`extension_status` → `in_progress`, 저장 시 → `completed` (lock 보호) |
 
 ---
 
@@ -427,13 +433,19 @@ server.list_pending_chapters(work_id)
 stateDiagram-v2
     [*] --> pending: set_chapters (skip=false)
     [*] --> skipped: set_chapters (skip=true)
-    pending --> completed: save_chapter_result / save_extension_result
-    pending --> failed: mark_chapter_failed (retry_count++)
-    failed --> completed: 재시도 성공
-    failed --> pending: 재시도 재디스패치
+    pending --> in_progress: get_chapter_content (summary)<br/>search_extension_context (extension)
+    in_progress --> completed: save_chapter_result / save_extension_result
+    in_progress --> failed: mark_chapter_failed (retry_count++)
+    pending --> completed: save_* (content 없이 바로 저장 시)
+    pending --> failed: mark_chapter_failed
+    failed --> in_progress: 재시도(get_chapter_content 재호출)
     completed --> [*]
     skipped --> [*]
 ```
+
+> `in_progress`는 **처리 시작 시** 마킹된다(`get_chapter_content`=summary,
+> `search_extension_context`=extension). completed/skipped는 건드리지 않고, state에
+> 없는 chapter_id면 조용히 무시한다(모니터링 신호가 실제 작업을 깨지 않도록).
 
 - 변경 파일: `state.json`(실패 시 `status`/`retry_count`). 그 외엔 읽기 전용.
 
@@ -524,7 +536,7 @@ flowchart TD
     T2 --> T2c["raw_data/chapters_raw/ch{N}.json (skip 제외)"]
     T3["T3 챕터 루프"] --> T3a["chapters/summaries/ch{N}.json"]
     T3 --> T3b["chapters/quiz/ch{N}.json"]
-    T3 --> T3c["chapters/extension_questions/ch{N}.json"]
+    T3 --> T3c["chapters/extension_quiz/ch{N}.json"]
     T3 --> T3d["state.json status 갱신 (lock+atomic)"]
     T3 --> T3e["(ocr) chapters_raw text backfill"]
     T4["T4 finalize_study"] --> T4a["output_dir/ 정적 산출물"]

@@ -1,4 +1,4 @@
-"""HTML 렌더러: state + book_info + chapters/{summaries,quiz,extension_questions} → 정적 사이트.
+"""HTML 렌더러: state + book_info + chapters/{summaries,quiz,extension_quiz} → 정적 사이트.
 
 설계 메모:
 - Jinja2 의존 추가하지 않고 stdlib `html.escape` + f-string 합성.
@@ -232,7 +232,7 @@ def _load_all(work_id: str) -> dict[str, Any]:
     book_info = workspace.load_book_info(work_id) or {}
     summaries_dir = workspace.summaries_dir(work_id)
     quiz_dir = workspace.quiz_dir(work_id)
-    ext_dir = workspace.extension_questions_dir(work_id)
+    ext_dir = workspace.extension_quiz_dir(work_id)
     raw_dir = workspace.chapters_raw_dir(work_id)
 
     all_ids = sorted(state.get("chapters", {}).keys(), key=_chapter_sort_key)

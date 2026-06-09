@@ -66,7 +66,11 @@ def _build_single(ko_short, tmp_path, *, opts=None):
     server.save_chapter_result(wid, "ch1", _fake_summary("ch1"))
     if server.get_subagent_prompts(wid)["data"]["enabled_types"]["extension"]:
         server.save_extension_result(wid, "ch1", {
-            "chapter_id": "ch1", "questions": {"extension": []}
+            "chapter_id": "ch1",
+            "questions": {"extension": [
+                {"id": "ch1_ex", "question": "?", "context": "ctx",
+                 "model_answer": "ans", "sources": ["https://e.com/"]}
+            ]},
         })
     fin = server.finalize_study(wid, "html")
     assert fin["ok"], fin
