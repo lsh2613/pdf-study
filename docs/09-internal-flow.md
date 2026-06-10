@@ -215,6 +215,7 @@ Task tool만 진짜 병렬, Gemini/Codex는 메인 모델이 순차 처리).
             - text 모드: get_chapter_raw → text
             - ocr  모드: page_range를 lazy 렌더(reader.render_pages) →
                          page_images(페이지 JPEG 절대경로) 반환
+       └─ workspace.mark_chapter_in_progress(kind="summary")  # summary_status=in_progress
 
 (2) summarizer sub-agent (메인 LLM이 위 프롬프트로 호출)
        - text 모드: text를 읽어 요약/문제 생성
@@ -223,6 +224,8 @@ Task tool만 진짜 병렬, Gemini/Codex는 메인 모델이 순차 처리).
                      body_text?(ocr이면 전사 본문)}
 
 (3) save_chapter_result(work_id, chapter_id, data)
+       └─ 필수값 검증(server): summary·key_points + 활성 mc/sa/rf가 비면
+          ok=False(data.missing)로 거부 → completed 안 됨
        └─ workspace.save_chapter_result
             - chapters/summaries/ch{N}.json + chapters/quiz/ch{N}.json
               두 파일로 분리 저장 (body_text는 summaries에서 제외)
@@ -231,10 +234,12 @@ Task tool만 진짜 병렬, Gemini/Codex는 메인 모델이 순차 처리).
 
 (4) (extension 활성 시)
     search_extension_context(work_id, chapter_id, query)
+       └─ workspace.mark_chapter_in_progress(kind="extension")  # extension_status=in_progress
        └─ exa_client.search(query)  ← Exa Web Research MCP HTTP 호출
        - 실패해도 빈 results + ok=True (graceful degrade)
 
 (5) extension sub-agent → save_extension_result
+       └─ 필수값 검증: questions.extension 비면 ok=False로 거부
        └─ chapters/extension_quiz/ch{N}.json + extension_status="completed"
 ```
 

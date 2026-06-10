@@ -102,6 +102,17 @@
 - 실패 챕터는 모든 배치 종료 후 1회 재시도
 ```
 
+### 저장 검증 & 진행 상태
+
+- **필수값 검증(저장 시 거부):** `save_chapter_result`는 `summary`·`key_points`와
+  **활성화된** 문제 유형(mc/sa/rf)이 모두 비어있지 않은지, `save_extension_result`는
+  `questions.extension`이 비어있지 않은지 확인한다. 하나라도 누락/빈값이면 `ok=False`
+  (`data.missing`)로 거부하고 `completed`로 마킹하지 않는다 → **"모두 생성했다"고
+  단정하기 전에 각 필드를 직접 확인하고 저장**할 것(누락 시 그 필드만 채워 재호출).
+- **진행 상태:** `get_chapter_content` 호출 시 `summary_status`,
+  `search_extension_context` 호출 시 `extension_status`가 `in_progress`로 마킹되어,
+  병렬 처리 중 어떤 챕터가 진행 중인지 모니터링할 수 있다(저장 성공 시 `completed`).
+
 ### 입력 전달 (extraction_mode별)
 
 - **text 모드**: `get_chapter_content`가 `text`(본문)를 준다. sub-agent는 text를 읽고
