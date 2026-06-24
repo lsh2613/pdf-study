@@ -39,17 +39,25 @@ PDF(주로 책 스캔본)를 챕터별 요약 + 4유형 검증 문제로 변환�
 ## 사용자 셋업
 
 ```bash
-pip install pdf-study  # 개발 중에는 pip install -e .
+git clone <repo-url> ~/pdf-study
+cd ~/pdf-study
+./scripts/setup_mcp.sh
 ```
+
+스크립트는 프로젝트 로컬 `.venv`에 의존성을 설치하고, MCP 클라이언트에 붙여 넣을
+절대경로 설정을 출력한다. 전역 Python이나 다른 프로젝트의 `.venv`를 사용하지 않는다.
 
 ```json
 // claude_desktop_config.json (또는 호환 클라이언트)
 {
   "mcpServers": {
     "pdf-study": {
-      "command": "python",
+      "command": "<PDF_STUDY_INSTALL_DIR>/.venv/bin/python",
       "args": ["-m", "pdf_study"]
     }
   }
 }
 ```
+
+`<PDF_STUDY_INSTALL_DIR>`는 `pyproject.toml`이 있는 이 저장소의 절대경로다. 실제 값은
+`scripts/setup_mcp.sh`가 출력한 JSON을 그대로 복사한다.

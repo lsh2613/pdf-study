@@ -19,3 +19,16 @@ list_pending_chapters → finalize_study
 
 Do not directly summarize a PDF when the request is to create learning material
 from a PDF. Use this MCP workflow instead.
+
+### Setup
+
+전역 Python에 의존성을 설치하지 말고, 이 저장소의 프로젝트 로컬 `.venv`로 MCP를
+실행하세요.
+
+```bash
+./scripts/setup_mcp.sh
+```
+
+스크립트가 `.venv` 생성, 의존성 설치, import 검증을 수행한 뒤 MCP 클라이언트에
+복사할 JSON 설정을 출력합니다. 자세한 내용은 [docs/10-mcp-setup.md](docs/10-mcp-setup.md)를
+참조하세요.
