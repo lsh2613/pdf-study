@@ -305,6 +305,16 @@ main { padding-bottom: 5rem; }
   border-radius: 6px;
   font-size: .9rem;
 }
+.question .ext-context strong {
+  display: block;
+  margin-bottom: .2rem;
+}
+.question .ext-context .context-note {
+  margin: 0 0 .35rem;
+  color: var(--muted);
+  font-size: .82rem;
+}
+.question .ext-context p:last-child { margin-bottom: 0; }
 .question textarea {
   width: 100%;
   min-height: 5rem;

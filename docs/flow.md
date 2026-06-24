@@ -334,7 +334,7 @@ server.get_subagent_prompts(work_id)
 
 (2) summarizer sub-agent (메인 LLM이 프롬프트로 호출)
        - text: text를 읽어 요약/문제 생성
-       - ocr : page_images를 순서대로 읽어 본문 OCR (읽어낸 글자수로 스케일 적용)
+       - ocr : page_images를 순서대로 읽어 본문 OCR (읽어낸 글자수로 문제 최대 개수 적용)
        - 결과 JSON: {summary(마크다운), key_points, questions:{mc,sa,rf}, body_text?(ocr)}
 
 (3) save_chapter_result(work_id, chapter_id, data)
@@ -383,14 +383,19 @@ flowchart LR
 - `enable_extension=False`면 (4)(5) 생략, `extension_status`는 처음부터 처리 대상 아님.
 - Exa 검색 실패해도 `ok=True` + 빈 results로 graceful degrade (확장 문제는 context 없이 생성).
 
-### 문제 개수·요약 길이 스케일 (sub-agent가 글자수로 적용)
+### 문제 최대 개수 (sub-agent가 글자수로 적용)
 
-| 글자 수 | 객 | 단 | 주 | 확 | 요약 길이 |
-|---|---|---|---|---|---|
-| <3,000 | 3 | 1 | 1 | 1 | ~본문 1/2 |
-| 3K–10K | 5 | 2 | 2 | 1 | ~1/3 |
-| 10K–25K | 7 | 3 | 2 | 2 | ~1/3 |
-| 25K+ | 10 | 4 | 3 | 3 | ~1/4 |
+| 글자 수 | 객 | 단 | 주 | 확 |
+|---|---|---|---|---|
+| <3,000 | 3 | 1 | 1 | 1 |
+| 3K–10K | 5 | 2 | 2 | 1 |
+| 10K–25K | 7 | 3 | 2 | 2 |
+| 25K+ | 10 | 4 | 3 | 3 |
+
+요약은 글자 수 기반 길이 표로 산정하지 않는다. 본문에 `3.1`, `3.2` 같은 서브 챕터가
+있으면 각 서브 챕터를 별도 마크다운 섹션으로 요약한다.
+문제 개수 표는 목표치가 아니라 최대치다. 본문 근거가 부족하면 더 적게 만들고,
+최대 개수를 맞추기 위해 약한 문제를 억지로 추가하지 않는다.
 
 **변경 파일/데이터**
 

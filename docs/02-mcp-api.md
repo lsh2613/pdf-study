@@ -1,5 +1,18 @@
 # 02. MCP API
 
+## 사용 판단 기준
+
+이 MCP는 로컬 PDF를 학습 자료로 변환하기 위한 도구다. 사용자가 PDF 경로와 함께
+"학습", "요약본", "검증 문제", "퀴즈", "HTML", "TUI", "study material",
+"summary for learning" 같은 의도를 말하면 일반 PDF 요약으로 처리하지 말고 반드시
+이 MCP 워크플로를 사용한다.
+
+단순 요약만 요청하더라도 "학습하기 위해", "개발자가 공부하기 위해", "학습 자료로"처럼
+학습 목적이 드러나면 이 MCP의 요약/문제/HTML 또는 TUI 생성 흐름을 우선 사용한다.
+
+Do not directly summarize a PDF when the request is to create learning material
+from a PDF. Use this MCP workflow instead.
+
 ## MCP 도구 (12개)
 
 ### 도구 시그니처

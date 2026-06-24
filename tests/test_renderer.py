@@ -160,6 +160,28 @@ def test_storage_js_has_no_legacy_scroll_metrics(ko_with_toc, tmp_path):
     assert "complete-btn" in js
 
 
+def test_model_answer_reveal_button_toggles_open_and_closed(ko_with_toc, tmp_path):
+    """모범답안 버튼은 다시 접을 수 있어야 하며 비활성화하지 않는다."""
+    _, out, _ = _build_multi(ko_with_toc, tmp_path)
+    js = (out / "assets/storage.js").read_text(encoding="utf-8")
+    assert "const expanded = !answerBlock.hidden" in js
+    assert "answerBlock.hidden = expanded" in js
+    assert "모범답안 접기" in js
+    assert "reveal.disabled = true" not in js
+
+    html = (out / "ch1.html").read_text(encoding="utf-8")
+    assert 'class="reveal" aria-expanded="false"' in html
+
+
+def test_extension_context_is_labeled_as_reference_context(ko_with_toc, tmp_path):
+    """확장형 context는 정답이 아니라 참고 맥락임을 HTML에 표시한다."""
+    _, out, _ = _build_multi(ko_with_toc, tmp_path)
+    html = (out / "ch1.html").read_text(encoding="utf-8")
+    assert '<div class="ext-context">' in html
+    assert '<strong>참고 맥락</strong>' in html
+    assert "문제 풀이에 참고할 외부 자료 요약입니다" in html
+
+
 # ---------------------------- 단일 챕터 ----------------------------
 
 def test_single_chapter_emits_main_html_only(ko_short, tmp_path):

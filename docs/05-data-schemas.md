@@ -184,14 +184,15 @@ backfill된다(위 참조).
 
 #### chapters/summaries/ch{N}.json (요약 + 핵심포인트)
 
-`summary`는 **마크다운 문자열**이다(`##` 소제목·**굵게**·목록·코드·표 가능). 이미지
-(그림)는 넣지 않는다([04-content-generation.md](./04-content-generation.md#요약-형식--마크다운)).
+`summary`는 **마크다운 문자열**이다(`##` 소제목·**굵게**·목록·코드·표 가능). 본문에
+`3.1`, `3.2` 같은 서브 챕터가 있으면 각 서브 챕터를 별도 `##` 섹션으로 요약한다.
+이미지(그림)는 넣지 않는다([04-content-generation.md](./04-content-generation.md#요약-형식--마크다운)).
 
 ```json
 {
   "chapter_id": "ch1",
   "title": "트랜잭션",
-  "summary": "## 개요\n트랜잭션은 **원자성**을 보장한다.\n\n- 격리 수준\n...",
+  "summary": "## 1.1 트랜잭션의 의미\n트랜잭션은 **원자성**을 보장한다.\n\n## 1.2 격리 수준\n- READ COMMITTED\n...",
   "key_points": ["...", "..."]
 }
 ```
@@ -227,7 +228,7 @@ backfill된다(위 참조).
       {
         "id": "ex_1",
         "question": "...",
-        "context": "Exa로 검색한 외부 자료 요약",
+        "context": "Exa로 검색한 외부 자료 요약. 문제 풀이 참고 맥락이며 정답은 아님.",
         "model_answer": "...",
         "sources": ["https://...", "..."]
       }
@@ -235,6 +236,10 @@ backfill된다(위 참조).
   }
 }
 ```
+
+- `context`: 문제 풀이에 참고할 외부 자료 요약. 사용자에게 문제와 함께 노출되며
+  정답이 아니다.
+- `model_answer`: 사용자가 답변한 뒤 확인하는 모범답안.
 
 ### progress/ (학습 시 study_html.py가 생성/관리)
 

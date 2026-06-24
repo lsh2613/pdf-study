@@ -78,6 +78,16 @@ def test_init_work_default_output_dir_uses_cwd_result_pdf_basename(tmp_path, ko_
     assert (tmp_path / "result" / "ko_short" / ".work" / "state.json").exists()
 
 
+def test_init_work_docstring_tells_agents_when_to_use_mcp():
+    """도구 설명은 PDF 학습 자료 요청을 일반 요약 대신 MCP 워크플로로 유도해야 한다."""
+    doc = server.init_work.__doc__ or ""
+    assert "PDF 경로" in doc
+    assert "학습 자료" in doc
+    assert "일반 PDF 요약" in doc
+    assert "Do not directly summarize a PDF" in doc
+    assert "init_work → scan_pdf → set_chapters" in doc
+
+
 def test_init_work_blank_output_dir_falls_back_to_default(tmp_path, ko_short, monkeypatch):
     monkeypatch.chdir(tmp_path)
     r = server.init_work(str(ko_short), output_dir="   ")  # 공백만
@@ -227,6 +237,25 @@ def test_get_chapter_content_marks_summary_in_progress(tmp_path, ko_short):
     # 완료 후 다시 본문을 받아가도 completed는 되돌지 않는다
     server.get_chapter_content(wid, "ch1")
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "completed"
+
+
+def test_get_chapter_content_ocr_next_action_only_mentions_question_count(tmp_path, ko_short):
+    """OCR 안내에서 글자 수는 문제 개수 산정에만 쓰고 요약 길이 스케일은 언급하지 않는다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    r = server.set_chapters(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
+        execution_mode="sequential",
+        extraction_mode="ocr",
+        language="ko",
+    )
+    assert r["ok"], r
+
+    content = server.get_chapter_content(wid, "ch1")
+    assert content["ok"], content
+    assert "문제 개수" in content["next_action"]
+    assert "요약 길이" not in content["next_action"]
 
 
 def test_mark_chapter_in_progress_guards_done_and_missing(tmp_path, ko_short):

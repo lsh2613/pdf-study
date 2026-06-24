@@ -38,7 +38,7 @@ MCP의 역할은 **PDF 페이지를 JPEG로 래스터화**하는 것까지다.
   시도하되(없으면 LLM이 이미지로) **`scanned_text`는 노출하지 않는다**.
 - `set_chapters`(extraction_mode="ocr"): 본문 텍스트를 추출하지 않는다(그림도 없음).
 - `get_chapter_content`: 챕터 page_range를 lazy 렌더해 `page_images`로 반환.
-- 문제 개수·요약 길이 스케일: sub-agent가 OCR로 읽어낸 글자수로 기존 표를 적용.
+- 문제 최대 개수: sub-agent가 OCR로 읽어낸 글자수로 문제 최대 개수 표를 적용.
 
 ## PDF 처리 정책
 

@@ -132,10 +132,15 @@
       if (ta) ta.addEventListener("input", debouncedSave);
       if (reveal && answerBlock) {
         reveal.addEventListener("click", () => {
-          answerBlock.hidden = false;
-          reveal.disabled = true;
+          const expanded = !answerBlock.hidden;
+          answerBlock.hidden = expanded;
+          reveal.setAttribute("aria-expanded", expanded ? "false" : "true");
+          reveal.textContent = expanded ? "모범답안 보기" : "모범답안 접기";
           const prev = state.answers[qid] || { text: ta ? ta.value : "" };
-          state.answers[qid] = { text: prev.text || (ta ? ta.value : ""), viewed_answer: true };
+          state.answers[qid] = {
+            text: prev.text || (ta ? ta.value : ""),
+            viewed_answer: !!prev.viewed_answer || !expanded,
+          };
           postChapter();
         });
       }
@@ -266,7 +271,10 @@
           const block = qel.querySelector(".model-answer");
           const btn = qel.querySelector(".reveal");
           if (block) block.hidden = false;
-          if (btn) btn.disabled = true;
+          if (btn) {
+            btn.setAttribute("aria-expanded", "true");
+            btn.textContent = "모범답안 접기";
+          }
         }
       }
     }

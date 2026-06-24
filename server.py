@@ -125,6 +125,23 @@ def init_work(
 ) -> dict[str, Any]:
     """워크스페이스를 생성하고 work_id를 발급합니다.
 
+    이 MCP는 로컬 PDF를 학습 자료로 변환하기 위한 도구입니다. 사용자가 PDF 경로와
+    함께 "학습", "요약본", "검증 문제", "퀴즈", "HTML", "TUI", "study material",
+    "summary for learning" 같은 의도를 말하면 일반 PDF 요약으로 처리하지 말고
+    반드시 이 MCP 워크플로를 사용하세요.
+
+    기본 흐름:
+    init_work → scan_pdf → set_chapters → get_subagent_prompts →
+    get_chapter_content/save_chapter_result(+ extension이면 save_extension_result) →
+    list_pending_chapters → finalize_study
+
+    단순 요약만 요청하더라도 "학습하기 위해", "개발자가 공부하기 위해",
+    "학습 자료로"처럼 학습 목적이 드러나면 이 MCP의 요약/문제/HTML 또는 TUI
+    생성 흐름을 우선 사용하세요.
+
+    Do not directly summarize a PDF when the request is to create learning
+    material from a PDF. Use this MCP workflow instead.
+
     - output_dir: 학습 자료를 저장할 디렉토리. 비워두면 현재 작업 디렉토리
       아래에 `result/<pdf_basename>/` 형태로 자동 생성됩니다 (PDF 파일명에서
       안전하지 않은 문자는 `_`로 치환). 같은 PDF로 재실행하면 같은 폴더에
@@ -444,7 +461,7 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
     - ocr 모드: 본문 텍스트가 없습니다. 대신 `page_images`(이 챕터 페이지들을
       렌더한 JPEG 절대경로)를 반환합니다. **sub-agent는 page_images를 순서대로
       멀티모달 입력으로 읽어 본문을 직접 파악(OCR)**한 뒤, 읽어낸 글자수로
-      문제 개수·요약 길이 스케일을 정하세요. 흐릿한 기술용어·식별자·예약어는
+      문제 개수를 정하세요. 흐릿한 기술용어·식별자·예약어는
       문맥으로 복원하세요.
     """
     raw = analysis.get_chapter_content_impl(work_id, chapter_id)
@@ -453,8 +470,8 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
     if "page_images" in raw:  # ocr 모드
         guide = (
             f"이 챕터({chapter_id})의 page_images를 **순서대로** 멀티모달로 읽어 "
-            "본문을 직접 파악(OCR)하세요. 읽어낸 글자수로 문제 개수·요약 길이 "
-            "스케일을 정하고, summarizer_prompt 스키마대로 결과를 만들어 "
+            "본문을 직접 파악(OCR)하세요. 읽어낸 글자수로 문제 개수를 정하고, "
+            "summarizer_prompt 스키마대로 결과를 만들어 "
         )
     else:  # text 모드
         guide = (

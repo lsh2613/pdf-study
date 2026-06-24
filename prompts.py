@@ -9,7 +9,7 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
-# 챕터 글자 수 기준 동적 스케일 (docs/04)
+# 챕터 글자 수 기준 동적 상한 (docs/04)
 #   합계는 옵션 비활성 유형을 0으로 둔다 (재분배 없음).
 # ---------------------------------------------------------------------------
 QUESTION_SCALES_TABLE = """
@@ -20,41 +20,16 @@ QUESTION_SCALES_TABLE = """
 | 10,000–25,000  | 7 | 3 | 2 | 2 |
 | 25,000+        | 10 | 4 | 3 | 3 |
 
+위 표는 생성해야 하는 목표치가 아니라 **최대 개수**입니다. 본문에서 충분히 좋은
+문제를 만들 근거가 부족하면 더 적게 생성하세요. 최대 개수를 맞추기 위해 중복되거나
+사소하거나 본문 근거가 약한 문제를 억지로 채우지 마세요.
+
+The table above defines **maximum counts**, not targets. Generate fewer
+questions when the chapter does not support high-quality, non-duplicative
+items; do not pad the output with weak, trivial, repetitive, or poorly grounded
+questions just to reach the maximum.
+
 비활성화된 유형은 0개로 두세요 (재분배 없음).
-""".strip()
-
-
-# ---------------------------------------------------------------------------
-# 챕터 본문 분량에 따른 요약 길이 권장
-# ---------------------------------------------------------------------------
-SUMMARY_LENGTH_TABLE_KO = """
-기준선: **본문 글자수의 약 1/3**. 매우 짧으면 1/2까지, 매우 길면 1/4 수준으로 완만하게 조절.
-
-| 챕터 본문 글자 수 | 요약 권장 길이 | 비율 |
-|---|---|---|
-| < 2,000        | 800–1,200자    | ≈ 1/2 |
-| 2,000–10,000   | 1,000–3,500자  | ≈ 1/3 |
-| 10,000–25,000  | 3,000–8,000자  | ≈ 1/3 |
-| 25,000+        | 6,000–10,000자 | ≈ 1/4 |
-
-권장값이며 강제 아닙니다. 본문 성격(코드 위주·정의 위주·서사형 등)과
-독자가 다시 펼치지 않고도 요지를 잡을 수 있는지를 기준으로 조절하세요.
-""".strip()
-
-SUMMARY_LENGTH_TABLE_EN = """
-Baseline: **about 1/3 of the body length**. Up to ~1/2 for very short chapters,
-down to ~1/4 for very long ones.
-
-| Chapter body chars | Suggested summary length | Ratio |
-|---|---|---|
-| < 2,000        | 800–1,200 chars    | ≈ 1/2 |
-| 2,000–10,000   | 1,000–3,500 chars  | ≈ 1/3 |
-| 10,000–25,000  | 3,000–8,000 chars  | ≈ 1/3 |
-| 25,000+        | 6,000–10,000 chars | ≈ 1/4 |
-
-These are guidelines, not hard limits. Adjust based on the chapter's nature
-(code-heavy / definition-heavy / narrative) and whether a reader could grasp
-the key ideas without reopening the original text.
 """.strip()
 
 
@@ -71,6 +46,11 @@ summary는 **마크다운**으로 작성하세요. 렌더러가 그대로 마크
 - **굵게**, *기울임*, `인라인 코드`, 코드블록(```), 목록(-, 1.), 표(| … |)
 - 정의·수식·예약어는 코드/표로 정리하면 더 또렷해집니다
 
+본문에 `3.1`, `3.2` 같은 번호가 붙은 서브 챕터가 있으면 **각 서브 챕터마다**
+독립된 `## 3.1 ...`, `## 3.2 ...` 섹션을 만들어 요약하세요. 서브 챕터 번호가
+없으면 본문의 실제 소제목이나 의미 단락을 기준으로 `##`/`###` 섹션을 나누세요.
+챕터 전체를 하나의 덩어리 문단으로만 요약하지 마세요.
+
 이미지(그림)는 넣지 마세요 — `![...]()` 같은 이미지 문법은 사용하지 않습니다.
 필요한 그림 내용은 글/표로 풀어 설명하세요.""".strip()
 
@@ -81,6 +61,12 @@ Write `summary` in **Markdown**; the renderer interprets it as Markdown
 - `##`/`###` subheadings to structure the summary for readability
 - **bold**, *italics*, `inline code`, code blocks (```), lists (-, 1.), tables (| … |)
 - Render definitions, formulas, and keywords as code/tables when it clarifies
+
+If the body contains numbered subchapters such as `3.1` and `3.2`, create
+one section per subchapter with headings like `## 3.1 ...` and `## 3.2 ...`.
+If there are no numbered subchapters, divide the summary by the source's real
+subheadings or meaningful topic breaks. Do not summarize the whole chapter as
+one undifferentiated block.
 
 Do not embed images — never use image syntax like `![...]()`. Describe any
 needed figure content in prose or tables instead.""".strip()
@@ -101,7 +87,7 @@ INPUT_MODE_OCR_KO = """\
 (페이지 JPEG 절대경로)를 순서대로 멀티모달 입력으로 읽어 본문을 직접
 파악하세요(=OCR). 흐릿하거나 깨져 보이는 기술용어·식별자·예약어
 (예: SERIALIZABLE, KEY_BLOCK_SIZE, select_type)는 문맥으로 복원하세요.
-읽어낸 본문의 글자수를 헤아려 위의 두 표(문제 개수·요약 길이)를 적용하세요.
+읽어낸 본문의 글자수를 헤아려 위의 문제 개수 표를 적용하세요.
 **또한 이미지에서 읽어낸 본문 전체를 출력 JSON의 `body_text` 필드에 그대로
 담으세요**(요약이 아니라 전사한 원문 — 페이지 순서대로 이어붙임). 서버가 이를
 raw_data에 보존합니다.""".strip()
@@ -118,7 +104,7 @@ No body text is provided. Read the `page_images` (absolute JPEG paths) from
 get_chapter_content in order, as multimodal input, to recover the body yourself
 (=OCR). Reconstruct blurry/garbled technical terms, identifiers, and keywords
 (e.g. SERIALIZABLE, KEY_BLOCK_SIZE, select_type) from context. Count the chars
-you read and apply the two tables above (question counts / summary length).
+you read and apply the question counts table above.
 **Also put the full transcribed body (not a summary — the verbatim text you read,
 concatenated in page order) into the `body_text` field of the output JSON.** The
 server preserves it in raw_data.""".strip()
@@ -141,11 +127,8 @@ _SUMMARIZER_KO = """\
 [활성화된 문제 유형]
 {enabled_types_block}
 
-[챕터 글자 수별 권장 문제 개수]
+[챕터 글자 수별 최대 문제 개수]
 {scales_table}
-
-[챕터 본문 분량에 따른 요약 길이 권장]
-{summary_length_table}
 
 {input_mode_block}
 
@@ -160,7 +143,7 @@ _SUMMARIZER_KO = """\
 {{
   "chapter_id": "<주어진 chapter_id 그대로>",
   "title": "<주어진 title 그대로>",
-  "summary": "<위 권장 길이 표를 참고해 본문 분량에 맞춘 한국어 요약 (마크다운)>",
+  "summary": "<한국어 요약 (마크다운, 서브 챕터가 있으면 서브 챕터별 섹션)>",
   "key_points": ["...", "..."],
   "body_text": "<OCR 모드에서만: 페이지 이미지에서 전사한 본문 전체. text 모드는 생략>",
   "questions": {{
@@ -199,11 +182,8 @@ Read the given chapter and produce ① summary, ② key points, ③ verification
 [Enabled question types]
 {enabled_types_block}
 
-[Recommended question counts per chapter size]
+[Maximum question counts per chapter size]
 {scales_table}
-
-[Suggested summary length per chapter body size]
-{summary_length_table}
 
 {input_mode_block}
 
@@ -218,7 +198,7 @@ type literal `\\n` characters (the tool handles JSON serialization).
 {{
   "chapter_id": "<as given>",
   "title": "<as given>",
-  "summary": "<English summary scaled to body size per the table above (Markdown)>",
+  "summary": "<English summary (Markdown, sectioned by subchapter when present)>",
   "key_points": ["...", "..."],
   "body_text": "<OCR mode only: full verbatim body transcribed from page images. Omit in text mode>",
   "questions": {{
@@ -262,7 +242,7 @@ search_extension_context(work_id, chapter_id, query)를 호출해 외부 자료�
 - search_extension_context 결과의 출처 URL을 그대로 sources에 기재.
 - 결과가 비거나 실패하면 본문 지식만으로 만들고 sources는 빈 배열.
 
-[권장 개수]
+[최대 개수]
 {scales_table}
 
 [출력 형식 — JSON]
@@ -304,7 +284,7 @@ Do NOT produce multiple_choice / short_answer / reflection. Another sub-agent ha
 - Copy source URLs into `sources` verbatim.
 - If results are empty or fail, rely on chapter knowledge alone and leave sources as [].
 
-[Recommended counts]
+[Maximum counts]
 {scales_table}
 
 [Output format — JSON]
@@ -448,11 +428,7 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         summary_format_block = SUMMARY_FORMAT_EN
 
     summ_tmpl = _SUMMARIZER_KO if language == "ko" else _SUMMARIZER_EN
-    summary_length_table = (
-        SUMMARY_LENGTH_TABLE_KO if language == "ko" else SUMMARY_LENGTH_TABLE_EN
-    )
     summarizer_prompt = summ_tmpl.format(
-        summary_length_table=summary_length_table,
         book_info_block=book_info_block,
         user_context_block=user_context_block,
         enabled_types_block=enabled_types_block,

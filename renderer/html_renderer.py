@@ -403,7 +403,7 @@ def _text_section(section_id: str, title: str, items: list[dict[str, Any]], kind
             f'<div class="question text" data-qid="{qid}">'
             f'<p class="q-prompt">{_esc(q.get("question") or "")}</p>'
             f'<textarea placeholder="여기에 답변을 입력하세요"></textarea>'
-            f'<button type="button" class="reveal">모범답안 보기</button>'
+            f'<button type="button" class="reveal" aria-expanded="false">모범답안 보기</button>'
             f'<div class="model-answer" hidden>{_esc(model_answer)}</div>'
             '</div>'
         )
@@ -420,7 +420,15 @@ def _extension_section(items: list[dict[str, Any]]) -> str:
         context = q.get("context") or ""
         model_answer = q.get("model_answer") or ""
         sources = q.get("sources") or []
-        ctx_html = f'<div class="ext-context">{_esc(context)}</div>' if context else ""
+        ctx_html = (
+            '<div class="ext-context">'
+            '<strong>참고 맥락</strong>'
+            '<p class="context-note">문제 풀이에 참고할 외부 자료 요약입니다. '
+            '모범답안은 아래 버튼으로 따로 확인하세요.</p>'
+            f'<p>{_esc(context)}</p>'
+            '</div>'
+            if context else ""
+        )
         sources_html = ""
         if sources:
             links = "".join(
@@ -433,7 +441,7 @@ def _extension_section(items: list[dict[str, Any]]) -> str:
             f'<p class="q-prompt">{_esc(q.get("question") or "")}</p>'
             f'{ctx_html}'
             f'<textarea placeholder="여기에 답변을 입력하세요"></textarea>'
-            f'<button type="button" class="reveal">모범답안 보기</button>'
+            f'<button type="button" class="reveal" aria-expanded="false">모범답안 보기</button>'
             f'<div class="model-answer" hidden>{_esc(model_answer)}</div>'
             f'{sources_html}'
             '</div>'
