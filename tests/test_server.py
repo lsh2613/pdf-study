@@ -16,7 +16,7 @@ def stub_scan_toc_ocr(monkeypatch):
         def process_image(self, img_path):
             return "목차 OCR 텍스트"
 
-    monkeypatch.setattr(server.ocr, "get_ocr_worker", lambda: StubWorker())
+    monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda: StubWorker())
 
 
 def _check_envelope(resp: dict) -> None:
