@@ -9,6 +9,16 @@ import pytest
 from pdf_study import analysis, workspace
 
 
+@pytest.fixture(autouse=True)
+def stub_toc_ocr(monkeypatch):
+    """scan_pdf 목차 OCR 테스트가 실제 PaddleOCR 모델을 로드하지 않게 한다."""
+    class StubWorker:
+        def process_image(self, image_path):
+            return f"OCR:{Path(image_path).name}"
+
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: StubWorker())
+
+
 @pytest.fixture
 def make_workspace(tmp_path):
     """work_id 발급 + register까지 한 줄로."""
@@ -43,8 +53,8 @@ def test_scan_pdf_ko_with_toc_routes_to_from_outline(make_workspace, ko_with_toc
     assert workspace.load_state(wid)["phases"]["scanning"] == "completed"
 
 
-def test_scan_pdf_no_outline_routes_to_vision(make_workspace, ko_short):
-    """내장 목차가 없으면 vision 경로 — 목차 페이지를 렌더해 에이전트가 읽는다."""
+def test_scan_pdf_no_outline_routes_to_toc_ocr(make_workspace, ko_short):
+    """내장 목차가 없으면 목차 페이지를 렌더하고 OCR 텍스트를 함께 돌려준다."""
     wid, _ = make_workspace(ko_short)
     out = analysis.scan_pdf_impl(wid)
     assert out["outline_present"] is False
@@ -53,29 +63,72 @@ def test_scan_pdf_no_outline_routes_to_vision(make_workspace, ko_short):
     assert rec["suggested_chapters"] == []
     assert rec["chunk_fallback"]
     assert out["toc_page_images"], "목차 페이지가 이미지로 렌더되어야 함"
-    assert Path(out["toc_page_images"][0]["path"]).exists()
+    first = out["toc_page_images"][0]
+    assert Path(first["path"]).exists()
+    assert first["ocr_text"].startswith("OCR:p")
+    assert first["ocr_error"] is None
     assert "scan_page_images" not in out
 
 
-def test_scan_pdf_scanned_no_text_routes_to_vision_not_rejected(
+def test_scan_pdf_scanned_no_text_routes_to_toc_ocr_not_rejected(
     make_workspace, scanned_empty
 ):
-    """텍스트 레이어가 없어도 거부하지 않고 vision 경로로 간다."""
+    """텍스트 레이어가 없어도 거부하지 않고 목차 이미지 OCR 경로로 간다."""
     wid, _ = make_workspace(scanned_empty)
     out = analysis.scan_pdf_impl(wid)
     rec = out["recommendations"]
     assert rec.get("rejected") in (False, None)
     assert rec["primary_mode"] == "analyze_toc_from_images"
     assert out["toc_page_images"]
+    assert all("ocr_text" in item and "ocr_error" in item for item in out["toc_page_images"])
 
 
 def test_force_vision_skips_outline(make_workspace, ko_with_toc):
-    """force_vision=True면 내장 목차를 무시하고 목차 페이지를 vision으로 읽는다."""
+    """force_vision=True면 내장 목차를 무시하고 목차 페이지 OCR로 간다."""
     wid, _ = make_workspace(ko_with_toc)
     out = analysis.scan_pdf_impl(wid, force_vision=True)
     assert out["outline_present"] is False
     assert out["recommendations"]["primary_mode"] == "analyze_toc_from_images"
     assert out["toc_page_images"]
+    assert out["toc_page_images"][0]["ocr_error"] is None
+
+
+def test_scan_pdf_toc_ocr_partial_failure_does_not_fail(
+    make_workspace, ko_short, monkeypatch
+):
+    """일부 목차 페이지 OCR 실패는 항목의 ocr_error에만 기록한다."""
+    class MixedWorker:
+        def process_image(self, image_path):
+            if str(image_path).endswith("p2.jpg"):
+                raise RuntimeError("p2 OCR failed")
+            return "목차\n제1장 시작 3"
+
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MixedWorker())
+    monkeypatch.setattr(analysis.reader, "locate_toc_pages", lambda doc, scan_size: [1, 2])
+
+    wid, _ = make_workspace(ko_short)
+    out = analysis.scan_pdf_impl(wid, scan_size=2)
+
+    assert out["recommendations"]["primary_mode"] == "analyze_toc_from_images"
+    assert [item["page"] for item in out["toc_page_images"]] == [1, 2]
+    assert out["toc_page_images"][0]["ocr_text"] == "목차\n제1장 시작 3"
+    assert out["toc_page_images"][0]["ocr_error"] is None
+    assert out["toc_page_images"][1]["ocr_text"] == ""
+    assert "p2 OCR failed" in out["toc_page_images"][1]["ocr_error"]
+
+
+def test_scan_pdf_outline_path_does_not_call_toc_ocr(
+    make_workspace, ko_with_toc, monkeypatch
+):
+    """내장 목차를 쓰는 정상 경로에서는 목차 이미지 렌더/OCR을 하지 않는다."""
+    def fail_if_called():
+        raise AssertionError("OCR worker should not be called for outline path")
+
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", fail_if_called)
+    wid, _ = make_workspace(ko_with_toc)
+    out = analysis.scan_pdf_impl(wid)
+    assert out["outline_present"] is True
+    assert out["toc_page_images"] == []
 
 
 def test_set_chapters_extracts_text(make_workspace, ko_with_toc):

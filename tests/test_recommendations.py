@@ -21,14 +21,14 @@ def test_outline_present_routes_to_from_outline():
     assert r["rejected"] is False
     assert r["primary_mode"] == "from_outline"
     assert [c["title"] for c in r["suggested_chapters"]] == ["1장", "2장", "3장"]
-    # outline 경로는 vision 재분석을 선택지에 포함 (틀리면 force_vision)
+    # outline 경로는 legacy 재분석 선택지를 포함 (틀리면 force_vision)
     assert r["user_choices"] == [
         "proceed", "reanalyze_with_vision", "manual_pdf_pages", "chunks",
     ]
     assert "force_vision=True" in r["next_step_guidance"]
 
 
-def test_no_outline_routes_to_vision():
+def test_no_outline_routes_to_toc_ocr():
     r = analysis._build_recommendations(page_count=120, outline_chapters=None)
     assert r["rejected"] is False
     assert r["primary_mode"] == "analyze_toc_from_images"
@@ -36,12 +36,12 @@ def test_no_outline_routes_to_vision():
     assert r["chunk_fallback"]               # 최후 수단 청크는 분리 제공
     assert r["user_choices"] == ["proceed", "manual_pdf_pages", "chunks"]
     g = r["next_step_guidance"]
-    # 텍스트/스크립트 추정 금지 + 이미지 직독 강제
-    assert "스크립트" in g and "toc_page_images" in g
+    # 텍스트/스크립트 추정 금지 + 서버 OCR 텍스트 사용 안내
+    assert "스크립트" in g and "toc_page_images[].ocr_text" in g
 
 
 def test_no_outline_does_not_reject_low_quality():
-    # 텍스트 품질과 무관 — 거부 없음(스캔본도 vision으로)
+    # 텍스트 품질과 무관 — 거부 없음(스캔본도 목차 이미지 OCR로)
     r = analysis._build_recommendations(page_count=10, outline_chapters=None)
     assert r.get("rejected") in (False, None)
     assert r["primary_mode"] == "analyze_toc_from_images"

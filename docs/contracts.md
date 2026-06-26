@@ -21,7 +21,7 @@
 
 `resume_work(output_dir, pdf_path)`는 서버 재시작 후 디스크의 `.work/state.json`을 다시 등록한다. `output_dir`과 `pdf_path`가 모두 없거나, 대상 폴더에 상태 파일이 없으면 실패한다. 성공 응답은 남은 요약·확장 챕터 목록을 담는다.
 
-`scan_pdf(work_id, scan_size, force_vision)`는 PDF 메타, 텍스트 품질, 언어, 페이지 오프셋, 챕터 경계 추천을 반환한다. 내장 목차가 있으면 `recommendations.suggested_chapters`에 물리 페이지 범위가 들어간다. 내장 목차가 없거나 `force_vision=true`이면 `toc_page_images`를 반환하고, 클라이언트가 그 이미지를 읽어 챕터를 구성해야 한다. 알 수 없는 `work_id`나 손상된 PDF는 실패한다.
+`scan_pdf(work_id, scan_size, force_vision)`는 PDF 메타, 텍스트 품질, 언어, 페이지 오프셋, 챕터 경계 추천을 반환한다. 내장 목차가 있으면 `recommendations.suggested_chapters`에 물리 페이지 범위가 들어간다. 내장 목차가 없거나 `force_vision=true`이면 `toc_page_images`를 반환한다. 각 항목은 목차 페이지 JPEG 경로와 함께 `ocr_text`, `ocr_error`를 담으며, 클라이언트는 서버가 제공한 OCR 텍스트와 필요 시 이미지를 확인해 챕터를 구성해야 한다. 일부 목차 페이지 OCR 실패는 `scan_pdf` 실패가 아니라 해당 항목의 `ocr_error`로 표현된다. `force_vision`은 외부 계약 호환을 위한 기존 파라미터명이다. 알 수 없는 `work_id`나 손상된 PDF는 실패한다.
 
 `set_chapters(work_id, chapters, execution_mode, extraction_mode, book_info, language)`는 챕터와 처리 모드를 확정한다. `execution_mode`는 `sequential` 또는 `parallel`, `extraction_mode`는 `text` 또는 `ocr`만 허용한다. 둘 중 하나가 빠지면 실패 응답의 `data.choices`를 사용자에게 그대로 보여줘야 한다. 페이지 범위가 문서 밖이거나 챕터 ID가 중복되면 실패한다.
 
