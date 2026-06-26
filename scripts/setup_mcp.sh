@@ -107,8 +107,8 @@ fi
 echo "Creating project-local venv: $VENV_DIR"
 
 if command -v uv >/dev/null 2>&1; then
-  echo "uv detected. Using uv to create venv and install dependencies..."
-  uv venv "$VENV_DIR"
+  echo "uv detected. Forcing uv to download and use Python 3.13 for the local environment..."
+  uv venv --python 3.13 "$VENV_DIR"
   uv pip install -e "$REPO_DIR"
 else
   # Find a compatible Python version (< 3.14) because PaddlePaddle doesn't support 3.14 yet
