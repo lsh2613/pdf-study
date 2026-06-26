@@ -16,6 +16,7 @@ from mcp.server.fastmcp import FastMCP
 
 from . import analysis, exa_client, prompts, workspace
 from .renderer import RENDERERS
+from .pdf import ocr
 
 logger = logging.getLogger(__name__)
 
@@ -468,16 +469,34 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
     # 본문을 받아간 시점 = 요약 처리 시작 → 진행 모니터링용 in_progress 마킹
     workspace.mark_chapter_in_progress(work_id, chapter_id, kind="summary")
     if "page_images" in raw:  # ocr 모드
-        guide = (
-            f"이 챕터({chapter_id})의 page_images를 **순서대로** 멀티모달로 읽어 "
-            "본문을 직접 파악(OCR)하세요. 읽어낸 글자수로 문제 개수를 정하고, "
-            "summarizer_prompt 스키마대로 결과를 만들어 "
-        )
-    else:  # text 모드
-        guide = (
-            f"이 챕터({chapter_id})의 text를 읽고 "
-            "summarizer_prompt 스키마대로 요약·문제를 만들어 "
-        )
+        # 캐싱 확인 및 지연 추출
+        state = workspace.load_state(work_id)
+        chapter_state = state.get("chapters", {}).get(chapter_id, {})
+        if "body_text" in chapter_state:
+            raw["text"] = chapter_state["body_text"]
+        else:
+            worker = ocr.get_ocr_worker()
+            extracted = []
+            for img_path in raw["page_images"]:
+                try:
+                    result = worker.process_image(img_path)
+                    if result and result[0]:
+                        page_text = "\n".join(item[1][0] for item in result[0])
+                        extracted.append(page_text)
+                    else:
+                        extracted.append("")
+                except Exception:
+                    extracted.append("[해당 페이지 OCR 실패]")
+            body_text = "\n\n".join(extracted)
+            raw["text"] = body_text
+            workspace.update_chapter_status(work_id, chapter_id, body_text=body_text)
+
+        del raw["page_images"]
+
+    guide = (
+        f"이 챕터({chapter_id})의 text를 읽고 "
+        "summarizer_prompt 스키마대로 요약·문제를 만들어 "
+    )
     return _ok(raw, next_action=(
         guide + f"save_chapter_result(work_id=\"{work_id}\", "
         f"chapter_id=\"{chapter_id}\", data=...)로 저장하세요. extension이 "
