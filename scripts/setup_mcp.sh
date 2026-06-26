@@ -3,13 +3,16 @@ set -euo pipefail
 
 usage() {
   cat <<'INNER_EOF'
-Usage: scripts/setup_mcp.sh [--print-config] [--check] [--claude] [--codex] [--antigravity-cli] [--help]
+Usage: scripts/setup_mcp.sh [--global|--local] [--print-config] [--check] [--claude] [--codex] [--antigravity-cli] [--help]
 
 Create a project-local .venv for pdf-study, install this package into it,
 verify required runtime dependencies, and automatically apply MCP config to clients.
 
 Options:
-  --claude         Apply config to Claude Code (global).
+  --global         Install MCP configuration globally.
+  --local          Install MCP configuration locally in the current project root (default).
+  
+  --claude         Apply config to Claude Code.
   --codex          Apply config to Codex CLI.
   --antigravity-cli Apply config to Antigravity CLI.
   (If no targets are specified, config is applied to all three.)
@@ -49,20 +52,29 @@ PY
 }
 
 apply_config() {
-  "$VENV_PY" - "$VENV_PY" "$@" <<'PY'
+  "$VENV_PY" - "$VENV_PY" "$SCOPE" "$PWD" "$@" <<'PY'
 from __future__ import annotations
 import json
 import sys
 import os
 
 command = sys.argv[1]
-targets = sys.argv[2:]
+scope = sys.argv[2]
+project_dir = sys.argv[3]
+targets = sys.argv[4:]
 
-CONFIG_PATHS = {
-    "claude": os.path.expanduser("~/.claude.json"),
-    "codex": os.path.expanduser("~/.codex/config/mcp.json"),
-    "antigravity-cli": os.path.expanduser("~/.gemini/config/mcp.json")
-}
+if scope == "global":
+    CONFIG_PATHS = {
+        "claude": os.path.expanduser("~/.claude.json"),
+        "codex": os.path.expanduser("~/.codex/config/mcp.json"),
+        "antigravity-cli": os.path.expanduser("~/.gemini/antigravity-cli/mcp_config.json")
+    }
+else:
+    CONFIG_PATHS = {
+        "claude": os.path.join(project_dir, ".claude.json"),
+        "codex": os.path.join(project_dir, ".codex/mcp.json"),
+        "antigravity-cli": os.path.join(project_dir, ".agents/mcp_config.json")
+    }
 
 for target in targets:
     path = CONFIG_PATHS.get(target)
@@ -79,7 +91,7 @@ for target in targets:
         except Exception:
             data = {}
             
-    key = "globalMcpServers" if target == "claude" else "mcpServers"
+    key = "globalMcpServers" if target == "claude" and scope == "global" else "mcpServers"
     if key not in data:
         data[key] = {}
         
@@ -137,12 +149,21 @@ PY
 }
 
 TARGETS=()
+SCOPE="local"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --help|-h)
       usage
       exit 0
+      ;;
+    --global)
+      SCOPE="global"
+      shift
+      ;;
+    --local)
+      SCOPE="local"
+      shift
       ;;
     --print-config)
       print_config
