@@ -295,7 +295,7 @@ def set_chapters(
     book_info: dict[str, Any] | None = None,
     language: str = "",
 ) -> dict[str, Any]:
-    """챕터 구조 + 처리 모드를 확정하고 챕터별 본문/이미지를 추출합니다.
+    """챕터 구조 + 처리 모드를 확정하고 챕터별 본문을 추출합니다.
 
     - chapters: [{"chapter_id","title","page_range":[start,end]}, ...] (1-based)
       page_range는 항상 **PDF 물리 페이지** 기준. printed_range(책 페이지)는
@@ -310,8 +310,8 @@ def set_chapters(
         (data.forced_extraction_mode="ocr"). 이때는 그 2개만 제시하세요.
         - ① Sequential + Text: 안정적·빠르고 저렴 (디지털 PDF, 무난한 기본)
         - ② Parallel + Text: 최대 5개 챕터 동시로 가장 빠름 (디지털 PDF)
-        - ③ Sequential + OCR: 비전 LLM 직독으로 정확하나 느리고 비쌈 (스캔본)
-        - ④ Parallel + OCR: 병렬 OCR로 ③보다 빠르나 비용 가장 큼 (스캔본)
+        - ③ Sequential + OCR: PaddleOCR CPU 선계산. 느리지만 스캔본에 필요
+        - ④ Parallel + OCR: PaddleOCR CPU 병렬 선계산. ③보다 빠르지만 부하 큼
       ※ 목차 분석은 모드와 무관하게 항상 내장 목차/이미지로 처리됩니다. 여기서
         고르는 건 **본문 추출/디스패치** 방식뿐입니다.
       ※ 물을 땐 클라이언트의 구조화 선택 도구(예: Claude Code의 AskUserQuestion)로
@@ -322,7 +322,7 @@ def set_chapters(
       판권·저자 소개 같은 비본문 페이지가 섞여 들어왔을 때 사용**하세요.
     - book_info: 메인 LLM이 PDF 메타·목차로 보강한 책 정보
     - language: "ko" | "en". **OCR(extraction_mode="ocr")에서는 텍스트 언어 감지가
-      불가능하므로, 목차/페이지 이미지를 읽고 파악한 본문 언어를 반드시 전달**하세요.
+      불가능하므로, 목차 정보에서 파악한 본문 언어를 반드시 전달**하세요.
       (text 모드는 scan_pdf가 자동 감지하므로 생략 가능)
 
     extraction_mode="ocr"에서는 set_chapters 시점에 PaddleOCR CPU로 본문 텍스트를
@@ -371,10 +371,10 @@ def set_chapters(
                 "따라서 **OCR 조합만 선택할 수 있습니다** — text 조합은 제시하지 마세요. "
                 "아래 2가지 중 하나를 사용자에게 보여주고 골라 두 값을 전달해 다시 "
                 "호출하세요.\n"
-                "③ Sequential + OCR — 순차 + 비전 LLM이 페이지 이미지 직독. 정확하나 "
-                "느리고 비용 큼.\n"
-                "④ Parallel + OCR — 최대 5개 동시 + 비전 LLM OCR. ③보다 빠르나 비용 "
-                "가장 큼.\n"
+                "③ Sequential + OCR — 순차 + PaddleOCR CPU 선계산. 느리지만 "
+                "스캔본에 필요.\n"
+                "④ Parallel + OCR — 최대 5개 동시 + PaddleOCR CPU 선계산. "
+                "③보다 빠르지만 CPU 부하 큼.\n"
                 "extraction_mode는 'ocr' 고정, execution_mode만 'sequential'|'parallel'에서 "
                 "선택. OCR은 텍스트 언어 감지가 불가하니 language도 함께 전달하세요.\n"
             )
@@ -395,10 +395,10 @@ def set_chapters(
                 "안정적·빠르고 저렴 (디지털 PDF, 무난한 기본값).\n"
                 "② Parallel + Text — 최대 5개 챕터 동시 + 텍스트 추출. 가장 빠름 "
                 "(병렬 디스패치 가능한 클라이언트).\n"
-                "③ Sequential + OCR — 순차 + 비전 LLM이 페이지 이미지 직독. 정확하나 "
-                "느리고 비용 큼 (스캔본).\n"
-                "④ Parallel + OCR — 최대 5개 동시 + 비전 LLM OCR. ③보다 빠르나 비용 "
-                "가장 큼 (스캔본).\n"
+                "③ Sequential + OCR — 순차 + PaddleOCR CPU 선계산. 느리지만 "
+                "스캔본에 필요.\n"
+                "④ Parallel + OCR — 최대 5개 동시 + PaddleOCR CPU 선계산. "
+                "③보다 빠르지만 CPU 부하 큼 (스캔본).\n"
                 "execution_mode는 'sequential'|'parallel', extraction_mode는 'text'|'ocr'.\n"
             )
             data = {
@@ -424,7 +424,7 @@ def set_chapters(
             return _err(
                 f"이 PDF는 {reason} text 모드 추출 결과를 신뢰할 수 없습니다 "
                 f"(text_quality={tq}). extraction_mode='ocr'로 다시 호출하세요 — "
-                "비전 LLM이 페이지 이미지를 직접 읽어 깨진 글자까지 문맥으로 복원합니다. "
+                "PaddleOCR CPU로 본문을 선계산합니다. "
                 "(OCR은 텍스트 언어 감지가 불가하니 language도 함께 전달하세요.) "
                 "execution_mode는 고른 값을 그대로 유지하면 됩니다.",
                 data={
@@ -492,6 +492,19 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
     또는 메인 LLM이 직접 처리 — 어느 쪽이든 같은 프롬프트를 사용.
     """
     state = workspace.load_state(work_id)
+    invalid = analysis.validate_chapter_raw_inputs(work_id, state)
+    if invalid:
+        return _err(
+            "sub-agent 입력 raw 본문이 준비되지 않았거나 손상됐습니다. "
+            "각 non-skip 챕터는 chapters_raw/{chapter_id}.json에 비어 있지 않은 "
+            "text와 정확한 char_count가 있어야 합니다. OCR 실패 챕터는 먼저 "
+            "set_chapters/OCR 단계를 복구한 뒤 다시 호출하세요.",
+            data={
+                "extraction_mode": state.get("extraction_mode"),
+                "invalid_chapters": invalid,
+                "required_fields": ["chapter_raw.text", "chapter_raw.char_count"],
+            },
+        )
     book_info = workspace.load_book_info(work_id)
     data = prompts.build_prompts(state, book_info)
     ext_on = data["enabled_types"]["extension"]
@@ -525,10 +538,11 @@ def save_chapter_result(
     단정했지만 실제로 누락된 결과가 조용히 completed 되는 것을 막는다.
     """
     options = workspace.load_state(work_id).get("question_options", {})
-    
-    # 에이전트가 예전 프롬프트나 환각으로 body_text를 보내더라도 
+
+    # 에이전트가 예전 프롬프트나 환각으로 body_text를 보내더라도
     # 서버의 캐시(get_chapter_content에서 추출한 text)를 덮어쓰지 않도록 제거
-    data.pop("body_text", None)
+    data_to_save = dict(data)
+    data_to_save.pop("body_text", None)
 
     missing = _missing_summary_fields(data, options)
     if missing:
@@ -540,7 +554,7 @@ def save_chapter_result(
             "직접 확인하세요.)",
             data={"missing": missing, "chapter_id": chapter_id},
         )
-    path = workspace.save_chapter_result(work_id, chapter_id, data)
+    path = workspace.save_chapter_result(work_id, chapter_id, data_to_save)
     return _ok({"saved_path": str(path)}, next_action=(
         f"{chapter_id} 요약/문제 저장 완료. extension이 활성이면 이 챕터의 "
         "확장 문제도(search_extension_context→save_extension_result) 처리하세요. "

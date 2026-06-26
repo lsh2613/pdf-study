@@ -684,6 +684,117 @@ def set_chapters_impl(
 # get_chapter_content
 # ---------------------------------------------------------------------------
 
+def _raw_validation_reasons(
+    work_id: str,
+    chapter_id: str,
+    chapter_state: dict[str, Any],
+    *,
+    extraction_mode: str,
+) -> list[dict[str, str]]:
+    """sub-agent 입력으로 쓸 chapter raw의 필수 조건을 검사한다."""
+    reasons: list[dict[str, str]] = []
+    if chapter_state.get("summary_status") == "failed":
+        code = "ocr_failed" if extraction_mode == "ocr" else "chapter_failed"
+        reasons.append({
+            "code": code,
+            "message": chapter_state.get("error") or "chapter extraction failed",
+        })
+
+    try:
+        raw = workspace.get_chapter_raw(work_id, chapter_id)
+    except FileNotFoundError:
+        reasons.append({
+            "code": "raw_missing",
+            "message": "chapters_raw file is missing",
+        })
+        return reasons
+
+    text = raw.get("text")
+    if not isinstance(text, str):
+        reasons.append({
+            "code": "text_missing",
+            "message": "chapter_raw.text is missing or not a string",
+        })
+    elif not text.strip():
+        reasons.append({
+            "code": "text_blank",
+            "message": "chapter_raw.text is blank",
+        })
+
+    char_count = raw.get("char_count")
+    if type(char_count) is not int:
+        reasons.append({
+            "code": "char_count_missing",
+            "message": "chapter_raw.char_count is missing or not an integer",
+        })
+    elif isinstance(text, str) and char_count != len(text):
+        reasons.append({
+            "code": "char_count_mismatch",
+            "message": (
+                f"chapter_raw.char_count={char_count} does not match "
+                f"len(chapter_raw.text)={len(text)}"
+            ),
+        })
+
+    return reasons
+
+
+def validate_chapter_raw_inputs(
+    work_id: str,
+    state: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """non-skip 챕터의 raw text/char_count 문제를 구조화해 반환한다."""
+    if state is None:
+        state = workspace.load_state(work_id)
+    extraction_mode = state.get("extraction_mode") or "text"
+    invalid: list[dict[str, Any]] = []
+    for chapter_id, chapter_state in state.get("chapters", {}).items():
+        if chapter_state.get("skip"):
+            continue
+        reasons = _raw_validation_reasons(
+            work_id,
+            chapter_id,
+            chapter_state,
+            extraction_mode=extraction_mode,
+        )
+        if reasons:
+            invalid.append({
+                "chapter_id": chapter_id,
+                "title": chapter_state.get("title"),
+                "page_range": chapter_state.get("page_range"),
+                "reasons": reasons,
+            })
+    return invalid
+
+
+def _validated_chapter_raw(
+    work_id: str,
+    chapter_id: str,
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    chapter_state = state["chapters"][chapter_id]
+    extraction_mode = state.get("extraction_mode") or "text"
+    reasons = _raw_validation_reasons(
+        work_id,
+        chapter_id,
+        chapter_state,
+        extraction_mode=extraction_mode,
+    )
+    if reasons:
+        reason_text = "; ".join(
+            f"{r['code']}: {r['message']}" for r in reasons
+        )
+        raise RuntimeError(
+            f"chapter raw is invalid for {chapter_id}: {reason_text}"
+        )
+
+    raw = workspace.get_chapter_raw(work_id, chapter_id)
+    if extraction_mode == "ocr":
+        raw = dict(raw)
+        raw.pop("page_images", None)
+    return raw
+
+
 def get_chapter_content_impl(work_id: str, chapter_id: str) -> dict[str, Any]:
     """챕터 raw 데이터 반환.
 
@@ -718,4 +829,4 @@ def get_chapter_content_impl(work_id: str, chapter_id: str) -> dict[str, Any]:
             "표시돼 추출 대상이 아닙니다. 본문 챕터만 처리하세요."
         )
 
-    return workspace.get_chapter_raw(work_id, chapter_id)  # 없으면 FileNotFoundError
+    return _validated_chapter_raw(work_id, chapter_id, state)
