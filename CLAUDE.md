@@ -1,0 +1,57 @@
+# pdf-study 작업 기준
+
+pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. 사용자는 개발자로 한정하지 않는다. PDF 자체를 공부하거나 책을 PDF로 만들어 학습하려는 사람이, 챕터 요약·핵심 포인트·검증 문제·확장 문제를 HTML 또는 터미널 자료로 받는 것이 목표다.
+
+```
+.
+├── CLAUDE.md -> Claude Code가 작업 전에 읽는 프로젝트 기준
+├── AGENTS.md -> Codex가 작업 전에 읽는 프로젝트 기준
+├── docs/
+│   ├── architecture.md -> 서버 구성과 데이터 흐름
+│   ├── business-rules.md -> PDF 학습 자료 생성 규칙
+│   ├── security.md -> 로컬 PDF와 외부 검색의 보호 기준
+│   ├── standards.md -> 변경 시 지켜야 하는 강제 규칙
+│   ├── engineering-notes.md -> 놓치기 쉬운 동작과 확인 절차
+│   ├── operations.md -> 설치·실행·검증 절차
+│   ├── contracts.md -> MCP 도구와 출력물의 외부 계약
+│   └── tracking/
+│       ├── status.md -> 현재 구현 상태와 남은 일
+│       ├── decisions/
+│       │   ├── index.md -> 결정 기록 목록
+│       │   ├── 0001-local-mcp-server.md -> 로컬 MCP 서버 형태
+│       │   ├── 0002-chapter-boundaries.md -> 챕터 경계 판단 방식
+│       │   ├── 0003-text-or-ocr.md -> 본문 추출 방식
+│       │   ├── 0004-neutral-render-data.md -> 렌더러 공통 데이터
+│       │   ├── 0005-extension-search.md -> 확장 문제 검색 처리
+│       │   └── 0006-project-local-venv.md -> 프로젝트 로컬 실행 환경
+│       └── findings.md -> 아직 해결하지 않은 문제
+├── server.py / analysis.py / workspace.py / prompts.py / exa_client.py -> MCP 도구, 흐름 결정, 상태 저장, 프롬프트, 외부 검색
+├── pdf/AGENTS.md -> PDF 열기·목차·페이지 렌더링 기준
+├── renderer/AGENTS.md -> HTML·Markdown/TUI 출력 기준
+├── templates/AGENTS.md -> 생성물에 복사되는 런처와 정적 자산 기준
+└── scripts/AGENTS.md -> 설치 스크립트 기준
+```
+
+## 반드시 지킬 일
+
+- PDF 학습 요청은 일반 요약으로 처리하지 않는다. `init_work → scan_pdf → set_chapters → get_subagent_prompts → save_* → list_pending_chapters → finalize_study` 흐름을 지켜야 한다.
+- 챕터 경계는 PDF 북마크 또는 목차 페이지 이미지로만 정한다. PDF 텍스트를 긁어 목차를 추정하는 코드를 추가하면 안 된다.
+- 텍스트 레이어가 없거나 깨진 PDF는 text 모드로 밀어붙이면 안 된다. OCR 흐름은 페이지 이미지를 읽은 본문을 `body_text`로 되돌려 저장하는 방향이며, 저장 경계의 누락 강제 검증은 아직 보강 대상이다.
+- 사용자가 골라야 하는 선택지는 서버 응답의 항목과 설명을 바꾸지 않는다. 추천·기본값을 임의로 붙이거나 선택지를 합치면 안 된다.
+- `.work/state.json`은 잠금이 걸린 `workspace.py` 헬퍼로만 바꾼다. 직접 read-modify-write를 넣으면 병렬 처리에서 상태가 깨진다.
+
+## 작업 전 확인
+
+- MCP 도구 흐름이나 사용자 선택지를 바꿀 때는 `docs/contracts.md`와 `docs/business-rules.md`를 먼저 확인한다.
+- PDF 페이지 번호, 목차, OCR, 텍스트 품질을 바꿀 때는 `pdf/AGENTS.md`를 먼저 확인한다.
+- HTML 또는 TUI 출력, 진도 저장, 마크다운 렌더링을 바꿀 때는 `renderer/AGENTS.md`와 `templates/AGENTS.md`를 먼저 확인한다.
+- 설치·실행 환경을 바꿀 때는 `scripts/AGENTS.md`와 `docs/operations.md`를 먼저 확인한다.
+- 상태 파일, 저장 폴더, 동시 저장을 바꿀 때는 `docs/engineering-notes.md`의 상태 저장 항목을 확인한다.
+
+## 바로 알려야 하는 문제
+
+- 사용자의 PDF 본문이나 생성 결과가 의도와 다르게 외부로 전송될 수 있는 변경
+- 챕터 저장이 완료로 표시됐지만 요약·문제 파일이 비어 있거나 일부만 저장되는 상황
+- `finalize_study`가 처리되지 않은 챕터를 조용히 제외하고 결과물을 만드는 상황
+- 같은 PDF 작업에서 병렬 저장 후 `state.json`이 깨지거나 완료 상태가 되돌아가는 상황
+- 기존 MCP 도구의 입력·출력·에러 형태가 바뀌어 클라이언트가 기존 흐름을 이어갈 수 없는 변경
