@@ -24,6 +24,8 @@ Options:
 Environment:
   PYTHON           Python executable used to create the venv (default: python3).
   PDF_STUDY_VENV   Override venv path (default: <repo>/.venv).
+  PDF_STUDY_PADDLEOCR_CACHE
+                   Override PaddleOCR model cache path (default: <repo>/.paddleocr).
 INNER_EOF
 }
 
@@ -32,19 +34,25 @@ REPO_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)"
 PYTHON_BIN="${PYTHON:-python3}"
 VENV_DIR="${PDF_STUDY_VENV:-$REPO_DIR/.venv}"
 VENV_PY="$VENV_DIR/bin/python"
+PADDLEOCR_CACHE_DIR="${PDF_STUDY_PADDLEOCR_CACHE:-$REPO_DIR/.paddleocr}"
+export PDF_STUDY_PADDLEOCR_CACHE="$PADDLEOCR_CACHE_DIR"
 
 print_config() {
-  "$PYTHON_BIN" - "$VENV_PY" <<'PY'
+  "$PYTHON_BIN" - "$VENV_PY" "$PADDLEOCR_CACHE_DIR" <<'PY'
 from __future__ import annotations
 import json
 import sys
 
 command = sys.argv[1]
+cache_dir = sys.argv[2]
 print(json.dumps({
     "mcpServers": {
         "pdf-study": {
             "command": command,
             "args": ["-m", "pdf_study"],
+            "env": {
+                "PDF_STUDY_PADDLEOCR_CACHE": cache_dir,
+            },
         }
     }
 }, ensure_ascii=False, indent=2))
@@ -52,16 +60,17 @@ PY
 }
 
 apply_config() {
-  "$VENV_PY" - "$VENV_PY" "$SCOPE" "$PWD" "$@" <<'PY'
+  "$VENV_PY" - "$VENV_PY" "$PADDLEOCR_CACHE_DIR" "$SCOPE" "$PWD" "$@" <<'PY'
 from __future__ import annotations
 import json
 import sys
 import os
 
 command = sys.argv[1]
-scope = sys.argv[2]
-project_dir = sys.argv[3]
-targets = sys.argv[4:]
+cache_dir = sys.argv[2]
+scope = sys.argv[3]
+project_dir = sys.argv[4]
+targets = sys.argv[5:]
 
 if scope == "global":
     CONFIG_PATHS = {
@@ -97,7 +106,10 @@ for target in targets:
         
     data[key]["pdf-study"] = {
         "command": command,
-        "args": ["-m", "pdf_study"]
+        "args": ["-m", "pdf_study"],
+        "env": {
+            "PDF_STUDY_PADDLEOCR_CACHE": cache_dir,
+        },
     }
     
     try:
@@ -127,6 +139,7 @@ modules = {
     "PIL": "pillow",
     "rich": "rich",
     "markdown_it": "markdown-it-py",
+    "paddle": "paddlepaddle",
     "paddleocr": "paddleocr",
     "pdf_study": "pdf-study",
 }

@@ -30,6 +30,9 @@ def test_setup_script_prints_absolute_mcp_config():
     assert command.is_absolute()
     assert command == ROOT / ".venv" / "bin" / "python"
     assert cfg["args"] == ["-m", "pdf_study"]
+    assert cfg["env"] == {
+        "PDF_STUDY_PADDLEOCR_CACHE": str(ROOT / ".paddleocr"),
+    }
     assert "<PDF_STUDY_INSTALL_DIR>" not in out
     assert "~/" not in out
 
@@ -47,3 +50,11 @@ def test_mcp_setup_guide_documents_local_venv_install():
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "scripts/setup_mcp.sh" in readme
+
+
+def test_setup_script_checks_paddle_runtime_dependencies():
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert '"paddle": "paddlepaddle"' in text
+    assert '"paddleocr": "paddleocr"' in text
+    assert "PDF_STUDY_PADDLEOCR_CACHE" in text

@@ -1,48 +1,126 @@
+from __future__ import annotations
+
+import importlib
 import os
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+import sys
+import types
 import concurrent.futures
+import threading
+from pathlib import Path
 
-from pdf.ocr import get_ocr_worker, OCRWorker
 
-def test_home_env_var_isolated():
-    # pdf.ocr sets HOME at the top
-    assert os.environ["HOME"] == str(Path(".venv").resolve())
+ROOT = Path(__file__).resolve().parent.parent
 
-@patch('pdf.ocr.PaddleOCR')
-def test_singleton_initialization(mock_paddleocr):
-    # Mock behavior of PaddleOCR
-    mock_ocr_instance = MagicMock()
-    mock_paddleocr.return_value = mock_ocr_instance
-    mock_ocr_instance.ocr.return_value = [[[[[0,0], [1,0], [1,1], [0,1]], ("test text", 0.99)]]]
 
-    worker1 = get_ocr_worker()
-    worker2 = get_ocr_worker()
-    
-    # Ensure singleton
-    assert worker1 is worker2
-    
-    # OCR shouldn't be initialized until first use
-    assert worker1._ocr is None
-    
-    # First use
-    result1 = worker1.process_image("dummy.jpg")
-    
-    # Initialization happened
-    mock_paddleocr.assert_called_once()
-    
-    # Second use
-    result2 = worker1.process_image("dummy2.jpg")
-    
-    # No additional initialization
-    mock_paddleocr.assert_called_once()
+def load_ocr_module(monkeypatch):
+    """Import pdf.ocr with a fake paddleocr module so tests never load models."""
+    fake_paddleocr = types.ModuleType("paddleocr")
+    fake_paddleocr.PaddleOCR = object
+    monkeypatch.setitem(sys.modules, "paddleocr", fake_paddleocr)
+    sys.modules.pop("pdf.ocr", None)
+    return importlib.import_module("pdf.ocr")
 
-def test_concurrency_limit():
-    worker = get_ocr_worker()
-    
-    cpu_count = os.cpu_count() or 1
-    expected_limit = max(1, min(cpu_count // 2, 2))
-    
-    assert isinstance(worker.executor, concurrent.futures.ThreadPoolExecutor)
-    assert worker.executor._max_workers == expected_limit
+
+def test_import_does_not_rewrite_home(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+
+    load_ocr_module(monkeypatch)
+
+    assert os.environ["HOME"] == str(home)
+
+
+def test_default_cache_is_project_local_and_can_be_overridden(monkeypatch, tmp_path):
+    ocr = load_ocr_module(monkeypatch)
+
+    assert ocr.resolve_model_cache_dir() == ROOT / ".paddleocr"
+
+    custom_cache = tmp_path / "ocr-cache"
+    monkeypatch.setenv("PDF_STUDY_PADDLEOCR_CACHE", str(custom_cache))
+
+    assert ocr.resolve_model_cache_dir() == custom_cache
+
+
+def test_worker_initializes_paddleocr_for_cpu_and_local_cache(monkeypatch, tmp_path):
+    ocr = load_ocr_module(monkeypatch)
+    calls: list[dict[str, object]] = []
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+        def predict(self, image_path):
+            assert image_path == "page-1.jpg"
+            return [{"rec_texts": ["첫 문장", "second line"]}]
+
+    cache_dir = tmp_path / "models"
+    worker = ocr.OCRWorker(ocr_factory=FakePaddleOCR, cache_dir=cache_dir, max_workers=1)
+
+    assert worker.process_image("page-1.jpg") == "첫 문장\nsecond line"
+    assert calls == [
+        {
+            "lang": "korean",
+            "device": "cpu",
+        }
+    ]
+    assert os.environ["PADDLEOCR_HOME"] == str(cache_dir)
+    assert os.environ["PADDLE_PDX_CACHE_HOME"] == str(cache_dir)
+    assert cache_dir.is_dir()
+
+
+def test_worker_keeps_paddleocr_instance_thread_local(monkeypatch, tmp_path):
+    ocr = load_ocr_module(monkeypatch)
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    instance_ids: list[int] = []
+    active_predicts = 0
+    max_active_predicts = 0
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs):
+            with lock:
+                self.instance_id = len(instance_ids) + 1
+                instance_ids.append(self.instance_id)
+
+        def predict(self, image_path):
+            nonlocal active_predicts, max_active_predicts
+            with lock:
+                active_predicts += 1
+                max_active_predicts = max(max_active_predicts, active_predicts)
+            barrier.wait(timeout=5)
+            with lock:
+                active_predicts -= 1
+            return [{"rec_texts": [f"{self.instance_id}:{image_path}"]}]
+
+    worker = ocr.OCRWorker(
+        ocr_factory=FakePaddleOCR,
+        cache_dir=tmp_path / "models",
+        max_workers=2,
+    )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(worker.process_image, ["a.jpg", "b.jpg"]))
+
+    result_pairs = {tuple(result.split(":", 1)) for result in results}
+    assert {int(instance_id) for instance_id, _ in result_pairs} == {1, 2}
+    assert {image_path for _, image_path in result_pairs} == {"a.jpg", "b.jpg"}
+    assert sorted(instance_ids) == [1, 2]
+    assert max_active_predicts == 2
+
+
+def test_prediction_rec_texts_are_extracted_from_common_shapes(monkeypatch):
+    ocr = load_ocr_module(monkeypatch)
+
+    object_result = types.SimpleNamespace(rec_texts=["alpha", "beta"])
+    assert ocr.extract_rec_texts([object_result]) == ["alpha", "beta"]
+    assert ocr.extract_rec_texts({"rec_texts": ["gamma", ""]}) == ["gamma"]
+
+
+def test_ocr_worker_limit_is_testable(monkeypatch):
+    ocr = load_ocr_module(monkeypatch)
+
+    assert ocr.calculate_ocr_worker_limit(None) == 1
+    assert ocr.calculate_ocr_worker_limit(0) == 1
+    assert ocr.calculate_ocr_worker_limit(1) == 1
+    assert ocr.calculate_ocr_worker_limit(2) == 2
+    assert ocr.calculate_ocr_worker_limit(16) == 2
