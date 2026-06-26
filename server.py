@@ -491,16 +491,12 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
             raw["text"] = body_text
             workspace.update_chapter_status(work_id, chapter_id, body_text=body_text)
 
-        guide = (
-            f"이 챕터({chapter_id})의 page_images를 **순서대로** 멀티모달로 읽어 "
-            "본문을 직접 파악(OCR)하세요. 읽어낸 글자수로 문제 개수를 정하고, "
-            "summarizer_prompt 스키마대로 결과를 만들어 "
-        )
-    else:  # text 모드
-        guide = (
-            f"이 챕터({chapter_id})의 text를 읽고 "
-            "summarizer_prompt 스키마대로 요약·문제를 만들어 "
-        )
+        del raw["page_images"]
+
+    guide = (
+        f"이 챕터({chapter_id})의 text를 읽고 "
+        "summarizer_prompt 스키마대로 요약·문제를 만들어 "
+    )
     return _ok(raw, next_action=(
         guide + f"save_chapter_result(work_id=\"{work_id}\", "
         f"chapter_id=\"{chapter_id}\", data=...)로 저장하세요. extension이 "

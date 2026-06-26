@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+from unittest.mock import patch
 import pytest
 
 from pdf_study import server, workspace
@@ -239,26 +240,7 @@ def test_get_chapter_content_marks_summary_in_progress(tmp_path, ko_short):
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "completed"
 
 
-def test_get_chapter_content_ocr_next_action_only_mentions_question_count(tmp_path, ko_short):
-    """OCR 안내에서 글자 수는 문제 개수 산정에만 쓰고 요약 길이 스케일은 언급하지 않는다."""
-    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
-    r = server.set_chapters(
-        wid,
-        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
-        execution_mode="sequential",
-        extraction_mode="ocr",
-        language="ko",
-    )
-    assert r["ok"], r
-
-    content = server.get_chapter_content(wid, "ch1")
-    assert content["ok"], content
-    assert "문제 개수" in content["next_action"]
-    assert "요약 길이" not in content["next_action"]
-
-
-def test_get_chapter_content_ocr_lazy_extraction(tmp_path, ko_short, mocker):
+def test_get_chapter_content_ocr_lazy_extraction(tmp_path, ko_short):
     """OCR 모드에서 get_chapter_content가 페이지를 순차적으로 추출하고 상태에 캐시한다.
     실패한 페이지는 '[해당 페이지 OCR 실패]'를 삽입한다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
@@ -284,26 +266,26 @@ def test_get_chapter_content_ocr_lazy_extraction(tmp_path, ko_short, mocker):
                 raise RuntimeError("OCR Failed")
 
     mock_worker = MockWorker()
-    mocker.patch("pdf_study.server.ocr.get_ocr_worker", return_value=mock_worker)
+    with patch("pdf_study.pdf.ocr.get_ocr_worker", return_value=mock_worker):
 
-    # First call - should trigger extraction
-    content = server.get_chapter_content(wid, "ch1")
-    assert content["ok"]
-    data = content["data"]
-    assert "text" in data
-    assert "페이지 1 텍스트" in data["text"]
-    assert "[해당 페이지 OCR 실패]" in data["text"]
+        # First call - should trigger extraction
+        content = server.get_chapter_content(wid, "ch1")
+        assert content["ok"]
+        data = content["data"]
+        assert "text" in data
+        assert "페이지 1 텍스트" in data["text"]
+        assert "[해당 페이지 OCR 실패]" in data["text"]
 
-    # Check that it was cached in state
-    state = server.workspace.load_state(wid)
-    assert state["chapters"]["ch1"]["body_text"] == data["text"]
+        # Check that it was cached in state
+        state = server.workspace.load_state(wid)
+        assert state["chapters"]["ch1"]["body_text"] == data["text"]
 
-    # Second call - should use cache
-    mock_worker.call_count = 0
-    content2 = server.get_chapter_content(wid, "ch1")
-    assert content2["ok"]
-    assert content2["data"]["text"] == data["text"]
-    assert mock_worker.call_count == 0  # Should not be called again
+        # Second call - should use cache
+        mock_worker.call_count = 0
+        content2 = server.get_chapter_content(wid, "ch1")
+        assert content2["ok"]
+        assert content2["data"]["text"] == data["text"]
+        assert mock_worker.call_count == 0  # Should not be called again
 
 
 def test_mark_chapter_in_progress_guards_done_and_missing(tmp_path, ko_short):
