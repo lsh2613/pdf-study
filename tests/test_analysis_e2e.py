@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -100,45 +102,61 @@ def test_set_chapters_extracts_text(make_workspace, ko_with_toc):
         assert state["chapters"][cid]["char_count"] > 0
 
 
-def test_ocr_mode_set_chapters_and_get_content(make_workspace, ko_with_toc):
-    """extraction_mode="ocr": set_chapters는 본문 텍스트를 안 뽑고,
-    get_chapter_content가 페이지 이미지를 렌더해 page_images로 돌려준다."""
+def test_ocr_mode_set_chapters_precomputes_raw_text(
+    make_workspace, ko_with_toc, monkeypatch
+):
+    """extraction_mode="ocr": set_chapters가 PaddleOCR 결과를 raw text로 저장한다."""
     wid, _ = make_workspace(ko_with_toc)
     analysis.scan_pdf_impl(wid)
+    calls = []
+
+    class MockWorker:
+        def process_image(self, image_path):
+            calls.append(Path(image_path).name)
+            return f"text from {Path(image_path).stem}"
+
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
     res = analysis.set_chapters_impl(
         wid,
-        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 6]}],
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 3]}],
         "sequential", "ocr",
         book_info={"title": "테스트용 한국어 책"},
         language="ko",
     )
-    assert res["chapters"][0]["char_count"] == 0  # 텍스트 미추출
+    expected = "text from p1\n\ntext from p2\n\ntext from p3"
+    assert res["chapters"][0]["char_count"] == len(expected)
     state = workspace.load_state(wid)
     assert state["language"] == "ko"
     assert state["extraction_mode"] == "ocr"
+    assert state["chapters"]["ch1"]["char_count"] == len(expected)
 
-    # raw에는 text 필드가 없어야 한다
     raw = workspace.get_chapter_raw(wid, "ch1")
-    assert "text" not in raw
+    assert raw["text"] == expected
+    assert raw["char_count"] == len(expected)
+    assert calls == ["p1.jpg", "p2.jpg", "p3.jpg"]
 
-    # get_chapter_content_impl이 페이지 이미지를 렌더해 채운다
     content = analysis.get_chapter_content_impl(wid, "ch1")
-    pages = content["page_images"]
-    assert [p["page"] for p in pages] == [1, 2, 3, 4, 5, 6]
-    assert all(Path(p["path"]).exists() for p in pages)
+    assert content["text"] == expected
+    assert "page_images" not in content
 
 
 def test_ocr_body_text_backfilled_to_raw(make_workspace, ko_with_toc):
-    """OCR: 서브에이전트가 읽은 본문(body_text)을 raw_data의 text로 보존."""
+    """OCR: body_text backfill은 기존 raw text를 덮어쓸 수 있다."""
     wid, _ = make_workspace(ko_with_toc)
     analysis.scan_pdf_impl(wid)
-    analysis.set_chapters_impl(
-        wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 6]}],
-        "sequential", "ocr", language="ko",
-    )
-    # 처리 전: raw엔 text 없음, char_count 0
+    class MockWorker:
+        def process_image(self, image_path):
+            return "초기 OCR 본문"
+
+    from unittest.mock import patch
+    with patch("pdf_study.analysis.ocr.get_ocr_worker", return_value=MockWorker()):
+        analysis.set_chapters_impl(
+            wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
+            "sequential", "ocr", language="ko",
+        )
     raw0 = workspace.get_chapter_raw(wid, "ch1")
-    assert "text" not in raw0 and raw0["char_count"] == 0
+    assert raw0["text"] == "초기 OCR 본문"
+    assert raw0["char_count"] == len("초기 OCR 본문")
 
     body = "이미지에서 읽어낸 본문 전체입니다."
     workspace.save_chapter_result(wid, "ch1", {
@@ -147,16 +165,126 @@ def test_ocr_body_text_backfilled_to_raw(make_workspace, ko_with_toc):
         "body_text": body,
         "questions": {"multiple_choice": [], "short_answer": [], "reflection": []},
     })
-    # raw에 text + char_count backfill
     raw1 = workspace.get_chapter_raw(wid, "ch1")
     assert raw1["text"] == body
     assert raw1["char_count"] == len(body)
     assert workspace.load_state(wid)["chapters"]["ch1"]["char_count"] == len(body)
-    # summaries 파일엔 body_text가 새지 않는다
     summ = json.loads(
         (workspace.summaries_dir(wid) / "ch1.json").read_text(encoding="utf-8"))
     assert "body_text" not in summ
     assert summ["summary"] == "요약"
+
+
+def test_ocr_page_exception_marks_chapter_failed_without_partial_raw(
+    make_workspace, ko_with_toc, monkeypatch
+):
+    """페이지 OCR 예외가 있으면 해당 챕터는 실패하고 partial raw를 저장하지 않는다."""
+    wid, _ = make_workspace(ko_with_toc)
+    analysis.scan_pdf_impl(wid)
+
+    class MockWorker:
+        def process_image(self, image_path):
+            if Path(image_path).name == "p2.jpg":
+                raise RuntimeError("boom")
+            return "partial"
+
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
+    res = analysis.set_chapters_impl(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
+        "sequential", "ocr", language="ko",
+    )
+    assert res["chapters"][0]["error"]
+    state_entry = workspace.load_state(wid)["chapters"]["ch1"]
+    assert state_entry["summary_status"] == "failed"
+    assert "boom" in state_entry["error"]
+    with pytest.raises(FileNotFoundError):
+        workspace.get_chapter_raw(wid, "ch1")
+
+
+def test_ocr_empty_chapter_marks_failed_without_raw(
+    make_workspace, ko_with_toc, monkeypatch
+):
+    """개별 페이지가 비는 것은 허용하지만 챕터 전체 공백 OCR은 실패한다."""
+    wid, _ = make_workspace(ko_with_toc)
+    analysis.scan_pdf_impl(wid)
+
+    class MockWorker:
+        def process_image(self, image_path):
+            return "   "
+
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
+    res = analysis.set_chapters_impl(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
+        "sequential", "ocr", language="ko",
+    )
+    assert "empty text" in res["chapters"][0]["error"]
+    state_entry = workspace.load_state(wid)["chapters"]["ch1"]
+    assert state_entry["summary_status"] == "failed"
+    assert "empty text" in state_entry["error"]
+    with pytest.raises(FileNotFoundError):
+        workspace.get_chapter_raw(wid, "ch1")
+
+
+def test_ocr_skips_skip_chapters(make_workspace, ko_with_toc, monkeypatch):
+    """skip 챕터는 OCR 호출과 raw 저장 대상에서 제외한다."""
+    wid, _ = make_workspace(ko_with_toc)
+    analysis.scan_pdf_impl(wid)
+    calls = []
+
+    class MockWorker:
+        def process_image(self, image_path):
+            calls.append(image_path)
+            return "본문"
+
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
+    analysis.set_chapters_impl(
+        wid,
+        [
+            {"chapter_id": "ch1", "title": "표지", "page_range": [1, 1], "skip": True},
+            {"chapter_id": "ch2", "title": "본문", "page_range": [2, 2]},
+        ],
+        "sequential", "ocr", language="ko",
+    )
+    assert len(calls) == 1
+    with pytest.raises(FileNotFoundError):
+        workspace.get_chapter_raw(wid, "ch1")
+    assert workspace.get_chapter_raw(wid, "ch2")["text"] == "본문"
+
+
+def test_ocr_chapter_parallelism_honors_worker_limit(
+    make_workspace, ko_with_toc, monkeypatch
+):
+    """챕터 단위 OCR 병렬 실행은 calculate_ocr_worker_limit 값을 따른다."""
+    wid, _ = make_workspace(ko_with_toc)
+    analysis.scan_pdf_impl(wid)
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    class MockWorker:
+        def process_image(self, image_path):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+            return Path(image_path).stem
+
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
+    monkeypatch.setattr(analysis.ocr, "calculate_ocr_worker_limit", lambda: 1)
+    analysis.set_chapters_impl(
+        wid,
+        [
+            {"chapter_id": "ch1", "title": "A", "page_range": [1, 1]},
+            {"chapter_id": "ch2", "title": "B", "page_range": [2, 2]},
+        ],
+        "parallel", "ocr", language="ko",
+    )
+    assert max_active == 1
 
 
 def test_text_mode_body_text_does_not_overwrite_raw(make_workspace, ko_with_toc):

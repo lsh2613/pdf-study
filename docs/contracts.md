@@ -29,7 +29,7 @@
 
 `get_subagent_prompts(work_id)`는 요약자 프롬프트, 확장 문제 프롬프트, 처리 순서, 본문 챕터 ID 목록을 반환한다. skip 챕터는 `chapter_ids`에서 제외되고 `skipped_chapter_ids`에 따로 들어간다.
 
-`get_chapter_content(work_id, chapter_id)`는 챕터 입력을 반환한다. text 모드에서는 `text`, OCR 모드에서는 `page_images`가 들어간다. 등록되지 않은 `chapter_id`, skip 챕터, 아직 챕터가 설정되지 않은 작업은 실패한다.
+`get_chapter_content(work_id, chapter_id)`는 챕터 입력을 반환한다. text 모드와 OCR 모드 모두 `text`가 들어간다. OCR 모드의 `text`는 `set_chapters` 시점에 PaddleOCR CPU로 선계산해 `chapters_raw/chN.json`에 저장한 본문이다. 등록되지 않은 `chapter_id`, skip 챕터, 아직 챕터가 설정되지 않은 작업은 실패한다.
 
 `save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다. `summary`, `key_points`, 활성화된 `multiple_choice`, `short_answer`, `reflection` 중 필요한 값이 비어 있으면 실패하고 `data.missing`에 누락 필드를 담는다. OCR 모드의 요약 프롬프트는 `body_text`를 요구하지만, 현재 저장 경계는 `body_text`가 있을 때만 raw 본문으로 되돌려 저장한다.
 
