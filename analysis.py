@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from . import lang, workspace
@@ -427,6 +428,35 @@ def _validate_chapter_def(ch: dict[str, Any], page_count: int) -> dict[str, Any]
     return out
 
 
+def _ocr_chapter_pages(
+    ch_def: dict[str, Any],
+    page_images: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """챕터 하나의 페이지 이미지를 순서대로 OCR해 raw payload를 만든다."""
+    cid = ch_def["chapter_id"]
+    worker = ocr.get_ocr_worker()
+    page_texts: list[str] = []
+    for page_image in page_images:
+        image_path = page_image["path"]
+        try:
+            page_texts.append(str(worker.process_image(image_path) or ""))
+        except Exception as exc:
+            page = page_image.get("page")
+            raise RuntimeError(f"chapter {cid} page {page} OCR failed: {exc}") from exc
+
+    text = "\n\n".join(page_texts)
+    if not text.strip():
+        raise ValueError(f"chapter {cid} OCR produced empty text")
+
+    return {
+        "chapter_id": cid,
+        "title": ch_def["title"],
+        "page_range": ch_def["page_range"],
+        "text": text,
+        "char_count": len(text),
+    }
+
+
 def set_chapters_impl(
     work_id: str,
     chapters: list[dict[str, Any]],
@@ -442,7 +472,7 @@ def set_chapters_impl(
                   (1-based inclusive)
         execution_mode: "sequential" | "parallel". 챕터 디스패치 방식.
         extraction_mode: "text" | "ocr". 본문 추출 방식(목차 단계와 무관).
-                  text=라이브러리 추출 / ocr=서브에이전트가 페이지 이미지 직독.
+                  text=라이브러리 추출 / ocr=PaddleOCR CPU 선계산.
         book_info: 메인 LLM이 보강한 책 정보. None이면 PDF 메타만 사용.
         language: "ko" | "en". OCR 모드에서 LLM이 이미지로 파악한 본문 언어를
                   전달하면 state.language를 갱신한다(텍스트 감지가 불가능하므로).
@@ -450,8 +480,8 @@ def set_chapters_impl(
     Returns:
         {"chapter_count", "total_chars", "chapters": [...]}
 
-    extraction_mode == "ocr"이면 본문 텍스트를 추출하지 않는다. 서브에이전트가
-    get_chapter_content가 렌더한 페이지 이미지를 직접 읽기 때문.
+    extraction_mode == "ocr"이면 set_chapters 시점에 페이지 이미지를 렌더하고
+    PaddleOCR CPU로 본문 텍스트를 선계산해 raw에 저장한다.
     (그림 추출은 하지 않는다 — 요약은 텍스트/마크다운만 다룬다.)
     """
     if not chapters:
@@ -510,12 +540,58 @@ def set_chapters_impl(
     summaries: list[dict[str, Any]] = []
     total_chars = 0
 
-    doc = reader.open_pdf(pdf_path)
-    try:
+    if ocr_mode:
+        page_images_by_chapter: dict[str, list[dict[str, Any]]] = {}
+        failed_chapters: set[str] = set()
+        doc = reader.open_pdf(pdf_path)
+        try:
+            for ch_def in normalized:
+                if ch_def.get("skip"):
+                    continue
+                cid = ch_def["chapter_id"]
+                start, end = ch_def["page_range"]
+                try:
+                    page_images_by_chapter[cid] = reader.render_pages(
+                        doc, int(start), int(end), workspace.pages_dir(work_id),
+                    )
+                except Exception as e:
+                    logger.exception("chapter page rendering failed: %s", cid)
+                    failed_chapters.add(cid)
+                    workspace.mark_chapter_failed(
+                        work_id, cid, kind="summary", error=str(e),
+                    )
+        finally:
+            doc.close()
+
+        results: dict[str, dict[str, Any]] = {}
+        errors: dict[str, str] = {}
+        max_workers = ocr.calculate_ocr_worker_limit()
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_chapter = {
+                executor.submit(
+                    _ocr_chapter_pages,
+                    ch_def,
+                    page_images_by_chapter[ch_def["chapter_id"]],
+                ): ch_def
+                for ch_def in normalized
+                if not ch_def.get("skip")
+                and ch_def["chapter_id"] in page_images_by_chapter
+                and ch_def["chapter_id"] not in failed_chapters
+            }
+            for future in as_completed(future_to_chapter):
+                ch_def = future_to_chapter[future]
+                cid = ch_def["chapter_id"]
+                try:
+                    results[cid] = future.result()
+                except Exception as e:
+                    logger.exception("chapter OCR failed: %s", cid)
+                    errors[cid] = str(e)
+                    workspace.mark_chapter_failed(
+                        work_id, cid, kind="summary", error=str(e),
+                    )
+
         for ch_def in normalized:
             cid = ch_def["chapter_id"]
-
-            # 비본문 챕터(찾아보기·색인·판권 등)는 추출도, sub-agent 디스패치도, 렌더도 안 한다
             if ch_def.get("skip"):
                 summaries.append({
                     "chapter_id": cid, "title": ch_def["title"],
@@ -525,45 +601,77 @@ def set_chapters_impl(
                 })
                 continue
 
-            try:
-                if ocr_mode:
-                    # 본문 텍스트는 추출하지 않는다(서브에이전트가 페이지 이미지를
-                    # 직접 읽음).
-                    char_count = 0
-                else:
-                    extracted = chapter_mod.extract_chapter(doc, ch_def)
-                    char_count = extracted["char_count"]
-            except Exception as e:
-                logger.exception("chapter extraction failed: %s", cid)
-                workspace.mark_chapter_failed(work_id, cid, kind="summary", error=str(e))
+            if cid in results:
+                raw_payload = results[cid]
+                char_count = raw_payload["char_count"]
+                workspace.save_chapter_raw(work_id, cid, raw_payload)
+                workspace.update_chapter_status(work_id, cid, char_count=char_count)
+                total_chars += char_count
                 summaries.append({
-                    "chapter_id": cid, "title": ch_def["title"],
+                    "chapter_id": cid,
+                    "title": ch_def["title"],
                     "page_range": ch_def["page_range"],
-                    "char_count": 0, "error": str(e),
+                    "char_count": char_count,
+                    "error": None,
                 })
                 continue
 
-            raw_payload = {
-                "chapter_id": cid,
-                "title": ch_def["title"],
-                "page_range": ch_def["page_range"],
-                "char_count": char_count,
-            }
-            if not ocr_mode:
-                raw_payload["text"] = extracted["text"]
-            workspace.save_chapter_raw(work_id, cid, raw_payload)
-            workspace.update_chapter_status(work_id, cid, char_count=char_count)
-
-            total_chars += char_count
+            state_entry = workspace.load_state(work_id)["chapters"].get(cid, {})
+            error = errors.get(cid) or state_entry.get("error") or "OCR failed"
             summaries.append({
-                "chapter_id": cid,
-                "title": ch_def["title"],
+                "chapter_id": cid, "title": ch_def["title"],
                 "page_range": ch_def["page_range"],
-                "char_count": char_count,
-                "error": None,
+                "char_count": 0, "error": error,
             })
-    finally:
-        doc.close()
+    else:
+        doc = reader.open_pdf(pdf_path)
+        try:
+            for ch_def in normalized:
+                cid = ch_def["chapter_id"]
+
+                # 비본문 챕터(찾아보기·색인·판권 등)는 추출도, sub-agent 디스패치도, 렌더도 안 한다
+                if ch_def.get("skip"):
+                    summaries.append({
+                        "chapter_id": cid, "title": ch_def["title"],
+                        "page_range": ch_def["page_range"],
+                        "char_count": 0,
+                        "skipped": True, "error": None,
+                    })
+                    continue
+
+                try:
+                    extracted = chapter_mod.extract_chapter(doc, ch_def)
+                    char_count = extracted["char_count"]
+                except Exception as e:
+                    logger.exception("chapter extraction failed: %s", cid)
+                    workspace.mark_chapter_failed(work_id, cid, kind="summary", error=str(e))
+                    summaries.append({
+                        "chapter_id": cid, "title": ch_def["title"],
+                        "page_range": ch_def["page_range"],
+                        "char_count": 0, "error": str(e),
+                    })
+                    continue
+
+                raw_payload = {
+                    "chapter_id": cid,
+                    "title": ch_def["title"],
+                    "page_range": ch_def["page_range"],
+                    "char_count": char_count,
+                    "text": extracted["text"],
+                }
+                workspace.save_chapter_raw(work_id, cid, raw_payload)
+                workspace.update_chapter_status(work_id, cid, char_count=char_count)
+
+                total_chars += char_count
+                summaries.append({
+                    "chapter_id": cid,
+                    "title": ch_def["title"],
+                    "page_range": ch_def["page_range"],
+                    "char_count": char_count,
+                    "error": None,
+                })
+        finally:
+            doc.close()
 
     return {
         "chapter_count": len(normalized),
@@ -577,12 +685,10 @@ def set_chapters_impl(
 # ---------------------------------------------------------------------------
 
 def get_chapter_content_impl(work_id: str, chapter_id: str) -> dict[str, Any]:
-    """챕터 raw 데이터 반환. OCR 모드면 페이지를 lazy 렌더해 page_images 첨부.
+    """챕터 raw 데이터 반환.
 
     - text 모드: chapters_raw의 {text}를 그대로 반환.
-    - ocr 모드: 본문 텍스트가 없으므로 page_range의 페이지를 JPEG로 렌더해
-      page_images(서브에이전트가 직접 읽을 페이지 이미지 절대경로)를 채운다.
-      이미 렌더된 페이지는 재사용한다(p{N}.jpg 캐시).
+    - ocr 모드: set_chapters에서 선계산해 저장한 chapters_raw의 {text}를 그대로 반환.
 
     chapter_id는 **set_chapters로 등록된 id(ch1·ch2·…)**여야 한다. 페이지 범위
     같은 임의 문자열('p11-p18' 등)을 주면 등록 챕터 목록을 담아 거부한다 —
@@ -612,15 +718,4 @@ def get_chapter_content_impl(work_id: str, chapter_id: str) -> dict[str, Any]:
             "표시돼 추출 대상이 아닙니다. 본문 챕터만 처리하세요."
         )
 
-    raw = workspace.get_chapter_raw(work_id, chapter_id)  # 없으면 FileNotFoundError
-
-    if state.get("extraction_mode", "text") == "ocr":
-        start, end = raw["page_range"]
-        doc = reader.open_pdf(state["pdf_path"])
-        try:
-            raw["page_images"] = reader.render_pages(
-                doc, int(start), int(end), workspace.pages_dir(work_id),
-            )
-        finally:
-            doc.close()
-    return raw
+    return workspace.get_chapter_raw(work_id, chapter_id)  # 없으면 FileNotFoundError

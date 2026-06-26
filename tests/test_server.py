@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-from unittest.mock import patch
 import pytest
 
 from pdf_study import server, workspace
@@ -250,11 +249,20 @@ def test_get_chapter_content_marks_summary_in_progress(tmp_path, ko_short):
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "completed"
 
 
-def test_get_chapter_content_ocr_lazy_extraction(tmp_path, ko_short):
-    """OCR 모드에서 get_chapter_content가 페이지를 순차적으로 추출하고 상태에 캐시한다.
-    실패한 페이지는 '[해당 페이지 OCR 실패]'를 삽입한다."""
+def test_get_chapter_content_ocr_returns_precomputed_text_without_lazy_ocr(
+    tmp_path, ko_short, monkeypatch
+):
+    """OCR 모드에서도 get_chapter_content는 저장된 text만 반환하고 worker를 다시 부르지 않는다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     server.scan_pdf(wid)
+    calls = []
+
+    class MockWorker:
+        def process_image(self, img_path):
+            calls.append(img_path)
+            return "페이지 OCR 텍스트"
+
+    monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda: MockWorker())
     r = server.set_chapters(
         wid,
         [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
@@ -263,39 +271,26 @@ def test_get_chapter_content_ocr_lazy_extraction(tmp_path, ko_short):
         language="ko",
     )
     assert r["ok"]
+    assert len(calls) == 2
+    assert workspace.get_chapter_raw(wid, "ch1")["text"] == (
+        "페이지 OCR 텍스트\n\n페이지 OCR 텍스트"
+    )
 
-    # Mock OCRWorker
-    class MockWorker:
-        def __init__(self):
-            self.call_count = 0
+    class FailingWorker:
         def process_image(self, img_path):
-            self.call_count += 1
-            if self.call_count == 1:
-                return [[[[[0,0], [0,0], [0,0], [0,0]], ("페이지 1 텍스트", 0.99)]]]
-            else:
-                raise RuntimeError("OCR Failed")
+            raise AssertionError("lazy OCR must not run")
 
-    mock_worker = MockWorker()
-    with patch("pdf_study.pdf.ocr.get_ocr_worker", return_value=mock_worker):
+    monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda: FailingWorker())
+    content = server.get_chapter_content(wid, "ch1")
+    assert content["ok"]
+    data = content["data"]
+    assert data["text"] == "페이지 OCR 텍스트\n\n페이지 OCR 텍스트"
+    assert "page_images" not in data
+    assert "body_text" not in workspace.load_state(wid)["chapters"]["ch1"]
 
-        # First call - should trigger extraction
-        content = server.get_chapter_content(wid, "ch1")
-        assert content["ok"]
-        data = content["data"]
-        assert "text" in data
-        assert "페이지 1 텍스트" in data["text"]
-        assert "[해당 페이지 OCR 실패]" in data["text"]
-
-        # Check that it was cached in state
-        state = server.workspace.load_state(wid)
-        assert state["chapters"]["ch1"]["body_text"] == data["text"]
-
-        # Second call - should use cache
-        mock_worker.call_count = 0
-        content2 = server.get_chapter_content(wid, "ch1")
-        assert content2["ok"]
-        assert content2["data"]["text"] == data["text"]
-        assert mock_worker.call_count == 0  # Should not be called again
+    content2 = server.get_chapter_content(wid, "ch1")
+    assert content2["ok"]
+    assert content2["data"]["text"] == data["text"]
 
 
 def test_mark_chapter_in_progress_guards_done_and_missing(tmp_path, ko_short):

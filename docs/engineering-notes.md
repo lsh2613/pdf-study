@@ -24,13 +24,13 @@
 
 대응: 선택이 필요한 오류 응답에는 구조화된 `choices`와 선택지 제시 규칙을 함께 둔다. 테스트는 선택지 값뿐 아니라 오류 메시지에 선택 도구 안내가 남아 있는지도 확인한다.
 
-## OCR 본문 되돌려 저장
+## OCR 본문 선계산 저장
 
-증상: OCR 모드로 최종 결과는 만들어졌지만 raw 원문에는 본문 텍스트가 없어 이후 진단이나 재렌더에서 text 모드와 다르게 동작한다.
+증상: OCR 모드로 챕터를 등록했지만 raw 원문에 본문 텍스트가 없거나 일부 페이지만 저장되면 이후 진단이나 재렌더에서 text 모드와 다르게 동작한다.
 
-원인: 서버는 OCR 모드에서 본문을 읽지 않으므로, 요약자가 이미지에서 읽은 원문을 다시 저장하지 않으면 raw 데이터가 비어 있다.
+원인: OCR은 페이지 이미지 렌더링과 PaddleOCR 호출을 거치므로 페이지 단위 예외나 전체 공백 결과가 발생할 수 있다. 이때 partial 본문을 저장하면 실패 챕터가 정상 raw처럼 보인다.
 
-대응: OCR 요약 프롬프트는 `body_text`를 요구하고, `save_chapter_result`는 이를 `chapters_raw/chN.json`의 `text`와 `char_count`로 되돌려 넣는다. 변경 후에는 summaries 파일에 `body_text`가 남지 않고 raw 파일에만 저장되는지 확인한다.
+대응: OCR 모드는 `set_chapters` 반환 전에 non-skip 챕터를 페이지 순서대로 OCR하고, 챕터 전체가 성공했을 때만 `chapters_raw/chN.json`에 `text`와 `char_count`를 저장한다. 페이지 OCR 예외나 전체 공백 결과는 `summary_status=failed`와 `error`로 드러내고 raw 본문을 저장하지 않는다.
 
 ## 완료 상태의 거짓 양성
 

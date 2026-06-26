@@ -20,7 +20,7 @@ pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, �
 
 `scan_pdf`는 PDF 메타데이터, 텍스트 레이어 품질, 언어, 페이지 오프셋, 내장 목차를 확인한다. 내장 목차가 있으면 물리 페이지 범위가 담긴 챕터 후보를 반환한다. 내장 목차가 없거나 재분석이 필요하면 목차 페이지를 JPEG로 렌더하고, 클라이언트가 이미지를 읽어 챕터를 구성하게 한다.
 
-클라이언트가 챕터와 처리 방식을 확정하면 `set_chapters`가 상태 파일에 챕터를 등록한다. text 모드에서는 이 시점에 본문 텍스트를 추출해 `chapters_raw`에 저장한다. OCR 모드에서는 본문 텍스트를 추출하지 않고, 이후 `get_chapter_content`가 페이지 이미지를 지연 렌더링해 요약자가 직접 읽게 한다.
+클라이언트가 챕터와 처리 방식을 확정하면 `set_chapters`가 상태 파일에 챕터를 등록한다. text 모드에서는 이 시점에 본문 텍스트를 추출해 `chapters_raw`에 저장한다. OCR 모드에서는 이 시점에 본문 페이지 이미지를 렌더링하고 PaddleOCR CPU로 읽어 `chapters_raw`에 `text`와 `char_count`를 저장한다.
 
 `get_subagent_prompts`는 처리 모드와 언어에 맞는 프롬프트를 돌려준다. 각 챕터 처리자는 `get_chapter_content`로 입력을 받고, 요약·핵심 포인트·활성 문제 유형을 만든 뒤 `save_chapter_result`로 저장한다. 확장 문제가 켜져 있으면 `search_extension_context`가 검색 결과를 보조 자료로 주고 `save_extension_result`가 확장 문제를 저장한다.
 

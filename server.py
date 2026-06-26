@@ -16,7 +16,6 @@ from mcp.server.fastmcp import FastMCP
 
 from . import analysis, exa_client, prompts, workspace
 from .renderer import RENDERERS
-from .pdf import ocr
 
 logger = logging.getLogger(__name__)
 
@@ -326,8 +325,8 @@ def set_chapters(
       불가능하므로, 목차/페이지 이미지를 읽고 파악한 본문 언어를 반드시 전달**하세요.
       (text 모드는 scan_pdf가 자동 감지하므로 생략 가능)
 
-    extraction_mode="ocr"에서는 본문 텍스트를 추출하지 않습니다.
-    서브에이전트가 get_chapter_content가 렌더한 페이지 이미지를 직접 읽습니다.
+    extraction_mode="ocr"에서는 set_chapters 시점에 PaddleOCR CPU로 본문 텍스트를
+    선계산합니다. 서브에이전트는 get_chapter_content가 반환한 text를 읽습니다.
 
     ※ text 모드 가드: scan_pdf가 측정한 text_quality가 "garbled"(인코딩 깨짐) 또는
       "no_text_layer"(텍스트 거의 없음)이면 text 추출이 무의미하므로 거부하고
@@ -462,40 +461,11 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
     """챕터 본문을 반환합니다 (extraction_mode에 따라 형태가 다름).
 
     - text 모드: `text`(본문)를 반환. sub-agent는 text를 읽고 요약/문제를 만드세요.
-    - ocr 모드: 본문 텍스트가 없습니다. 대신 `page_images`(이 챕터 페이지들을
-      렌더한 JPEG 절대경로)를 반환합니다. **sub-agent는 page_images를 순서대로
-      멀티모달 입력으로 읽어 본문을 직접 파악(OCR)**한 뒤, 읽어낸 글자수로
-      문제 개수를 정하세요. 흐릿한 기술용어·식별자·예약어는
-      문맥으로 복원하세요.
+    - ocr 모드: set_chapters에서 PaddleOCR CPU로 선계산한 `text`를 반환합니다.
     """
     raw = analysis.get_chapter_content_impl(work_id, chapter_id)
     # 본문을 받아간 시점 = 요약 처리 시작 → 진행 모니터링용 in_progress 마킹
     workspace.mark_chapter_in_progress(work_id, chapter_id, kind="summary")
-    if "page_images" in raw:  # ocr 모드
-        # 캐싱 확인 및 지연 추출
-        state = workspace.load_state(work_id)
-        chapter_state = state.get("chapters", {}).get(chapter_id, {})
-        if "body_text" in chapter_state:
-            raw["text"] = chapter_state["body_text"]
-        else:
-            worker = ocr.get_ocr_worker()
-            extracted = []
-            for img_path in raw["page_images"]:
-                try:
-                    result = worker.process_image(img_path)
-                    if result and result[0]:
-                        page_text = "\n".join(item[1][0] for item in result[0])
-                        extracted.append(page_text)
-                    else:
-                        extracted.append("")
-                except Exception:
-                    extracted.append("[해당 페이지 OCR 실패]")
-            body_text = "\n\n".join(extracted)
-            raw["text"] = body_text
-            workspace.update_chapter_status(work_id, chapter_id, body_text=body_text)
-
-        del raw["page_images"]
-
     guide = (
         f"이 챕터({chapter_id})의 text를 읽고 "
         "summarizer_prompt 스키마대로 요약·문제를 만들어 "
@@ -531,7 +501,7 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
         "요약/문제 생성 → save_chapter_result"
         + ("(+ extension 활성: search_extension_context→save_extension_result)" if ext_on else "")
         + ". chapter_id는 반드시 위 목록의 값(ch1·ch2…)을 쓰고, 페이지 범위 문자열은 "
-        "쓰지 마세요. mode가 'ocr'이면 본문 대신 page_images를 직접 읽습니다."
+        "쓰지 마세요. mode가 'ocr'이어도 set_chapters에서 선계산된 text를 읽습니다."
     ))
 
 

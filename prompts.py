@@ -82,12 +82,10 @@ get_chapter_content가 제공한 text가 챕터 본문입니다. 깨진 글자·
 (임의 추가 금지).""".strip()
 
 INPUT_MODE_OCR_KO = """\
-[입력 방식 — 페이지 이미지(OCR)]
-본문 텍스트는 제공되지 않습니다. get_chapter_content가 주는 page_images
-(페이지 JPEG 절대경로)를 순서대로 멀티모달 입력으로 읽어 본문을 직접
-파악하세요(=OCR). 흐릿하거나 깨져 보이는 기술용어·식별자·예약어
-(예: SERIALIZABLE, KEY_BLOCK_SIZE, select_type)는 문맥으로 복원하세요.
-읽어낸 본문의 글자수를 헤아려 위의 문제 개수 표를 적용하세요.""".strip()
+[입력 방식 — OCR 선계산 본문 텍스트]
+get_chapter_content가 제공한 text가 PaddleOCR CPU로 미리 읽은 챕터 본문입니다.
+깨진 글자·띄어쓰기 오류·잘못 분리된 줄이 있으면 의미를 해치지 않는 선에서
+자연스럽게 교정해 읽으세요(임의 추가 금지).""".strip()
 
 INPUT_MODE_TEXT_EN = """\
 [Input mode — body text]
@@ -96,12 +94,11 @@ characters, spacing errors, or split lines, read with natural corrections where
 meaning is preserved (do not invent content).""".strip()
 
 INPUT_MODE_OCR_EN = """\
-[Input mode — page images (OCR)]
-No body text is provided. Read the `page_images` (absolute JPEG paths) from
-get_chapter_content in order, as multimodal input, to recover the body yourself
-(=OCR). Reconstruct blurry/garbled technical terms, identifiers, and keywords
-(e.g. SERIALIZABLE, KEY_BLOCK_SIZE, select_type) from context. Count the chars
-you read and apply the question counts table above.""".strip()
+[Input mode — precomputed OCR text]
+The `text` from get_chapter_content is the chapter body precomputed with
+PaddleOCR CPU. If it has broken characters, spacing errors, or split lines,
+read with natural corrections where meaning is preserved (do not invent
+content).""".strip()
 
 
 # ---------------------------------------------------------------------------
@@ -445,9 +442,9 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     )
     if ocr_mode:
         ocr_note = (
-            "[OCR 모드] get_chapter_content는 본문 text 대신 page_images(페이지 "
-            "이미지 절대경로)를 돌려줍니다. 각 챕터에서 page_images를 순서대로 "
-            "멀티모달로 읽어 본문을 파악한 뒤 요약/문제를 생성하세요.\n\n"
+            "[OCR 모드] get_chapter_content는 set_chapters에서 PaddleOCR CPU로 "
+            "선계산한 본문 text를 돌려줍니다. 각 챕터의 text를 읽고 요약/문제를 "
+            "생성하세요.\n\n"
         )
         workflow = ocr_note + workflow
 
