@@ -16,7 +16,7 @@ dependencies = [
     # 실제 설치되는 패키지는 늘지 않으나, 직접 import하므로 정직하게 명시한다.
     "markdown-it-py>=2.2.0",
     "paddlepaddle",
-    "paddleocr>=2.7.0",
+    "paddleocr>=3.0.0",
 ]
 
 [project.optional-dependencies]

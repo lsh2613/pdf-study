@@ -1,50 +1,166 @@
-import os
-from pathlib import Path
-import threading
+from __future__ import annotations
+
 import concurrent.futures
+import inspect
+import os
+import threading
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any, Callable
 
-# Isolate the model download by setting HOME to the project's .venv
-os.environ["HOME"] = str(Path(".venv").resolve())
 
-try:
-    from paddleocr import PaddleOCR
-except ImportError:
-    PaddleOCR = None
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CACHE_DIR = REPO_ROOT / ".paddleocr"
+CACHE_ENV = "PDF_STUDY_PADDLEOCR_CACHE"
+PADDLEOCR_CACHE_ENV = "PADDLEOCR_HOME"
+PADDLE_CACHE_ENVS = (PADDLEOCR_CACHE_ENV, "PADDLE_PDX_CACHE_HOME")
+
+PaddleOCRFactory = Callable[..., Any]
+
+_worker: "OCRWorker | None" = None
+_worker_lock = threading.Lock()
+_AUTO_CPU_COUNT = object()
+
+
+def resolve_model_cache_dir(cache_dir: str | os.PathLike[str] | None = None) -> Path:
+    if cache_dir is not None:
+        return Path(cache_dir).expanduser().resolve()
+
+    configured = os.environ.get(CACHE_ENV)
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    return DEFAULT_CACHE_DIR
+
+
+def prepare_model_cache(cache_dir: str | os.PathLike[str] | None = None) -> Path:
+    resolved = resolve_model_cache_dir(cache_dir)
+    resolved.mkdir(parents=True, exist_ok=True)
+    for env_name in PADDLE_CACHE_ENVS:
+        os.environ[env_name] = str(resolved)
+    return resolved
+
+
+def calculate_ocr_worker_limit(cpu_count: int | None | object = _AUTO_CPU_COUNT) -> int:
+    if cpu_count is _AUTO_CPU_COUNT:
+        cpu_count = os.cpu_count()
+    if not cpu_count or cpu_count <= 1:
+        return 1
+    return 2
+
+
+def _load_paddleocr_factory() -> PaddleOCRFactory:
+    try:
+        from paddleocr import PaddleOCR
+    except ImportError as exc:
+        raise RuntimeError(
+            "PaddleOCR is not installed. Run scripts/setup_mcp.sh to prepare the MCP environment."
+        ) from exc
+    return PaddleOCR
+
+
+def _paddleocr_kwargs(factory: PaddleOCRFactory) -> dict[str, Any]:
+    desired_kwargs: dict[str, Any] = {"lang": "korean", "device": "cpu"}
+    try:
+        parameters = inspect.signature(factory).parameters
+    except (TypeError, ValueError):
+        return desired_kwargs
+
+    accepts_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+    if accepts_kwargs:
+        return desired_kwargs
+
+    return {
+        name: value
+        for name, value in desired_kwargs.items()
+        if name in parameters
+    }
+
+
+def _iter_prediction_items(prediction: Any) -> Iterable[Any]:
+    if prediction is None:
+        return ()
+    if isinstance(prediction, dict):
+        return (prediction,)
+    if isinstance(prediction, (str, bytes)):
+        return ()
+    if isinstance(prediction, Iterable):
+        return prediction
+    return (prediction,)
+
+
+def extract_rec_texts(prediction: Any) -> list[str]:
+    texts: list[str] = []
+    for item in _iter_prediction_items(prediction):
+        rec_texts = None
+        if isinstance(item, dict):
+            rec_texts = item.get("rec_texts")
+        else:
+            rec_texts = getattr(item, "rec_texts", None)
+
+        if rec_texts is None:
+            continue
+
+        for text in rec_texts:
+            if text is None:
+                continue
+            normalized = str(text).strip()
+            if normalized:
+                texts.append(normalized)
+    return texts
+
 
 class OCRWorker:
-    _instance = None
-    _lock = threading.Lock()
+    def __init__(
+        self,
+        *,
+        ocr_factory: PaddleOCRFactory | None = None,
+        cache_dir: str | os.PathLike[str] | None = None,
+        max_workers: int | None = None,
+    ) -> None:
+        self._ocr_factory = ocr_factory
+        self._cache_dir = cache_dir
+        self._factory: PaddleOCRFactory | None = None
+        self._thread_state = threading.local()
+        self._init_lock = threading.Lock()
+        self.executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_workers or calculate_ocr_worker_limit()
+        )
 
-    def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            with cls._lock:
-                if not cls._instance:
-                    instance = super(OCRWorker, cls).__new__(cls)
-                    instance._ocr = None
-                    instance._init_lock = threading.Lock()
-                    cpu_count = os.cpu_count() or 1
-                    max_workers = max(1, min(cpu_count // 2, 2))
-                    instance.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
-                    cls._instance = instance
-        return cls._instance
+    def _get_ocr(self) -> Any:
+        ocr = getattr(self._thread_state, "ocr", None)
+        if ocr is not None:
+            return ocr
 
-    def __init__(self):
-        pass
+        with self._init_lock:
+            prepare_model_cache(self._cache_dir)
+            if self._factory is None:
+                self._factory = self._ocr_factory or _load_paddleocr_factory()
+            ocr = self._factory(**_paddleocr_kwargs(self._factory))
 
-    def _get_ocr(self):
-        if self._ocr is None:
-            with self._init_lock:
-                if self._ocr is None:
-                    self._ocr = PaddleOCR(use_angle_cls=True, lang='korean')
-        return self._ocr
+        self._thread_state.ocr = ocr
+        return ocr
 
-    def process_image(self, image_path: str):
-        future = self.executor.submit(self._do_process, image_path)
+    def process_image(self, image_path: str | os.PathLike[str]) -> str:
+        future = self.executor.submit(self._extract_text, image_path)
         return future.result()
 
-    def _do_process(self, image_path: str):
+    def _extract_text(self, image_path: str | os.PathLike[str]) -> str:
         ocr = self._get_ocr()
-        return ocr.ocr(image_path, cls=True)
+        if not hasattr(ocr, "predict"):
+            raise RuntimeError("The installed PaddleOCR object does not provide predict(image_path).")
+
+        prediction = ocr.predict(str(image_path))
+        return "\n".join(extract_rec_texts(prediction))
+
 
 def get_ocr_worker() -> OCRWorker:
-    return OCRWorker()
+    global _worker
+    if _worker is None:
+        with _worker_lock:
+            if _worker is None:
+                _worker = OCRWorker()
+    return _worker
