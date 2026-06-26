@@ -105,11 +105,30 @@ if [[ $# -gt 0 ]]; then
 fi
 
 echo "Creating project-local venv: $VENV_DIR"
-"$PYTHON_BIN" -m venv "$VENV_DIR"
 
-echo "Installing pdf-study into: $VENV_DIR"
-"$VENV_PY" -m pip install -U pip setuptools wheel
-"$VENV_PY" -m pip install -e "$REPO_DIR"
+if command -v uv >/dev/null 2>&1; then
+  echo "uv detected. Using uv to create venv and install dependencies..."
+  uv venv "$VENV_DIR"
+  uv pip install -e "$REPO_DIR"
+else
+  # Find a compatible Python version (< 3.14) because PaddlePaddle doesn't support 3.14 yet
+  for py in python3.13 python3.12 python3.11 python3.10 "$PYTHON_BIN"; do
+    if command -v "$py" >/dev/null 2>&1; then
+      py_ver=$("$py" -c 'import sys; print(sys.version_info.minor)')
+      if [ "$py_ver" -lt 14 ]; then
+        PYTHON_BIN="$py"
+        break
+      fi
+    fi
+  done
+  
+  echo "Using Python binary: $PYTHON_BIN"
+  "$PYTHON_BIN" -m venv "$VENV_DIR"
+
+  echo "Installing pdf-study into: $VENV_DIR"
+  "$VENV_PY" -m pip install -U pip setuptools wheel
+  "$VENV_PY" -m pip install -e "$REPO_DIR"
+fi
 
 if [[ "$(uname)" == "Darwin" ]]; then
   echo ""
