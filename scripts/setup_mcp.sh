@@ -3,17 +3,16 @@ set -euo pipefail
 
 usage() {
   cat <<'INNER_EOF'
-Usage: scripts/setup_mcp.sh [--print-config] [--check] [--claude] [--codex] [--antigravity-cli] [--gemini] [--help]
+Usage: scripts/setup_mcp.sh [--print-config] [--check] [--claude] [--codex] [--antigravity-cli] [--help]
 
 Create a project-local .venv for pdf-study, install this package into it,
 verify required runtime dependencies, and automatically apply MCP config to clients.
 
 Options:
-  --claude         Apply config to Claude Desktop.
-  --codex          Apply config to Codex.
+  --claude         Apply config to Claude Code (global).
+  --codex          Apply config to Codex CLI.
   --antigravity-cli Apply config to Antigravity CLI.
-  --gemini         Apply config to Gemini.
-  (If no targets are specified, config is applied to all four.)
+  (If no targets are specified, config is applied to all three.)
 
   --print-config   Print the MCP config JSON for this checkout and exit.
   --check          Verify the existing .venv can import required dependencies.
@@ -60,10 +59,9 @@ command = sys.argv[1]
 targets = sys.argv[2:]
 
 CONFIG_PATHS = {
-    "claude": os.path.expanduser("~/Library/Application Support/Claude/claude_desktop_config.json"),
+    "claude": os.path.expanduser("~/.claude.json"),
     "codex": os.path.expanduser("~/.codex/config/mcp.json"),
-    "antigravity-cli": os.path.expanduser("~/.gemini/antigravity-cli/mcp.json"),
-    "gemini": os.path.expanduser("~/.gemini/config/mcp.json")
+    "antigravity-cli": os.path.expanduser("~/.gemini/config/mcp.json")
 }
 
 for target in targets:
@@ -81,10 +79,11 @@ for target in targets:
         except Exception:
             data = {}
             
-    if "mcpServers" not in data:
-        data["mcpServers"] = {}
+    key = "globalMcpServers" if target == "claude" else "mcpServers"
+    if key not in data:
+        data[key] = {}
         
-    data["mcpServers"]["pdf-study"] = {
+    data[key]["pdf-study"] = {
         "command": command,
         "args": ["-m", "pdf_study"]
     }
@@ -153,7 +152,7 @@ while [[ $# -gt 0 ]]; do
       check_env
       exit 0
       ;;
-    --claude|--codex|--antigravity-cli|--gemini)
+    --claude|--codex|--antigravity-cli)
       TARGETS+=("${1#--}")
       shift
       ;;
@@ -166,7 +165,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-  TARGETS=("claude" "codex" "antigravity-cli" "gemini")
+  TARGETS=("claude" "codex" "antigravity-cli")
 fi
 
 echo "Creating project-local venv: $VENV_DIR"
