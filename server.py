@@ -245,17 +245,19 @@ def scan_pdf(
     scan_size: int = 30,
     force_vision: bool = False,
 ) -> dict[str, Any]:
-    """PDF 메타 + 챕터 경계 소스(내장 목차 또는 목차 페이지 이미지) + offset.
+    """PDF 메타 + 챕터 경계 소스(내장 목차 또는 목차 페이지 OCR) + offset.
 
     챕터 경계는 텍스트 레이어를 신뢰하지 않고 두 소스에서만 얻습니다:
     응답.data.recommendations.primary_mode 가
       - "from_outline": PDF 내장 목차(북마크)로 챕터를 구성. suggested_chapters에
         담겨 옵니다. **사용자에게 보여 확인**받고, 맞으면 그대로 set_chapters.
         **틀리면 scan_pdf(work_id, force_vision=True)로 재호출**하면 목차 페이지를
-        이미지로 렌더해 vision으로 다시 읽습니다.
+        이미지로 렌더하고 서버가 PaddleOCR CPU 텍스트를 함께 제공합니다.
       - "analyze_toc_from_images": 내장 목차가 없음. 응답.data.toc_page_images
-        (목차 페이지 JPEG 경로)를 vision으로 직접 읽어 챕터를 구성하세요.
+        (목차 페이지 JPEG 경로, ocr_text, ocr_error)를 바탕으로 챕터를 구성하세요.
         **PDF 텍스트나 파이썬 스크립트로 목차를 추정하지 마세요.**
+    force_vision은 외부 계약 호환용 legacy 이름이며, 현재 동작은 목차 페이지
+    이미지 렌더 + 서버 OCR 텍스트 제공입니다.
 
     **페이지 오프셋 + 선택지 흐름 (필수)**:
     recommendations에 page_offset(물리 = 책 + offset), offset_confidence,
@@ -273,8 +275,9 @@ def scan_pdf(
         return _err(rec.get("reason") or "scan rejected", data=data)
     next_action = (
         f'set_chapters(work_id="{work_id}", chapters=<from_outline면 '
-        "recommendations.suggested_chapters, 아니면 toc_page_images를 vision으로 읽어 "
-        '구성>, execution_mode=<사용자 선택>, extraction_mode=<사용자 선택>, book_info={...})'
+        "recommendations.suggested_chapters, 아니면 toc_page_images[].ocr_text와 "
+        'path 이미지를 확인해 구성>, execution_mode=<사용자 선택>, '
+        "extraction_mode=<사용자 선택>, book_info={...})"
     )
     return _ok(data, next_action=next_action)
 

@@ -10,6 +10,16 @@ import pytest
 from pdf_study import server, workspace
 
 
+@pytest.fixture(autouse=True)
+def stub_scan_toc_ocr(monkeypatch):
+    """scan_pdf 목차 OCR 테스트가 실제 PaddleOCR 모델을 로드하지 않게 한다."""
+    class StubWorker:
+        def process_image(self, img_path):
+            return "목차 OCR 텍스트"
+
+    monkeypatch.setattr(server.ocr, "get_ocr_worker", lambda: StubWorker())
+
+
 def _check_envelope(resp: dict) -> None:
     """모든 도구는 {ok, error, data, next_action} 형태로 응답해야 한다."""
     assert set(resp.keys()) == {"ok", "error", "data", "next_action"}
@@ -349,10 +359,10 @@ def test_save_extension_result_rejects_empty_extension(tmp_path, ko_short):
 
 
 # ---------------------------------------------------------------------------
-# scan_pdf — 텍스트 레이어 없어도 거부하지 않고 vision 경로
+# scan_pdf — 텍스트 레이어 없어도 거부하지 않고 목차 이미지 OCR 경로
 # ---------------------------------------------------------------------------
 
-def test_scan_pdf_scanned_routes_to_vision_not_rejected(tmp_path, scanned_empty):
+def test_scan_pdf_scanned_routes_to_toc_ocr_not_rejected(tmp_path, scanned_empty):
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
     r = server.scan_pdf(wid)
     _check_envelope(r)
@@ -360,6 +370,9 @@ def test_scan_pdf_scanned_routes_to_vision_not_rejected(tmp_path, scanned_empty)
     rec = r["data"]["recommendations"]
     assert rec["primary_mode"] == "analyze_toc_from_images"
     assert r["data"]["toc_page_images"]
+    assert r["data"]["toc_page_images"][0]["ocr_text"] == "목차 OCR 텍스트"
+    assert r["data"]["toc_page_images"][0]["ocr_error"] is None
+    assert "ocr_text" in r["next_action"]
     # 텍스트는 응답에 노출되지 않는다
     assert "scanned_text" not in r["data"]
 
@@ -418,7 +431,7 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
 
     r2 = server.scan_pdf(wid)
     _check_envelope(r2); assert r2["ok"]
-    # ko_short은 내장 목차가 없어 vision 경로 — 챕터는 직접 구성
+    # ko_short은 내장 목차가 없어 목차 OCR 경로 — 챕터는 직접 구성
     chs = [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}]
 
     r3 = _sc(wid, chs, book_info={"title": "T", "author": "A"})

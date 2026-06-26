@@ -10,6 +10,7 @@ from typing import Any
 
 from . import lang, workspace
 from .pdf import chapter as chapter_mod
+from .pdf import ocr
 from .pdf import reader
 
 logger = logging.getLogger(__name__)
@@ -69,9 +70,9 @@ def _with_offset_meta(
 
     source:
       - "outline": 내장 목차(북마크)로 챕터를 구성함. 사용자에게 보여 확인받고,
-        틀리면 force_vision=True로 vision 재분석하라는 4택 안내.
-      - "vision":  내장 목차가 없어 toc_page_images를 vision으로 읽어야 함.
-        텍스트/스크립트 추정 금지 + 이미지 직독 안내 + 3택.
+        틀리면 force_vision=True로 목차 이미지 OCR 재스캔을 하라는 4택 안내.
+      - "vision":  legacy 이름. 내장 목차가 없어 toc_page_images와 서버 OCR
+        텍스트를 바탕으로 챕터를 구성해야 함. 텍스트/스크립트 추정 금지 + 3택.
     """
     _annotate_printed_ranges(reco["suggested_chapters"], page_offset)
     if reco.get("chunk_fallback"):
@@ -123,23 +124,25 @@ def _with_offset_meta(
             + choices_policy
             + "① 이대로 진행 → suggested_chapters를 그대로 set_chapters. "
             "② 목차가 틀림 → scan_pdf(work_id, force_vision=True)로 목차 페이지를 "
-            "이미지로 렌더해 vision으로 다시 읽고 재구성. "
+            "이미지로 렌더하고 서버가 제공한 OCR 텍스트를 바탕으로 재구성. "
             "③ 직접 입력. ④ 청크. " + manual_chunk
         )
-    else:  # vision
+    else:  # legacy vision branch: 목차 이미지 OCR 경로
         reco["user_choices"] = ["proceed", "manual_pdf_pages", "chunks"]
         reco["next_step_guidance"] = (
-            "[목차 vision 분석] 내장 목차가 없습니다. **PDF 텍스트레이어나 파이썬 "
+            "[목차 OCR 분석] 내장 목차가 없습니다. **PDF 텍스트레이어나 파이썬 "
             "스크립트로 목차를 추정하지 마세요 — 스캔본·글꼴 깨진 PDF에서 잘못된 "
-            "페이지가 나옵니다.** 반드시 응답의 toc_page_images[].path 이미지를 "
-            "vision으로 한 장씩 읽어 ① 최상위 챕터 항목만(하위 절 '1.1' 무시) 골라 각 "
-            "항목의 책 페이지번호를 읽고, ② 꼬리말 인쇄번호와 물리 페이지를 대조해 "
-            "offset(물리 = 책 + offset)을 검증한 뒤 from_toc 챕터를 구성하세요"
+            "페이지가 나옵니다.** 응답의 toc_page_images[].ocr_text를 바탕으로 "
+            "① 최상위 챕터 항목만(하위 절 '1.1' 무시) 골라 각 항목의 책 페이지번호를 "
+            "읽고, ② toc_page_images[].path 이미지의 꼬리말 인쇄번호와 물리 페이지를 "
+            "대조해 offset(물리 = 책 + offset)을 검증한 뒤 from_toc 챕터를 구성하세요"
             + (f" (서버 추정 offset {page_offset}은 참고만, 이미지로 검증). "
                if off_known else " (서버가 offset 미측정 → 이미지로 직접 추정). ")
-            + "suggested_chapters는 비어 있습니다(서버는 vision 없이 챕터를 제안하지 "
-            "않음). chunk_fallback은 목차를 도저히 못 읽을 때만. 본문 언어도 파악해 "
-            "set_chapters(language=\"ko\"|\"en\")로 전달하세요. "
+            + "suggested_chapters는 비어 있습니다(서버는 OCR 텍스트를 제공하지만 "
+            "챕터 경계를 자동 확정하지 않음). ocr_error가 있거나 OCR 텍스트만으로 "
+            "부족하면 path 이미지를 확인하세요. chunk_fallback은 목차를 도저히 못 "
+            "읽을 때만. 본문 언어도 파악해 set_chapters(language=\"ko\"|\"en\")로 "
+            "전달하세요. "
             + excerpt_note + two_number + choices_policy
             + "① 이대로 진행 ② 직접 입력 ③ 청크. " + manual_chunk
         )
@@ -152,13 +155,13 @@ def _build_recommendations(
     page_offset: int | None = None,
     offset_confidence: str = "none",
 ) -> dict[str, Any]:
-    """챕터 분리 추천을 만든다 — 내장 목차(outline) 우선, 없으면 vision.
+    """챕터 분리 추천을 만든다 — 내장 목차(outline) 우선, 없으면 목차 이미지 OCR.
 
     텍스트 레이어는 신뢰하지 않는다(스캔본·깨진 PDF에서 정렬이 깨져 잘못된
     목차가 나옴). 챕터 경계의 정당한 소스는 둘뿐:
       - outline_chapters 있음 → from_outline (북마크 = 물리 페이지 직접 지정).
-        사용자 확인 후, 틀리면 force_vision=True로 vision 재분석.
-      - 없음 → analyze_toc_from_images (toc_page_images를 vision으로 직독).
+        사용자 확인 후, 틀리면 force_vision=True로 목차 이미지 OCR 재스캔.
+      - 없음 → analyze_toc_from_images (toc_page_images[].ocr_text 기반 구성).
 
     page_offset: 물리 = 인쇄(책) + offset. None이면 미측정.
     비거부 응답에는 _with_offset_meta로 page_offset/offset_confidence,
@@ -170,7 +173,7 @@ def _build_recommendations(
             "primary_mode": "from_outline" | "analyze_toc_from_images",
             "primary_reason": str,
             "suggested_chapters": [{... "page_range":[s,e], "printed_range":[s,e]|None}],
-            "chunk_fallback": [...],         # vision 경로에서만
+            "chunk_fallback": [...],         # 이미지 OCR 경로에서만
             "alternatives": [str, ...],
             "page_offset": int | None,
             "offset_confidence": "high" | "low" | "none",
@@ -186,34 +189,65 @@ def _build_recommendations(
             "primary_reason": (
                 f"PDF 내장 목차(북마크)에서 챕터 {len(outline_chapters)}개를 "
                 "구성했습니다. 물리 페이지를 직접 가리켜 정확하나, 발췌본·오류 대비 "
-                "사용자 확인을 받으세요(틀리면 force_vision=True로 vision 재분석)."
+                "사용자 확인을 받으세요(틀리면 force_vision=True로 목차 이미지 OCR 재스캔)."
             ),
             "suggested_chapters": outline_chapters,
             "alternatives": [
-                "force_vision=True 로 목차 페이지를 vision 재분석",
+                "force_vision=True 로 목차 페이지를 렌더하고 OCR 텍스트 확인",
                 f"chunks ({DEFAULT_CHUNK_SIZE}p 단위 균등 분할)",
             ],
         }, page_offset, offset_confidence, page_count, source="outline")
 
-    # 내장 목차 없음 → vision. 서버는 챕터를 제안하지 않고, 에이전트가
-    # toc_page_images를 읽어 from_toc를 직접 구성한다. 청크는 '목차를 못 읽을
-    # 때만' 쓰는 최후 수단이라 suggested_chapters가 아니라 chunk_fallback에 둔다.
+    # 내장 목차 없음 → 목차 페이지 이미지 + OCR 텍스트. 서버는 챕터를 제안하지
+    # 않고, 에이전트가 toc_page_images[].ocr_text와 이미지를 확인해 from_toc를
+    # 직접 구성한다. 청크는 '목차를 못 읽을 때만' 쓰는 최후 수단이라
+    # suggested_chapters가 아니라 chunk_fallback에 둔다.
     return _with_offset_meta({
         "rejected": False,
         "reason": None,
         "primary_mode": "analyze_toc_from_images",
         "primary_reason": (
-            "내장 목차가 없습니다. toc_page_images를 vision으로 읽어 챕터를 "
-            "구성하세요(텍스트·스크립트 추정 금지). 목차를 도저히 못 읽을 때만 "
+            "내장 목차가 없습니다. toc_page_images[].ocr_text를 바탕으로 챕터를 "
+            "구성하세요(텍스트·스크립트 추정 금지). OCR 텍스트가 부족하거나 "
+            "ocr_error가 있으면 path 이미지를 확인하세요. 목차를 도저히 못 읽을 때만 "
             "chunk_fallback(또는 single_unit)을 쓰세요."
         ),
-        "suggested_chapters": [],  # 에이전트가 이미지 분석으로 채운다
+        "suggested_chapters": [],  # 에이전트가 OCR 텍스트와 이미지를 확인해 채운다
         "chunk_fallback": chapter_mod.make_chunks(page_count, DEFAULT_CHUNK_SIZE),
         "alternatives": [
             f"chunk_fallback ({DEFAULT_CHUNK_SIZE}p 단위 균등 분할)",
             "single_unit (전체 1챕터)",
         ],
     }, page_offset, offset_confidence, page_count, source="vision")
+
+
+def _attach_toc_ocr(toc_page_images: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """렌더된 목차 페이지 이미지마다 PaddleOCR CPU 결과를 덧붙인다.
+
+    OCR은 목차 경계의 보조 입력일 뿐 scan_pdf 전체 성공 여부를 결정하지 않는다.
+    일부 페이지 실패는 해당 항목의 ocr_error에 남기고 나머지 페이지를 계속 처리한다.
+    """
+    try:
+        worker = ocr.get_ocr_worker()
+    except Exception as exc:
+        logger.warning("toc OCR worker initialization failed: %s", exc)
+        for item in toc_page_images:
+            item["ocr_text"] = ""
+            item["ocr_error"] = str(exc)
+        return toc_page_images
+
+    for item in toc_page_images:
+        try:
+            text = worker.process_image(item["path"])
+        except Exception as exc:
+            logger.warning("toc page OCR failed for %s: %s", item.get("path"), exc)
+            item["ocr_text"] = ""
+            item["ocr_error"] = str(exc)
+            continue
+
+        item["ocr_text"] = text
+        item["ocr_error"] = None
+    return toc_page_images
 
 
 def _outline_to_chapters(
@@ -257,13 +291,14 @@ def scan_pdf_impl(
     scan_size: int = DEFAULT_SCAN_SIZE,
     force_vision: bool = False,
 ) -> dict[str, Any]:
-    """PDF 스캔: 메타 + 챕터 경계 소스(내장 목차 또는 목차 페이지 이미지) + offset.
+    """PDF 스캔: 메타 + 챕터 경계 소스(내장 목차 또는 목차 페이지 OCR) + offset.
 
     챕터 경계 소스는 두 가지뿐이다(텍스트 레이어는 신뢰하지 않는다):
       (1) 내장 목차(doc.get_toc) → 물리 페이지를 직접 가리켜 정확·무비용.
-      (2) 없으면 목차 페이지를 JPEG로 렌더(toc_page_images) → 에이전트가 vision
-          으로 직독.
-    force_vision=True면 (1)을 건너뛰고 항상 (2)로 간다(내장 목차가 틀렸을 때).
+      (2) 없으면 목차 페이지를 JPEG로 렌더(toc_page_images)하고 서버가
+          PaddleOCR CPU 결과(ocr_text/ocr_error)를 함께 제공한다.
+    force_vision=True는 외부 계약 호환용 legacy 이름이다. True면 (1)을 건너뛰고
+    항상 (2)로 간다(내장 목차가 틀렸을 때).
 
     state.json에 language, page_count, page_offset을 채우고
     phases.scanning을 completed로 갱신한다. extraction_mode는 set_chapters에서
@@ -303,7 +338,7 @@ def scan_pdf_impl(
         outline_chapters = _outline_to_chapters(outline, page_count)
         use_outline = bool(outline_chapters)
 
-        # (2) 내장 목차가 없으면 목차 페이지를 렌더해 vision으로 읽게 한다.
+        # (2) 내장 목차가 없으면 목차 페이지를 렌더하고 OCR 텍스트를 붙인다.
         toc_page_images: list[dict[str, Any]] = []
         if not use_outline and scan_end > 0:
             toc_pages = (
@@ -313,6 +348,7 @@ def scan_pdf_impl(
             toc_page_images = reader.render_pages(
                 doc, toc_pages[0], toc_pages[-1], workspace.pages_dir(work_id),
             )
+            _attach_toc_ocr(toc_page_images)
     finally:
         doc.close()
 
@@ -355,7 +391,7 @@ def scan_pdf_impl(
         "page_offset": page_offset,
         "page_offset_confidence": offset_confidence,
         "outline_present": use_outline,
-        # 내장 목차가 없을 때만 채워진다 — 에이전트가 vision으로 읽을 목차 페이지 이미지
+        # 내장 목차가 없을 때만 채워진다 — 목차 페이지 이미지와 서버 OCR 결과
         "toc_page_images": toc_page_images,
         "recommendations": recommendations,
     }
