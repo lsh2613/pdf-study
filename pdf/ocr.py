@@ -19,18 +19,17 @@ class OCRWorker:
         if not cls._instance:
             with cls._lock:
                 if not cls._instance:
-                    cls._instance = super(OCRWorker, cls).__new__(cls)
-                    cls._instance._initialized = False
+                    instance = super(OCRWorker, cls).__new__(cls)
+                    instance._ocr = None
+                    instance._init_lock = threading.Lock()
+                    cpu_count = os.cpu_count() or 1
+                    max_workers = max(1, min(cpu_count // 2, 2))
+                    instance.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+                    cls._instance = instance
         return cls._instance
 
     def __init__(self):
-        if not self._initialized:
-            self._ocr = None
-            self._init_lock = threading.Lock()
-            cpu_count = os.cpu_count() or 1
-            max_workers = max(1, min(cpu_count // 2, 2))
-            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
-            self._initialized = True
+        pass
 
     def _get_ocr(self):
         if self._ocr is None:
