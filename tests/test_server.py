@@ -258,6 +258,54 @@ def test_get_chapter_content_ocr_next_action_only_mentions_question_count(tmp_pa
     assert "요약 길이" not in content["next_action"]
 
 
+def test_get_chapter_content_ocr_lazy_extraction(tmp_path, ko_short, mocker):
+    """OCR 모드에서 get_chapter_content가 페이지를 순차적으로 추출하고 상태에 캐시한다.
+    실패한 페이지는 '[해당 페이지 OCR 실패]'를 삽입한다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    r = server.set_chapters(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
+        execution_mode="sequential",
+        extraction_mode="ocr",
+        language="ko",
+    )
+    assert r["ok"]
+
+    # Mock OCRWorker
+    class MockWorker:
+        def __init__(self):
+            self.call_count = 0
+        def process_image(self, img_path):
+            self.call_count += 1
+            if self.call_count == 1:
+                return [[[[[0,0], [0,0], [0,0], [0,0]], ("페이지 1 텍스트", 0.99)]]]
+            else:
+                raise RuntimeError("OCR Failed")
+
+    mock_worker = MockWorker()
+    mocker.patch("pdf_study.server.ocr.get_ocr_worker", return_value=mock_worker)
+
+    # First call - should trigger extraction
+    content = server.get_chapter_content(wid, "ch1")
+    assert content["ok"]
+    data = content["data"]
+    assert "text" in data
+    assert "페이지 1 텍스트" in data["text"]
+    assert "[해당 페이지 OCR 실패]" in data["text"]
+
+    # Check that it was cached in state
+    state = server.workspace.load_state(wid)
+    assert state["chapters"]["ch1"]["body_text"] == data["text"]
+
+    # Second call - should use cache
+    mock_worker.call_count = 0
+    content2 = server.get_chapter_content(wid, "ch1")
+    assert content2["ok"]
+    assert content2["data"]["text"] == data["text"]
+    assert mock_worker.call_count == 0  # Should not be called again
+
+
 def test_mark_chapter_in_progress_guards_done_and_missing(tmp_path, ko_short):
     """in_progress 마킹은 completed/skipped를 안 건드리고, 없는 챕터는 조용히 무시."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
