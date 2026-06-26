@@ -15,6 +15,8 @@ dependencies = [
     # 요약 마크다운 → HTML 변환(렌더러). rich가 이미 끌어오는 전이 의존성이라
     # 실제 설치되는 패키지는 늘지 않으나, 직접 import하므로 정직하게 명시한다.
     "markdown-it-py>=2.2.0",
+    "paddlepaddle",
+    "paddleocr>=2.7.0",
 ]
 
 [project.optional-dependencies]
@@ -46,3 +48,9 @@ include-package-data = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-mock>=3.15.1",
+]

@@ -16,6 +16,7 @@ from mcp.server.fastmcp import FastMCP
 
 from . import analysis, exa_client, prompts, workspace
 from .renderer import RENDERERS
+from .pdf import ocr
 
 logger = logging.getLogger(__name__)
 
@@ -468,16 +469,34 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
     # 본문을 받아간 시점 = 요약 처리 시작 → 진행 모니터링용 in_progress 마킹
     workspace.mark_chapter_in_progress(work_id, chapter_id, kind="summary")
     if "page_images" in raw:  # ocr 모드
-        guide = (
-            f"이 챕터({chapter_id})의 page_images를 **순서대로** 멀티모달로 읽어 "
-            "본문을 직접 파악(OCR)하세요. 읽어낸 글자수로 문제 개수를 정하고, "
-            "summarizer_prompt 스키마대로 결과를 만들어 "
-        )
-    else:  # text 모드
-        guide = (
-            f"이 챕터({chapter_id})의 text를 읽고 "
-            "summarizer_prompt 스키마대로 요약·문제를 만들어 "
-        )
+        # 캐싱 확인 및 지연 추출
+        state = workspace.load_state(work_id)
+        chapter_state = state.get("chapters", {}).get(chapter_id, {})
+        if "body_text" in chapter_state:
+            raw["text"] = chapter_state["body_text"]
+        else:
+            worker = ocr.get_ocr_worker()
+            extracted = []
+            for img_path in raw["page_images"]:
+                try:
+                    result = worker.process_image(img_path)
+                    if result and result[0]:
+                        page_text = "\n".join(item[1][0] for item in result[0])
+                        extracted.append(page_text)
+                    else:
+                        extracted.append("")
+                except Exception:
+                    extracted.append("[해당 페이지 OCR 실패]")
+            body_text = "\n\n".join(extracted)
+            raw["text"] = body_text
+            workspace.update_chapter_status(work_id, chapter_id, body_text=body_text)
+
+        del raw["page_images"]
+
+    guide = (
+        f"이 챕터({chapter_id})의 text를 읽고 "
+        "summarizer_prompt 스키마대로 요약·문제를 만들어 "
+    )
     return _ok(raw, next_action=(
         guide + f"save_chapter_result(work_id=\"{work_id}\", "
         f"chapter_id=\"{chapter_id}\", data=...)로 저장하세요. extension이 "
@@ -527,14 +546,17 @@ def save_chapter_result(
     """summarizer sub-agent의 챕터 결과 JSON을 저장합니다.
 
     스키마는 get_subagent_prompts의 summarizer_prompt에 명시. 동시성 안전.
-    OCR 모드에서 결과에 `body_text`(이미지에서 전사한 본문 전체)가 있으면
-    chapters_raw/ch{N}.json의 `text`로 보존된다(text 모드와 동일 형태).
 
     저장 전 필수 값(summary·key_points·활성 문제 유형)이 모두 채워졌는지 검증한다.
     하나라도 비었으면 completed로 마킹하지 않고 ok=False로 거부 — "모두 성공"이라
     단정했지만 실제로 누락된 결과가 조용히 completed 되는 것을 막는다.
     """
     options = workspace.load_state(work_id).get("question_options", {})
+    
+    # 에이전트가 예전 프롬프트나 환각으로 body_text를 보내더라도 
+    # 서버의 캐시(get_chapter_content에서 추출한 text)를 덮어쓰지 않도록 제거
+    data.pop("body_text", None)
+
     missing = _missing_summary_fields(data, options)
     if missing:
         return _err(

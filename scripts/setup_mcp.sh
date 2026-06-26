@@ -63,6 +63,7 @@ modules = {
     "PIL": "pillow",
     "rich": "rich",
     "markdown_it": "markdown-it-py",
+    "paddleocr": "paddleocr",
     "pdf_study": "pdf-study",
 }
 
@@ -109,6 +110,14 @@ echo "Creating project-local venv: $VENV_DIR"
 echo "Installing pdf-study into: $VENV_DIR"
 "$VENV_PY" -m pip install -U pip setuptools wheel
 "$VENV_PY" -m pip install -e "$REPO_DIR"
+
+if [[ "$(uname)" == "Darwin" ]]; then
+  echo ""
+  echo "Note: If you are on macOS (Intel or Apple Silicon), PaddleOCR requires OpenMP."
+  echo "If paddleocr fails to import, please run: brew install libomp"
+  echo ""
+fi
+
 
 check_env
 
