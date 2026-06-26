@@ -2,13 +2,19 @@
 set -euo pipefail
 
 usage() {
-  cat <<'EOF'
-Usage: scripts/setup_mcp.sh [--print-config] [--check] [--help]
+  cat <<'INNER_EOF'
+Usage: scripts/setup_mcp.sh [--print-config] [--check] [--claude] [--codex] [--antigravity-cli] [--gemini] [--help]
 
 Create a project-local .venv for pdf-study, install this package into it,
-verify required runtime dependencies, and print a copyable MCP config snippet.
+verify required runtime dependencies, and automatically apply MCP config to clients.
 
 Options:
+  --claude         Apply config to Claude Desktop.
+  --codex          Apply config to Codex.
+  --antigravity-cli Apply config to Antigravity CLI.
+  --gemini         Apply config to Gemini.
+  (If no targets are specified, config is applied to all four.)
+
   --print-config   Print the MCP config JSON for this checkout and exit.
   --check          Verify the existing .venv can import required dependencies.
   --help           Show this help.
@@ -16,7 +22,7 @@ Options:
 Environment:
   PYTHON           Python executable used to create the venv (default: python3).
   PDF_STUDY_VENV   Override venv path (default: <repo>/.venv).
-EOF
+INNER_EOF
 }
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -28,7 +34,6 @@ VENV_PY="$VENV_DIR/bin/python"
 print_config() {
   "$PYTHON_BIN" - "$VENV_PY" <<'PY'
 from __future__ import annotations
-
 import json
 import sys
 
@@ -44,6 +49,55 @@ print(json.dumps({
 PY
 }
 
+apply_config() {
+  "$VENV_PY" - "$VENV_PY" "$@" <<'PY'
+from __future__ import annotations
+import json
+import sys
+import os
+
+command = sys.argv[1]
+targets = sys.argv[2:]
+
+CONFIG_PATHS = {
+    "claude": os.path.expanduser("~/Library/Application Support/Claude/claude_desktop_config.json"),
+    "codex": os.path.expanduser("~/.codex/config/mcp.json"),
+    "antigravity-cli": os.path.expanduser("~/.gemini/antigravity-cli/mcp.json"),
+    "gemini": os.path.expanduser("~/.gemini/config/mcp.json")
+}
+
+for target in targets:
+    path = CONFIG_PATHS.get(target)
+    if not path:
+        continue
+    
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    
+    data = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+            
+    if "mcpServers" not in data:
+        data["mcpServers"] = {}
+        
+    data["mcpServers"]["pdf-study"] = {
+        "command": command,
+        "args": ["-m", "pdf_study"]
+    }
+    
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"✅ Successfully updated {target} MCP config at: {path}")
+    except Exception as e:
+        print(f"❌ Failed to update {target} config: {e}", file=sys.stderr)
+PY
+}
+
 check_env() {
   if [[ ! -x "$VENV_PY" ]]; then
     echo "Missing venv Python: $VENV_PY" >&2
@@ -53,7 +107,6 @@ check_env() {
 
   "$VENV_PY" - <<'PY'
 from __future__ import annotations
-
 import importlib
 import sys
 
@@ -84,24 +137,36 @@ print(f"pdf-study MCP environment OK: {sys.executable}")
 PY
 }
 
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  usage
-  exit 0
-fi
+TARGETS=()
 
-if [[ "${1:-}" == "--print-config" ]]; then
-  print_config
-  exit 0
-fi
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --print-config)
+      print_config
+      exit 0
+      ;;
+    --check)
+      check_env
+      exit 0
+      ;;
+    --claude|--codex|--antigravity-cli|--gemini)
+      TARGETS+=("${1#--}")
+      shift
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
 
-if [[ "${1:-}" == "--check" ]]; then
-  check_env
-  exit 0
-fi
-
-if [[ $# -gt 0 ]]; then
-  usage >&2
-  exit 2
+if [[ ${#TARGETS[@]} -eq 0 ]]; then
+  TARGETS=("claude" "codex" "antigravity-cli" "gemini")
 fi
 
 echo "Creating project-local venv: $VENV_DIR"
@@ -150,14 +215,8 @@ if [[ "$(uname)" == "Darwin" ]]; then
   fi
 fi
 
-
 check_env
 
-cat <<EOF
-
-Copy this MCP config into your MCP client settings.
-Use the absolute command path exactly as printed; do not replace it with
-"python", "~", or a relative path.
-
-EOF
-print_config
+echo ""
+echo "Applying MCP config to selected clients: ${TARGETS[*]}"
+apply_config "${TARGETS[@]}"
