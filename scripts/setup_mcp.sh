@@ -106,6 +106,12 @@ fi
 
 echo "Creating project-local venv: $VENV_DIR"
 
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv not found. Attempting to install uv automatically for zero-touch setup..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh || true
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
 if command -v uv >/dev/null 2>&1; then
   echo "uv detected. Forcing uv to download and use Python 3.13 for the local environment..."
   uv venv --python 3.13 "$VENV_DIR"
@@ -131,10 +137,17 @@ else
 fi
 
 if [[ "$(uname)" == "Darwin" ]]; then
-  echo ""
-  echo "Note: If you are on macOS (Intel or Apple Silicon), PaddleOCR requires OpenMP."
-  echo "If paddleocr fails to import, please run: brew install libomp"
-  echo ""
+  if ! brew list libomp >/dev/null 2>&1; then
+    echo "macOS detected. PaddleOCR requires OpenMP."
+    if command -v brew >/dev/null 2>&1; then
+      echo "Installing libomp automatically via Homebrew..."
+      brew install libomp
+    else
+      echo "Warning: Homebrew not found. Please install libomp manually: brew install libomp"
+    fi
+  else
+    echo "libomp is already installed."
+  fi
 fi
 
 
