@@ -87,10 +87,7 @@ INPUT_MODE_OCR_KO = """\
 (페이지 JPEG 절대경로)를 순서대로 멀티모달 입력으로 읽어 본문을 직접
 파악하세요(=OCR). 흐릿하거나 깨져 보이는 기술용어·식별자·예약어
 (예: SERIALIZABLE, KEY_BLOCK_SIZE, select_type)는 문맥으로 복원하세요.
-읽어낸 본문의 글자수를 헤아려 위의 문제 개수 표를 적용하세요.
-**또한 이미지에서 읽어낸 본문 전체를 출력 JSON의 `body_text` 필드에 그대로
-담으세요**(요약이 아니라 전사한 원문 — 페이지 순서대로 이어붙임). 서버가 이를
-raw_data에 보존합니다.""".strip()
+읽어낸 본문의 글자수를 헤아려 위의 문제 개수 표를 적용하세요.""".strip()
 
 INPUT_MODE_TEXT_EN = """\
 [Input mode — body text]
@@ -104,10 +101,7 @@ No body text is provided. Read the `page_images` (absolute JPEG paths) from
 get_chapter_content in order, as multimodal input, to recover the body yourself
 (=OCR). Reconstruct blurry/garbled technical terms, identifiers, and keywords
 (e.g. SERIALIZABLE, KEY_BLOCK_SIZE, select_type) from context. Count the chars
-you read and apply the question counts table above.
-**Also put the full transcribed body (not a summary — the verbatim text you read,
-concatenated in page order) into the `body_text` field of the output JSON.** The
-server preserves it in raw_data.""".strip()
+you read and apply the question counts table above.""".strip()
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +139,6 @@ _SUMMARIZER_KO = """\
   "title": "<주어진 title 그대로>",
   "summary": "<한국어 요약 (마크다운, 서브 챕터가 있으면 서브 챕터별 섹션)>",
   "key_points": ["...", "..."],
-  "body_text": "<OCR 모드에서만: 페이지 이미지에서 전사한 본문 전체. text 모드는 생략>",
   "questions": {{
     "multiple_choice": [
       {{
@@ -200,7 +193,6 @@ type literal `\\n` characters (the tool handles JSON serialization).
   "title": "<as given>",
   "summary": "<English summary (Markdown, sectioned by subchapter when present)>",
   "key_points": ["...", "..."],
-  "body_text": "<OCR mode only: full verbatim body transcribed from page images. Omit in text mode>",
   "questions": {{
     "multiple_choice": [
       {{"id": "mc_1", "question": "...", "options": ["A","B","C","D"], "answer_index": 0, "explanation": "..."}}

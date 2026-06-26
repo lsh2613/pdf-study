@@ -546,14 +546,17 @@ def save_chapter_result(
     """summarizer sub-agent의 챕터 결과 JSON을 저장합니다.
 
     스키마는 get_subagent_prompts의 summarizer_prompt에 명시. 동시성 안전.
-    OCR 모드에서 결과에 `body_text`(이미지에서 전사한 본문 전체)가 있으면
-    chapters_raw/ch{N}.json의 `text`로 보존된다(text 모드와 동일 형태).
 
     저장 전 필수 값(summary·key_points·활성 문제 유형)이 모두 채워졌는지 검증한다.
     하나라도 비었으면 completed로 마킹하지 않고 ok=False로 거부 — "모두 성공"이라
     단정했지만 실제로 누락된 결과가 조용히 completed 되는 것을 막는다.
     """
     options = workspace.load_state(work_id).get("question_options", {})
+    
+    # 에이전트가 예전 프롬프트나 환각으로 body_text를 보내더라도 
+    # 서버의 캐시(get_chapter_content에서 추출한 text)를 덮어쓰지 않도록 제거
+    data.pop("body_text", None)
+
     missing = _missing_summary_fields(data, options)
     if missing:
         return _err(
