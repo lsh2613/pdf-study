@@ -275,6 +275,9 @@ def test_get_chapter_content_ocr_returns_precomputed_text_without_lazy_ocr(
     assert workspace.get_chapter_raw(wid, "ch1")["text"] == (
         "페이지 OCR 텍스트\n\n페이지 OCR 텍스트"
     )
+    raw_with_legacy_images = workspace.get_chapter_raw(wid, "ch1")
+    raw_with_legacy_images["page_images"] = [{"path": "legacy.jpg"}]
+    workspace.save_chapter_raw(wid, "ch1", raw_with_legacy_images)
 
     class FailingWorker:
         def process_image(self, img_path):
@@ -291,6 +294,160 @@ def test_get_chapter_content_ocr_returns_precomputed_text_without_lazy_ocr(
     content2 = server.get_chapter_content(wid, "ch1")
     assert content2["ok"]
     assert content2["data"]["text"] == data["text"]
+
+
+def test_save_chapter_result_accepts_without_body_text(tmp_path, ko_short):
+    """body_text 없이도 요약/문제 저장은 정상 완료된다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    r = server.save_chapter_result(wid, "ch1", _result())
+
+    assert r["ok"], r
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "completed"
+
+
+def test_save_chapter_result_body_text_does_not_overwrite_ocr_raw(
+    tmp_path, ko_short, monkeypatch
+):
+    """server 경계로 body_text가 들어와도 OCR raw text/char_count는 유지된다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+
+    class MockWorker:
+        def process_image(self, img_path):
+            return "선계산 OCR 본문"
+
+    monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda: MockWorker())
+    r = server.set_chapters(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
+        execution_mode="sequential",
+        extraction_mode="ocr",
+        language="ko",
+    )
+    assert r["ok"], r
+    raw0 = workspace.get_chapter_raw(wid, "ch1")
+
+    data = _result()
+    data["body_text"] = "서브에이전트가 보낸 덮어쓰기 후보"
+    r = server.save_chapter_result(wid, "ch1", data)
+
+    assert r["ok"], r
+    raw1 = workspace.get_chapter_raw(wid, "ch1")
+    assert raw1 == raw0
+    assert workspace.load_state(wid)["chapters"]["ch1"]["char_count"] == raw0["char_count"]
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_code"),
+    [
+        ("raw_missing", "raw_missing"),
+        ("text_missing", "text_missing"),
+        ("char_count_mismatch", "char_count_mismatch"),
+        ("failed_status", "ocr_failed"),
+    ],
+)
+def test_get_subagent_prompts_rejects_invalid_ocr_raw(
+    tmp_path, ko_short, monkeypatch, case, expected_code
+):
+    """OCR 모드에서 raw text/char_count가 불완전하면 sub-agent 프롬프트를 주지 않는다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / f"out_{case}"))["data"]["work_id"]
+    server.scan_pdf(wid)
+
+    class MockWorker:
+        def process_image(self, img_path):
+            return "정상 OCR 본문"
+
+    monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda: MockWorker())
+    r = server.set_chapters(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
+        execution_mode="sequential",
+        extraction_mode="ocr",
+        language="ko",
+    )
+    assert r["ok"], r
+
+    if case == "raw_missing":
+        (workspace.chapters_raw_dir(wid) / "ch1.json").unlink()
+    elif case == "text_missing":
+        workspace.save_chapter_raw(wid, "ch1", {
+            "chapter_id": "ch1",
+            "title": "전체",
+            "page_range": [1, 1],
+            "char_count": 1,
+        })
+    elif case == "char_count_mismatch":
+        workspace.save_chapter_raw(wid, "ch1", {
+            "chapter_id": "ch1",
+            "title": "전체",
+            "page_range": [1, 1],
+            "text": "정상 OCR 본문",
+            "char_count": 999,
+        })
+    elif case == "failed_status":
+        workspace.update_chapter_status(
+            wid, "ch1", summary_status="failed", error="OCR failed"
+        )
+
+    r = server.get_subagent_prompts(wid)
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["required_fields"] == ["chapter_raw.text", "chapter_raw.char_count"]
+    invalid = r["data"]["invalid_chapters"]
+    assert invalid[0]["chapter_id"] == "ch1"
+    codes = {reason["code"] for reason in invalid[0]["reasons"]}
+    assert expected_code in codes
+
+
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        ("raw_missing", "raw_missing"),
+        ("char_count_mismatch", "char_count_mismatch"),
+    ],
+)
+def test_get_chapter_content_rejects_invalid_raw(
+    tmp_path, ko_short, monkeypatch, case, expected
+):
+    """get_chapter_content도 raw 누락/char_count 불일치를 실패로 반환한다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / f"out_content_{case}"))["data"]["work_id"]
+    server.scan_pdf(wid)
+
+    class MockWorker:
+        def process_image(self, img_path):
+            return "정상 OCR 본문"
+
+    monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda: MockWorker())
+    r = server.set_chapters(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
+        execution_mode="sequential",
+        extraction_mode="ocr",
+        language="ko",
+    )
+    assert r["ok"], r
+
+    if case == "raw_missing":
+        (workspace.chapters_raw_dir(wid) / "ch1.json").unlink()
+    else:
+        workspace.save_chapter_raw(wid, "ch1", {
+            "chapter_id": "ch1",
+            "title": "전체",
+            "page_range": [1, 1],
+            "text": "정상 OCR 본문",
+            "char_count": 999,
+            "page_images": [{"path": "must-not-return.jpg"}],
+        })
+
+    r = server.get_chapter_content(wid, "ch1")
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert expected in r["error"]
 
 
 def test_mark_chapter_in_progress_guards_done_and_missing(tmp_path, ko_short):

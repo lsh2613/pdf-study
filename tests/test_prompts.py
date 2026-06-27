@@ -87,12 +87,20 @@ def test_ocr_mode_uses_precomputed_text_input_block_and_workflow_note():
     out = prompts.build_prompts(_state(extraction_mode="ocr"))
     assert out["extraction_mode"] == "ocr"
     p = out["summarizer_prompt"]
+    workflow = out["workflow_instructions"]
     assert "[입력 방식 — OCR 선계산 본문 텍스트]" in p
     assert "get_chapter_content가 제공한 text" in p
     assert "page_images" not in p
+    assert "body_text" not in p
+    assert "vision" not in p.lower()
+    assert "비전" not in p
     assert "[입력 방식 — 본문 텍스트]" not in p
-    assert "[OCR 모드]" in out["workflow_instructions"]
-    assert "본문 text" in out["workflow_instructions"]
+    assert "[OCR 모드]" in workflow
+    assert "본문 text" in workflow
+    assert "page_images" not in workflow
+    assert "body_text" not in workflow
+    assert "vision" not in workflow.lower()
+    assert "비전" not in workflow
 
 
 def test_ocr_mode_english_input_block():

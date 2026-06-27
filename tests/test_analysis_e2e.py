@@ -193,8 +193,8 @@ def test_ocr_mode_set_chapters_precomputes_raw_text(
     assert "page_images" not in content
 
 
-def test_ocr_body_text_backfilled_to_raw(make_workspace, ko_with_toc):
-    """OCR: body_text backfill은 기존 raw text를 덮어쓸 수 있다."""
+def test_ocr_body_text_does_not_overwrite_raw(make_workspace, ko_with_toc):
+    """OCR: body_text가 들어와도 set_chapters의 canonical raw를 덮지 않는다."""
     wid, _ = make_workspace(ko_with_toc)
     analysis.scan_pdf_impl(wid)
     class MockWorker:
@@ -219,9 +219,9 @@ def test_ocr_body_text_backfilled_to_raw(make_workspace, ko_with_toc):
         "questions": {"multiple_choice": [], "short_answer": [], "reflection": []},
     })
     raw1 = workspace.get_chapter_raw(wid, "ch1")
-    assert raw1["text"] == body
-    assert raw1["char_count"] == len(body)
-    assert workspace.load_state(wid)["chapters"]["ch1"]["char_count"] == len(body)
+    assert raw1["text"] == "초기 OCR 본문"
+    assert raw1["char_count"] == len("초기 OCR 본문")
+    assert workspace.load_state(wid)["chapters"]["ch1"]["char_count"] == len("초기 OCR 본문")
     summ = json.loads(
         (workspace.summaries_dir(wid) / "ch1.json").read_text(encoding="utf-8"))
     assert "body_text" not in summ
