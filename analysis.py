@@ -474,8 +474,8 @@ def set_chapters_impl(
         extraction_mode: "text" | "ocr". 본문 추출 방식(목차 단계와 무관).
                   text=라이브러리 추출 / ocr=PaddleOCR CPU 선계산.
         book_info: 메인 LLM이 보강한 책 정보. None이면 PDF 메타만 사용.
-        language: "ko" | "en". OCR 모드에서 LLM이 이미지로 파악한 본문 언어를
-                  전달하면 state.language를 갱신한다(텍스트 감지가 불가능하므로).
+        language: "ko" | "en". OCR 모드에서 목차 정보나 사용자 확인으로 파악한
+                  본문 언어를 전달하면 state.language를 갱신한다.
 
     Returns:
         {"chapter_count", "total_chars", "chapters": [...]}
@@ -510,7 +510,7 @@ def set_chapters_impl(
             "page_count not in state. call scan_pdf before set_chapters."
         )
 
-    # OCR 모드: LLM이 파악한 언어를 state에 반영 (텍스트 감지가 불가능)
+    # OCR 모드: 목차 정보나 사용자 확인으로 파악한 언어를 state에 반영
     if language and language.lower() in ("ko", "en"):
         workspace.update_state(work_id, language=language.lower())
 

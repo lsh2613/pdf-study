@@ -7,7 +7,7 @@
     │   ├── outline.json
     │   ├── book_info.json
     │   ├── chapters_raw/ch{N}.json
-    │   └── pages/p{N}.jpg          # OCR 모드: 페이지 통째 렌더 (lazy)
+    │   └── pages/p{N}.jpg          # 목차/본문 OCR 입력 이미지 캐시
     └── chapters/
         ├── summaries/ch{N}.json           # 요약 + 핵심포인트
         ├── quiz/ch{N}.json                # 기본 문제 (mc/sa/rf)
@@ -124,7 +124,7 @@ def chapters_raw_dir(work_id: str) -> Path:
 
 
 def pages_dir(work_id: str) -> Path:
-    """OCR 모드에서 페이지를 JPEG로 렌더해 두는 곳 (p{N}.jpg)."""
+    """목차/본문 OCR 입력으로 쓸 페이지 JPEG 캐시 위치 (p{N}.jpg)."""
     return raw_data_dir(work_id) / "pages"
 
 

@@ -27,11 +27,11 @@
 
 처리 모드 선택 실패 응답의 각 선택지는 `execution_mode`, `extraction_mode`, `label`, `desc`를 담는다. 텍스트 레이어가 없거나 깨진 PDF에서는 `forced_extraction_mode="ocr"`가 함께 오고, 선택지는 OCR 조합만 남는다. 클라이언트는 빠진 text 선택지를 다시 만들어 사용자에게 보여주면 안 된다.
 
-`get_subagent_prompts(work_id)`는 요약자 프롬프트, 확장 문제 프롬프트, 처리 순서, 본문 챕터 ID 목록을 반환한다. skip 챕터는 `chapter_ids`에서 제외되고 `skipped_chapter_ids`에 따로 들어간다.
+`get_subagent_prompts(work_id)`는 요약자 프롬프트, 확장 문제 프롬프트, 처리 순서, 본문 챕터 ID 목록을 반환한다. skip 챕터는 `chapter_ids`에서 제외되고 `skipped_chapter_ids`에 따로 들어간다. non-skip 챕터의 raw 본문 파일이 없거나 `text`가 비어 있거나 `char_count`가 실제 길이와 맞지 않으면 실패하며, `data.invalid_chapters`에 챕터별 사유를 담는다.
 
 `get_chapter_content(work_id, chapter_id)`는 챕터 입력을 반환한다. text 모드와 OCR 모드 모두 `text`가 들어간다. OCR 모드의 `text`는 `set_chapters` 시점에 PaddleOCR CPU로 선계산해 `chapters_raw/chN.json`에 저장한 본문이다. 등록되지 않은 `chapter_id`, skip 챕터, 아직 챕터가 설정되지 않은 작업은 실패한다.
 
-`save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다. `summary`, `key_points`, 활성화된 `multiple_choice`, `short_answer`, `reflection` 중 필요한 값이 비어 있으면 실패하고 `data.missing`에 누락 필드를 담는다. OCR 모드의 요약 프롬프트는 `body_text`를 요구하지만, 현재 저장 경계는 `body_text`가 있을 때만 raw 본문으로 되돌려 저장한다.
+`save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다. `summary`, `key_points`, 활성화된 `multiple_choice`, `short_answer`, `reflection` 중 필요한 값이 비어 있으면 실패하고 `data.missing`에 누락 필드를 담는다. `body_text`는 요구하지 않으며, 들어오더라도 저장 전에 제거되어 `chapters_raw`의 canonical `text`와 `char_count`를 덮어쓰지 않는다.
 
 `search_extension_context(work_id, chapter_id, query)`는 확장 문제용 검색 결과를 반환한다. 빈 검색어는 실패한다. 외부 검색 자체의 오류는 `ok=true`, `data.exa_ok=false`, `data.results=[]`로 표현해 챕터 처리를 계속하게 한다.
 

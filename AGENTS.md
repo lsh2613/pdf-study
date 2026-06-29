@@ -36,7 +36,7 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
 
 - PDF 학습 요청은 일반 요약으로 처리하지 않는다. `init_work → scan_pdf → set_chapters → get_subagent_prompts → save_* → list_pending_chapters → finalize_study` 흐름을 지켜야 한다.
 - 챕터 경계는 PDF 북마크 또는 목차 페이지 이미지로만 정한다. PDF 텍스트를 긁어 목차를 추정하는 코드를 추가하면 안 된다.
-- 텍스트 레이어가 없거나 깨진 PDF는 text 모드로 밀어붙이면 안 된다. OCR 흐름은 페이지 이미지를 읽은 본문을 `body_text`로 되돌려 저장하는 방향이며, 저장 경계의 누락 강제 검증은 아직 보강 대상이다.
+- 텍스트 레이어가 없거나 깨진 PDF는 text 모드로 밀어붙이면 안 된다. OCR 흐름은 `set_chapters`에서 PaddleOCR CPU로 본문을 선계산해 `chapters_raw/chN.json`의 `text`와 `char_count`로 저장하는 방향이다. `body_text`는 raw 본문을 덮어쓰는 경로로 쓰지 않는다.
 - 사용자가 골라야 하는 선택지는 서버 응답의 항목과 설명을 바꾸지 않는다. 추천·기본값을 임의로 붙이거나 선택지를 합치면 안 된다.
 - `.work/state.json`은 잠금이 걸린 `workspace.py` 헬퍼로만 바꾼다. 직접 read-modify-write를 넣으면 병렬 처리에서 상태가 깨진다.
 

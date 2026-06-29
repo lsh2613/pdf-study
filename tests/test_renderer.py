@@ -1,12 +1,24 @@
 """HtmlRenderer + 사이드바 + 완료 토글 + 옵션 비활성 섹션 검증."""
 from __future__ import annotations
 
+import pytest
+
 from pdf_study import server
 from pdf_study.renderer.html_renderer import (
     _FallbackMd,
     _summary_section,
     _unescape_if_double_escaped,
 )
+
+
+@pytest.fixture(autouse=True)
+def stub_scan_toc_ocr(monkeypatch):
+    """scan_pdf 목차 OCR 테스트가 실제 PaddleOCR 모델을 로드하지 않게 한다."""
+    class StubWorker:
+        def process_image(self, img_path):
+            return "목차 OCR 텍스트"
+
+    monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda: StubWorker())
 
 
 def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):

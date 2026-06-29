@@ -353,10 +353,10 @@ def set_chapters(
              "desc": "디지털 PDF · 최대 5개 동시로 가장 빠름"},
             {"execution_mode": "sequential", "extraction_mode": "ocr",
              "label": "Sequential + OCR",
-             "desc": "스캔본·깨진 PDF · 정확하나 느리고 비쌈"},
+             "desc": "스캔본·깨진 PDF · PaddleOCR CPU 선계산. 느리지만 안정적"},
             {"execution_mode": "parallel", "extraction_mode": "ocr",
              "label": "Parallel + OCR",
-             "desc": "스캔본·깨진 PDF · 병렬 OCR로 빠르나 비용 가장 큼"},
+             "desc": "스캔본·깨진 PDF · 챕터 병렬 OCR로 빠르나 CPU 부하 큼"},
         ]
 
         if force_ocr:

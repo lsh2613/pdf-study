@@ -3,9 +3,9 @@
 ## 구현됨
 
 - 로컬 MCP 서버가 `init_work`부터 `finalize_study`까지 PDF 학습 자료 생성 흐름을 제공한다.
-- PDF 내장 목차가 있으면 물리 페이지 기준 챕터 후보를 만들고, 없으면 목차 페이지 이미지를 렌더해 클라이언트가 읽게 한다.
+- PDF 내장 목차가 있으면 물리 페이지 기준 챕터 후보를 만들고, 없으면 목차 페이지 이미지를 렌더해 PaddleOCR CPU `ocr_text`/`ocr_error`와 함께 제공한다.
 - 텍스트 레이어 품질을 평가해 텍스트 없음과 모지바케를 구분하고, 신뢰할 수 없는 text 모드를 거부한다.
-- text 모드는 챕터 본문을 서버가 추출하고, OCR 모드는 `set_chapters` 시점에 PaddleOCR CPU로 본문을 선계산해 raw에 저장한다.
+- text 모드는 챕터 본문을 서버가 추출하고, OCR 모드는 `set_chapters` 시점에 PaddleOCR CPU로 본문을 선계산해 raw에 저장한다. raw `text`와 `char_count`가 누락되거나 불일치하면 sub-agent 프롬프트와 챕터 본문 반환을 거부한다.
 - 챕터별 요약, 기본 문제, 확장 문제를 분리 JSON으로 저장하고, 활성 필드가 비어 있으면 완료 상태로 바꾸지 않는다.
 - 병렬 챕터 저장을 고려해 작업 상태 갱신은 잠금과 원자적 파일 교체를 사용한다.
 - HTML 사이트와 Markdown+TUI 출력이 같은 저장 결과에서 생성된다.
@@ -15,16 +15,15 @@
 ## 검증 상태
 
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, 선택지 요구, 최종 렌더링, 진도 저장 서버, 설치 스크립트를 다룬다.
-- 최근 확인: `.venv/bin/python -m pytest`가 157개 테스트를 모두 통과했다. 경고는 PyMuPDF 하위 SWIG 타입의 DeprecationWarning 5개다.
+- 최근 확인: `uv run --no-project --with pytest --with pymupdf --with pillow --with-editable . python -m pytest -q`가 178개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
 
 ## 남은 일
 
-- 실제 대형 스캔본에서 OCR 모드 비용·시간을 줄이는 배치 전략을 더 정교하게 만들 수 있다.
+- 실제 대형 스캔본에서 OCR 모드 CPU 사용량과 처리 시간을 줄이는 배치 전략을 더 정교하게 만들 수 있다.
 - 검색어에 원문 단락이 과도하게 들어가지 않도록 확장 문제 검색어 길이와 형태를 서버가 더 강하게 제한할 수 있다.
 - 결과물 실행 안내는 HTML과 TUI 각각에 있지만, MCP 클라이언트별 설정 예시는 현재 로컬 venv 중심 안내에 머문다.
 - 챕터별 실패 재시도 정책은 문서와 next_action으로 안내하지만, 실패한 챕터를 자동으로 다시 큐잉하는 별도 도구는 없다.
 - PDF 본문 언어는 한국어와 영어 중심이다. 다른 언어는 영어 프롬프트로 떨어진다.
-- `save_chapter_result`의 `body_text` 정책은 후속 정리가 필요하다. 현재 OCR raw 본문은 `set_chapters`에서 선계산되며, 저장 경계는 기존처럼 `body_text`가 있으면 raw를 덮어쓸 수 있다.
 
 ## 막힌 일
 

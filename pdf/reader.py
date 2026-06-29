@@ -188,7 +188,8 @@ def locate_toc_pages(doc: fitz.Document, max_scan: int = 30) -> list[int] | None
 
     텍스트가 깨졌어도 '목차/Contents' 키워드는 대개 살아남으므로, 페이지 번호
     (숫자)가 아니라 '어느 페이지가 목차인가'만 찾는 용도다. 실제 챕터↔페이지
-    숫자 추출은 vision(에이전트)이 toc_page_images를 읽어서 한다.
+    숫자 판단은 scan_pdf가 붙인 toc_page_images[].ocr_text와 필요 시 이미지를
+    확인해 한다.
 
     Returns:
         목차로 보이는 페이지 번호 리스트(1-based, 연속). 못 찾으면 None.
@@ -401,10 +402,10 @@ def detect_page_offset(doc: fitz.Document, sample_cap: int = 400) -> dict[str, A
 
 
 # ---------------------------------------------------------------------------
-# 페이지 → JPEG 렌더 (OCR 모드: 비전 LLM이 페이지를 직접 읽게 함)
+# 페이지 → JPEG 렌더 (목차/본문 OCR 입력 캐시)
 # ---------------------------------------------------------------------------
 
-RENDER_DPI = 150       # 한글 본문 가독 충분 + 비전 토큰 절약
+RENDER_DPI = 150       # 한글 본문 OCR 가독과 파일 크기 균형
 RENDER_QUALITY = 80    # JPEG 품질 (스캔 텍스트는 PNG보다 3~5배 작음)
 
 
@@ -418,9 +419,9 @@ def render_pages(
 ) -> list[dict[str, Any]]:
     """페이지 범위(1-based inclusive)를 JPEG로 렌더해 output_dir에 저장.
 
-    OCR 모드에서 서브에이전트(비전 LLM)가 본문 텍스트 대신 페이지 이미지를
-    직접 읽도록 하기 위함. 파일명은 p{N}.jpg로 페이지 단위라, scan과 챕터가
-    같은 페이지를 렌더해도 한 번만 만들어 캐시처럼 재사용한다(이미 있으면 스킵).
+    목차 OCR과 OCR 모드 본문 선계산에서 PaddleOCR 입력으로 재사용하기 위함.
+    파일명은 p{N}.jpg로 페이지 단위라, scan과 챕터가 같은 페이지를 렌더해도
+    한 번만 만들어 캐시처럼 재사용한다(이미 있으면 스킵).
 
     Returns:
         [{"id": "p12", "path": "<output_dir>/p12.jpg", "page": 12}, ...]
