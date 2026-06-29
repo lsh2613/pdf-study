@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from typing import Any
 
 from . import lang, workspace
@@ -428,6 +428,78 @@ def _validate_chapter_def(ch: dict[str, Any], page_count: int) -> dict[str, Any]
     return out
 
 
+class ChapterOcrError(RuntimeError):
+    def __init__(
+        self,
+        chapter_id: str,
+        message: str,
+        failed_pages: list[int] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.chapter_id = chapter_id
+        self.failed_pages = failed_pages or []
+
+
+def _normalize_failed_pages(failed_pages: list[Any] | None) -> list[int]:
+    pages: set[int] = set()
+    for page in failed_pages or []:
+        try:
+            pages.add(int(page))
+        except (TypeError, ValueError):
+            continue
+    return sorted(pages)
+
+
+def _record_ocr_failure(
+    work_id: str,
+    failed_chapters: dict[str, dict[str, Any]],
+    chapter_id: str,
+    error: str,
+    failed_pages: list[Any] | None = None,
+) -> None:
+    pages = _normalize_failed_pages(failed_pages)
+    failed_chapters[chapter_id] = {
+        "chapter_id": chapter_id,
+        "failed_pages": pages,
+        "error": error,
+    }
+    workspace.mark_chapter_failed(work_id, chapter_id, kind="summary", error=error)
+    workspace.update_chapter_status(work_id, chapter_id, failed_pages=pages)
+
+
+def _cached_ocr_raw_for_chapter(
+    work_id: str,
+    ch_def: dict[str, Any],
+) -> dict[str, Any] | None:
+    """이미 저장된 OCR raw가 현재 챕터 범위와 맞으면 재사용한다."""
+    try:
+        raw = workspace.get_chapter_raw(work_id, ch_def["chapter_id"])
+    except FileNotFoundError:
+        return None
+
+    if raw.get("extraction_mode") != "ocr":
+        return None
+
+    text = raw.get("text")
+    char_count = raw.get("char_count")
+    page_range = raw.get("page_range")
+    if not isinstance(text, str) or not text.strip():
+        return None
+    if type(char_count) is not int or char_count != len(text):
+        return None
+    if list(page_range or []) != list(ch_def["page_range"]):
+        return None
+
+    return {
+        "chapter_id": ch_def["chapter_id"],
+        "title": ch_def["title"],
+        "page_range": ch_def["page_range"],
+        "text": text,
+        "char_count": char_count,
+        "extraction_mode": "ocr",
+    }
+
+
 def _ocr_chapter_pages(
     ch_def: dict[str, Any],
     page_images: list[dict[str, Any]],
@@ -442,11 +514,16 @@ def _ocr_chapter_pages(
             page_texts.append(str(worker.process_image(image_path) or ""))
         except Exception as exc:
             page = page_image.get("page")
-            raise RuntimeError(f"chapter {cid} page {page} OCR failed: {exc}") from exc
+            failed_pages = [page] if page is not None else []
+            raise ChapterOcrError(
+                cid,
+                f"chapter {cid} page {page} OCR failed: {exc}",
+                _normalize_failed_pages(failed_pages),
+            ) from exc
 
     text = "\n\n".join(page_texts)
     if not text.strip():
-        raise ValueError(f"chapter {cid} OCR produced empty text")
+        raise ChapterOcrError(cid, f"chapter {cid} OCR produced empty text", [])
 
     return {
         "chapter_id": cid,
@@ -454,6 +531,7 @@ def _ocr_chapter_pages(
         "page_range": ch_def["page_range"],
         "text": text,
         "char_count": len(text),
+        "extraction_mode": "ocr",
     }
 
 
@@ -542,53 +620,67 @@ def set_chapters_impl(
 
     if ocr_mode:
         page_images_by_chapter: dict[str, list[dict[str, Any]]] = {}
-        failed_chapters: set[str] = set()
-        doc = reader.open_pdf(pdf_path)
-        try:
-            for ch_def in normalized:
-                if ch_def.get("skip"):
-                    continue
-                cid = ch_def["chapter_id"]
-                start, end = ch_def["page_range"]
-                try:
-                    page_images_by_chapter[cid] = reader.render_pages(
-                        doc, int(start), int(end), workspace.pages_dir(work_id),
-                    )
-                except Exception as e:
-                    logger.exception("chapter page rendering failed: %s", cid)
-                    failed_chapters.add(cid)
-                    workspace.mark_chapter_failed(
-                        work_id, cid, kind="summary", error=str(e),
-                    )
-        finally:
-            doc.close()
-
         results: dict[str, dict[str, Any]] = {}
         errors: dict[str, str] = {}
-        max_workers = ocr.calculate_ocr_worker_limit()
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_chapter = {
-                executor.submit(
-                    _ocr_chapter_pages,
-                    ch_def,
-                    page_images_by_chapter[ch_def["chapter_id"]],
-                ): ch_def
-                for ch_def in normalized
-                if not ch_def.get("skip")
-                and ch_def["chapter_id"] in page_images_by_chapter
-                and ch_def["chapter_id"] not in failed_chapters
-            }
-            for future in as_completed(future_to_chapter):
-                ch_def = future_to_chapter[future]
-                cid = ch_def["chapter_id"]
-                try:
-                    results[cid] = future.result()
-                except Exception as e:
-                    logger.exception("chapter OCR failed: %s", cid)
-                    errors[cid] = str(e)
-                    workspace.mark_chapter_failed(
-                        work_id, cid, kind="summary", error=str(e),
-                    )
+        failed_chapters: dict[str, dict[str, Any]] = {}
+        chapters_to_ocr: list[dict[str, Any]] = []
+
+        for ch_def in normalized:
+            if ch_def.get("skip"):
+                continue
+            cached = _cached_ocr_raw_for_chapter(work_id, ch_def)
+            if cached is not None:
+                results[ch_def["chapter_id"]] = cached
+            else:
+                chapters_to_ocr.append(ch_def)
+
+        if chapters_to_ocr:
+            doc = reader.open_pdf(pdf_path)
+            try:
+                for ch_def in chapters_to_ocr:
+                    cid = ch_def["chapter_id"]
+                    start, end = ch_def["page_range"]
+                    try:
+                        page_images_by_chapter[cid] = reader.render_pages(
+                            doc, int(start), int(end), workspace.pages_dir(work_id),
+                        )
+                    except Exception as e:
+                        logger.exception("chapter page rendering failed: %s", cid)
+                        pages = list(range(int(start), int(end) + 1))
+                        _record_ocr_failure(
+                            work_id, failed_chapters, cid, str(e), pages,
+                        )
+            finally:
+                doc.close()
+
+        future_to_chapter = {
+            ocr.submit_chapter_ocr(
+                _ocr_chapter_pages,
+                ch_def,
+                page_images_by_chapter[ch_def["chapter_id"]],
+            ): ch_def
+            for ch_def in normalized
+            if not ch_def.get("skip")
+            and ch_def["chapter_id"] in page_images_by_chapter
+            and ch_def["chapter_id"] not in failed_chapters
+        }
+        for future in as_completed(future_to_chapter):
+            ch_def = future_to_chapter[future]
+            cid = ch_def["chapter_id"]
+            try:
+                results[cid] = future.result()
+            except ChapterOcrError as e:
+                logger.exception("chapter OCR failed: %s", cid)
+                error = str(e)
+                errors[cid] = error
+                _record_ocr_failure(
+                    work_id, failed_chapters, cid, error, e.failed_pages,
+                )
+            except Exception as e:
+                logger.exception("chapter OCR failed: %s", cid)
+                error = str(e)
+                errors[cid] = error
+                _record_ocr_failure(work_id, failed_chapters, cid, error, [])
 
         for ch_def in normalized:
             cid = ch_def["chapter_id"]
@@ -658,6 +750,7 @@ def set_chapters_impl(
                     "page_range": ch_def["page_range"],
                     "char_count": char_count,
                     "text": extracted["text"],
+                    "extraction_mode": "text",
                 }
                 workspace.save_chapter_raw(work_id, cid, raw_payload)
                 workspace.update_chapter_status(work_id, cid, char_count=char_count)
@@ -673,11 +766,14 @@ def set_chapters_impl(
         finally:
             doc.close()
 
-    return {
+    result = {
         "chapter_count": len(normalized),
         "total_chars": total_chars,
         "chapters": summaries,
     }
+    if ocr_mode:
+        result["failed_chapters"] = list(failed_chapters.values())
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -758,12 +854,19 @@ def validate_chapter_raw_inputs(
             extraction_mode=extraction_mode,
         )
         if reasons:
-            invalid.append({
+            item = {
                 "chapter_id": chapter_id,
                 "title": chapter_state.get("title"),
                 "page_range": chapter_state.get("page_range"),
                 "reasons": reasons,
-            })
+            }
+            if chapter_state.get("failed_pages") is not None:
+                item["failed_pages"] = _normalize_failed_pages(
+                    chapter_state.get("failed_pages")
+                )
+            if chapter_state.get("error"):
+                item["error"] = chapter_state.get("error")
+            invalid.append(item)
     return invalid
 
 

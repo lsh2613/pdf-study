@@ -63,6 +63,20 @@ def _missing_summary_fields(data: dict[str, Any], options: dict[str, bool]) -> l
     return missing
 
 
+def _failed_chapters_from_invalid(invalid: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    failed: list[dict[str, Any]] = []
+    for item in invalid:
+        codes = {reason.get("code") for reason in item.get("reasons", [])}
+        if "ocr_failed" not in codes:
+            continue
+        failed.append({
+            "chapter_id": item.get("chapter_id"),
+            "failed_pages": item.get("failed_pages", []),
+            "error": item.get("error") or "OCR failed",
+        })
+    return failed
+
+
 _SAFE_NAME_RE = re.compile(r"[^\w가-힣.\-]+")  # 영숫자 / 한글 / _ . - 외엔 치환
 
 
@@ -310,8 +324,8 @@ def set_chapters(
         (data.forced_extraction_mode="ocr"). 이때는 그 2개만 제시하세요.
         - ① Sequential + Text: 안정적·빠르고 저렴 (디지털 PDF, 무난한 기본)
         - ② Parallel + Text: 최대 5개 챕터 동시로 가장 빠름 (디지털 PDF)
-        - ③ Sequential + OCR: PaddleOCR CPU 선계산. 느리지만 스캔본에 필요
-        - ④ Parallel + OCR: PaddleOCR CPU 병렬 선계산. ③보다 빠르지만 부하 큼
+        - ③ Sequential + OCR: PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리
+        - ④ Parallel + OCR: PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리
       ※ 목차 분석은 모드와 무관하게 항상 내장 목차/이미지로 처리됩니다. 여기서
         고르는 건 **본문 추출/디스패치** 방식뿐입니다.
       ※ 물을 땐 클라이언트의 구조화 선택 도구(예: Claude Code의 AskUserQuestion)로
@@ -353,10 +367,10 @@ def set_chapters(
              "desc": "디지털 PDF · 최대 5개 동시로 가장 빠름"},
             {"execution_mode": "sequential", "extraction_mode": "ocr",
              "label": "Sequential + OCR",
-             "desc": "스캔본·깨진 PDF · PaddleOCR CPU 선계산. 느리지만 안정적"},
+             "desc": "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리"},
             {"execution_mode": "parallel", "extraction_mode": "ocr",
              "label": "Parallel + OCR",
-             "desc": "스캔본·깨진 PDF · 챕터 병렬 OCR로 빠르나 CPU 부하 큼"},
+             "desc": "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리"},
         ]
 
         if force_ocr:
@@ -371,12 +385,12 @@ def set_chapters(
                 "따라서 **OCR 조합만 선택할 수 있습니다** — text 조합은 제시하지 마세요. "
                 "아래 2가지 중 하나를 사용자에게 보여주고 골라 두 값을 전달해 다시 "
                 "호출하세요.\n"
-                "③ Sequential + OCR — 순차 + PaddleOCR CPU 선계산. 느리지만 "
-                "스캔본에 필요.\n"
-                "④ Parallel + OCR — 최대 5개 동시 + PaddleOCR CPU 선계산. "
-                "③보다 빠르지만 CPU 부하 큼.\n"
-                "extraction_mode는 'ocr' 고정, execution_mode만 'sequential'|'parallel'에서 "
-                "선택. OCR은 텍스트 언어 감지가 불가하니 language도 함께 전달하세요.\n"
+                "③ Sequential + OCR — PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리.\n"
+                "④ Parallel + OCR — PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리.\n"
+                "OCR 선처리는 execution_mode와 별개로 서버 내부 상한(최대 2개 챕터, "
+                "CPU 1코어면 1개)으로 제한됩니다. extraction_mode는 'ocr' 고정, "
+                "execution_mode만 'sequential'|'parallel'에서 선택. OCR은 텍스트 언어 "
+                "감지가 불가하니 language도 함께 전달하세요.\n"
             )
             data = {
                 "choices": choices,
@@ -395,10 +409,10 @@ def set_chapters(
                 "안정적·빠르고 저렴 (디지털 PDF, 무난한 기본값).\n"
                 "② Parallel + Text — 최대 5개 챕터 동시 + 텍스트 추출. 가장 빠름 "
                 "(병렬 디스패치 가능한 클라이언트).\n"
-                "③ Sequential + OCR — 순차 + PaddleOCR CPU 선계산. 느리지만 "
-                "스캔본에 필요.\n"
-                "④ Parallel + OCR — 최대 5개 동시 + PaddleOCR CPU 선계산. "
-                "③보다 빠르지만 CPU 부하 큼 (스캔본).\n"
+                "③ Sequential + OCR — PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리.\n"
+                "④ Parallel + OCR — PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리. "
+                "OCR 선처리는 서버 내부 상한(최대 2개 챕터, CPU 1코어면 1개)으로 "
+                "별도 제한됩니다.\n"
                 "execution_mode는 'sequential'|'parallel', extraction_mode는 'text'|'ocr'.\n"
             )
             data = {
@@ -438,6 +452,15 @@ def set_chapters(
         work_id, chapters, execution_mode, extraction_mode,
         book_info=book_info, language=language,
     )
+    failed_chapters = data.get("failed_chapters") or []
+    if extraction_mode == "ocr" and failed_chapters:
+        return _err(
+            "OCR 본문 선처리 중 실패한 챕터가 있어 sub-agent 처리로 넘어갈 수 없습니다. "
+            "data.failed_chapters의 chapter_id, failed_pages, error를 확인한 뒤 "
+            "PDF/페이지 범위/OCR 환경을 복구하고 set_chapters를 다시 호출하세요.",
+            data=data,
+        )
+
     n_skip = sum(1 for c in data["chapters"] if c.get("skipped"))
     n_body = data["chapter_count"] - n_skip
     return _ok(data, next_action=(
@@ -494,6 +517,7 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
     state = workspace.load_state(work_id)
     invalid = analysis.validate_chapter_raw_inputs(work_id, state)
     if invalid:
+        failed_chapters = _failed_chapters_from_invalid(invalid)
         return _err(
             "sub-agent 입력 raw 본문이 준비되지 않았거나 손상됐습니다. "
             "각 non-skip 챕터는 chapters_raw/{chapter_id}.json에 비어 있지 않은 "
@@ -502,6 +526,7 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
             data={
                 "extraction_mode": state.get("extraction_mode"),
                 "invalid_chapters": invalid,
+                "failed_chapters": failed_chapters,
                 "required_fields": ["chapter_raw.text", "chapter_raw.char_count"],
             },
         )

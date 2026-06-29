@@ -296,6 +296,38 @@ def test_get_chapter_content_ocr_returns_precomputed_text_without_lazy_ocr(
     assert content2["data"]["text"] == data["text"]
 
 
+def test_set_chapters_ocr_failure_returns_failed_chapters(
+    tmp_path, ko_short, monkeypatch
+):
+    """OCR 선처리 실패는 ok=false와 data.failed_chapters로 즉시 드러난다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out_ocr_fail"))["data"]["work_id"]
+    server.scan_pdf(wid)
+
+    class MockWorker:
+        def process_image(self, img_path):
+            if str(img_path).endswith("p2.jpg"):
+                raise RuntimeError("OCR boom")
+            return "partial"
+
+    monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda: MockWorker())
+    r = server.set_chapters(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
+        execution_mode="parallel",
+        extraction_mode="ocr",
+        language="ko",
+    )
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["next_action"] is None
+    failed = r["data"]["failed_chapters"]
+    assert failed[0]["chapter_id"] == "ch1"
+    assert failed[0]["failed_pages"] == [2]
+    assert "OCR boom" in failed[0]["error"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "failed"
+
+
 def test_save_chapter_result_accepts_without_body_text(tmp_path, ko_short):
     """body_text 없이도 요약/문제 저장은 정상 완료된다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
@@ -389,7 +421,7 @@ def test_get_subagent_prompts_rejects_invalid_ocr_raw(
         })
     elif case == "failed_status":
         workspace.update_chapter_status(
-            wid, "ch1", summary_status="failed", error="OCR failed"
+            wid, "ch1", summary_status="failed", error="OCR failed", failed_pages=[1]
         )
 
     r = server.get_subagent_prompts(wid)
@@ -401,6 +433,15 @@ def test_get_subagent_prompts_rejects_invalid_ocr_raw(
     assert invalid[0]["chapter_id"] == "ch1"
     codes = {reason["code"] for reason in invalid[0]["reasons"]}
     assert expected_code in codes
+    if expected_code == "ocr_failed":
+        failed = r["data"]["failed_chapters"]
+        assert failed == [{
+            "chapter_id": "ch1",
+            "failed_pages": [1],
+            "error": "OCR failed",
+        }]
+    else:
+        assert r["data"]["failed_chapters"] == []
 
 
 @pytest.mark.parametrize(

@@ -15,7 +15,7 @@
 ## 검증 상태
 
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, 선택지 요구, 최종 렌더링, 진도 저장 서버, 설치 스크립트를 다룬다.
-- 최근 확인: `uv run --no-project --with pytest --with pymupdf --with pillow --with-editable . python -m pytest -q`가 178개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
+- 최근 확인: `uv run --no-project --with pytest --with pymupdf --with pillow --with-editable . python -m pytest -q`가 183개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
 
 ## 남은 일
 

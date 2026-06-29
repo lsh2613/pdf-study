@@ -19,6 +19,8 @@ PaddleOCRFactory = Callable[..., Any]
 
 _worker: "OCRWorker | None" = None
 _worker_lock = threading.Lock()
+_chapter_executor: concurrent.futures.ThreadPoolExecutor | None = None
+_chapter_executor_lock = threading.Lock()
 _AUTO_CPU_COUNT = object()
 
 
@@ -111,6 +113,39 @@ def extract_rec_texts(prediction: Any) -> list[str]:
             if normalized:
                 texts.append(normalized)
     return texts
+
+
+def get_chapter_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """프로세스 전역 챕터 OCR executor.
+
+    set_chapters 호출이 여러 개 겹쳐도 동시에 OCR되는 챕터 수는
+    calculate_ocr_worker_limit() 상한을 넘지 않는다.
+    """
+    global _chapter_executor
+    if _chapter_executor is None:
+        with _chapter_executor_lock:
+            if _chapter_executor is None:
+                _chapter_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=calculate_ocr_worker_limit()
+                )
+    return _chapter_executor
+
+
+def submit_chapter_ocr(
+    fn: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> concurrent.futures.Future[Any]:
+    return get_chapter_executor().submit(fn, *args, **kwargs)
+
+
+def _reset_chapter_executor_for_tests() -> None:
+    global _chapter_executor
+    with _chapter_executor_lock:
+        executor = _chapter_executor
+        _chapter_executor = None
+    if executor is not None:
+        executor.shutdown(wait=True, cancel_futures=True)
 
 
 class OCRWorker:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import concurrent.futures
 import threading
 import time
 from pathlib import Path
@@ -19,6 +20,14 @@ def stub_toc_ocr(monkeypatch):
             return f"OCR:{Path(image_path).name}"
 
     monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: StubWorker())
+
+
+@pytest.fixture(autouse=True)
+def reset_chapter_ocr_executor():
+    """전역 챕터 OCR executor가 테스트 간 worker limit monkeypatch를 공유하지 않게 한다."""
+    analysis.ocr._reset_chapter_executor_for_tests()
+    yield
+    analysis.ocr._reset_chapter_executor_for_tests()
 
 
 @pytest.fixture
@@ -186,11 +195,112 @@ def test_ocr_mode_set_chapters_precomputes_raw_text(
     raw = workspace.get_chapter_raw(wid, "ch1")
     assert raw["text"] == expected
     assert raw["char_count"] == len(expected)
+    assert raw["extraction_mode"] == "ocr"
     assert calls == ["p1.jpg", "p2.jpg", "p3.jpg"]
 
     content = analysis.get_chapter_content_impl(wid, "ch1")
     assert content["text"] == expected
     assert "page_images" not in content
+
+
+def test_ocr_mode_reuses_existing_raw_text(
+    make_workspace, ko_with_toc, monkeypatch
+):
+    """현재 page_range와 맞는 OCR raw가 있으면 렌더/OCR을 다시 하지 않는다."""
+    wid, _ = make_workspace(ko_with_toc)
+    analysis.scan_pdf_impl(wid)
+    cached_text = "캐시된 OCR 본문"
+    workspace.save_chapter_raw(wid, "ch1", {
+        "chapter_id": "ch1",
+        "title": "이전 제목",
+        "page_range": [1, 2],
+        "text": cached_text,
+        "char_count": len(cached_text),
+        "extraction_mode": "ocr",
+    })
+
+    def fail_render(*args, **kwargs):
+        raise AssertionError("cached OCR raw should avoid page rendering")
+
+    def fail_worker():
+        raise AssertionError("cached OCR raw should avoid OCR worker")
+
+    monkeypatch.setattr(analysis.reader, "render_pages", fail_render)
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", fail_worker)
+    res = analysis.set_chapters_impl(
+        wid,
+        [{"chapter_id": "ch1", "title": "새 제목", "page_range": [1, 2]}],
+        "parallel", "ocr", language="ko",
+    )
+
+    assert res["failed_chapters"] == []
+    assert res["chapters"][0]["char_count"] == len(cached_text)
+    raw = workspace.get_chapter_raw(wid, "ch1")
+    assert raw["title"] == "새 제목"
+    assert raw["text"] == cached_text
+    assert raw["extraction_mode"] == "ocr"
+
+
+def test_ocr_mode_does_not_reuse_text_mode_raw(
+    make_workspace, ko_with_toc, monkeypatch
+):
+    """OCR 모드는 이전 text 모드 raw가 있어도 새 OCR raw로 교체한다."""
+    wid, _ = make_workspace(ko_with_toc)
+    analysis.scan_pdf_impl(wid)
+    chapter = {"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}
+    analysis.set_chapters_impl(wid, [chapter], "sequential", "text")
+    text_raw = workspace.get_chapter_raw(wid, "ch1")
+    assert text_raw["extraction_mode"] == "text"
+
+    class MockWorker:
+        def process_image(self, image_path):
+            return "OCR 본문"
+
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
+    res = analysis.set_chapters_impl(
+        wid, [chapter], "sequential", "ocr", language="ko",
+    )
+
+    assert res["failed_chapters"] == []
+    raw = workspace.get_chapter_raw(wid, "ch1")
+    assert raw["text"] == "OCR 본문"
+    assert raw["extraction_mode"] == "ocr"
+
+
+def test_ocr_mode_does_not_promote_legacy_raw_after_failed_retry(
+    make_workspace, ko_with_toc, monkeypatch
+):
+    """모드 메타가 없는 raw는 state가 ocr이어도 OCR 캐시로 승격하지 않는다."""
+    wid, _ = make_workspace(ko_with_toc)
+    analysis.scan_pdf_impl(wid)
+    legacy_text = "legacy text raw"
+    workspace.save_chapter_raw(wid, "ch1", {
+        "chapter_id": "ch1",
+        "title": "전체",
+        "page_range": [1, 1],
+        "text": legacy_text,
+        "char_count": len(legacy_text),
+    })
+    workspace.update_state(wid, extraction_mode="ocr")
+    calls = []
+
+    class MockWorker:
+        def process_image(self, image_path):
+            calls.append(Path(image_path).name)
+            return "재시도 OCR 본문"
+
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
+    res = analysis.set_chapters_impl(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
+        "parallel", "ocr", language="ko",
+    )
+
+    assert res["failed_chapters"] == []
+    assert calls == ["p1.jpg"]
+    raw = workspace.get_chapter_raw(wid, "ch1")
+    assert raw["text"] == "재시도 OCR 본문"
+    assert raw["extraction_mode"] == "ocr"
 
 
 def test_ocr_body_text_does_not_overwrite_raw(make_workspace, ko_with_toc):
@@ -248,9 +358,13 @@ def test_ocr_page_exception_marks_chapter_failed_without_partial_raw(
         "sequential", "ocr", language="ko",
     )
     assert res["chapters"][0]["error"]
+    assert res["failed_chapters"][0]["chapter_id"] == "ch1"
+    assert res["failed_chapters"][0]["failed_pages"] == [2]
+    assert "boom" in res["failed_chapters"][0]["error"]
     state_entry = workspace.load_state(wid)["chapters"]["ch1"]
     assert state_entry["summary_status"] == "failed"
     assert "boom" in state_entry["error"]
+    assert state_entry["failed_pages"] == [2]
     with pytest.raises(FileNotFoundError):
         workspace.get_chapter_raw(wid, "ch1")
 
@@ -273,9 +387,13 @@ def test_ocr_empty_chapter_marks_failed_without_raw(
         "sequential", "ocr", language="ko",
     )
     assert "empty text" in res["chapters"][0]["error"]
+    assert res["failed_chapters"][0]["chapter_id"] == "ch1"
+    assert res["failed_chapters"][0]["failed_pages"] == []
+    assert "empty text" in res["failed_chapters"][0]["error"]
     state_entry = workspace.load_state(wid)["chapters"]["ch1"]
     assert state_entry["summary_status"] == "failed"
     assert "empty text" in state_entry["error"]
+    assert state_entry["failed_pages"] == []
     with pytest.raises(FileNotFoundError):
         workspace.get_chapter_raw(wid, "ch1")
 
@@ -337,6 +455,50 @@ def test_ocr_chapter_parallelism_honors_worker_limit(
         ],
         "parallel", "ocr", language="ko",
     )
+    assert max_active == 1
+
+
+def test_ocr_chapter_parallelism_limit_is_global_across_calls(
+    make_workspace, ko_with_toc, monkeypatch
+):
+    """동시 set_chapters 호출끼리도 전역 챕터 OCR 상한을 공유한다."""
+    wid1, _ = make_workspace(ko_with_toc)
+    wid2, _ = make_workspace(ko_with_toc)
+    analysis.scan_pdf_impl(wid1)
+    analysis.scan_pdf_impl(wid2)
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    class MockWorker:
+        def process_image(self, image_path):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+            return Path(image_path).stem
+
+    monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
+    monkeypatch.setattr(analysis.ocr, "calculate_ocr_worker_limit", lambda: 1)
+    chapters = [
+        {"chapter_id": "ch1", "title": "A", "page_range": [1, 1]},
+        {"chapter_id": "ch2", "title": "B", "page_range": [2, 2]},
+    ]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(
+                analysis.set_chapters_impl,
+                wid, chapters, "parallel", "ocr", None, "ko",
+            )
+            for wid in (wid1, wid2)
+        ]
+        results = [future.result(timeout=10) for future in futures]
+
+    assert all(result["failed_chapters"] == [] for result in results)
     assert max_active == 1
 
 
