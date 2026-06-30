@@ -112,6 +112,8 @@ def test_init_work_docstring_tells_agents_when_to_use_mcp():
     assert "일반 PDF 요약" in doc
     assert "Do not directly summarize a PDF" in doc
     assert "init_work → scan_pdf → set_chapters" in doc
+    assert "scan_pdf → prepare_ocr → scan_toc_with_ocr → set_chapters" in doc
+    assert "scan_pdf는 OCR 모델 다운로드/로드/실행을 하지 않고" in doc
 
 
 def test_init_work_blank_output_dir_falls_back_to_default(tmp_path, ko_short, monkeypatch):

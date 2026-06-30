@@ -153,6 +153,12 @@ def init_work(
     get_chapter_content/save_chapter_result(+ extension이면 save_extension_result) →
     list_pending_chapters → finalize_study
 
+    목차 OCR 분기:
+    scan_pdf에서 내장 목차가 없거나 force_vision=True로 재분석이 필요하면
+    scan_pdf → prepare_ocr → scan_toc_with_ocr → set_chapters 순서로 진행하세요.
+    scan_pdf는 OCR 모델 다운로드/로드/실행을 하지 않고 목차 후보 이미지만
+    준비합니다.
+
     단순 요약만 요청하더라도 "학습하기 위해", "개발자가 공부하기 위해",
     "학습 자료로"처럼 학습 목적이 드러나면 이 MCP의 요약/문제/HTML 또는 TUI
     생성 흐름을 우선 사용하세요.
