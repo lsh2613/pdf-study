@@ -26,6 +26,56 @@ pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, �
 
 `list_pending_chapters`가 남은 요약 또는 확장 문제를 확인한다. 남은 챕터가 있으면 `finalize_study`는 기본적으로 거부한다. 모두 끝난 뒤 `finalize_study`가 HTML 또는 Markdown+TUI 결과물을 같은 중립 JSON에서 만든다.
 
+## 흐름도
+
+```mermaid
+flowchart TD
+    A["init_work"] --> B["scan_pdf"]
+
+    B --> C{"텍스트 품질 정상?"}
+    B --> D{"내장 목차 있음?"}
+
+    D -->|아니오| E{"OCR 모델 캐시 있음?"}
+    E -->|아니오| F["prepare_ocr"]
+    E -->|예| G["scan_toc_with_ocr"]
+    F --> G
+    G --> H["목차 OCR 결과로 chapters 구성"]
+
+    D -->|예| I["내장 목차로 chapters 구성"]
+
+    I --> J{"본문 추출 모드 선택"}
+    H --> J
+
+    C -->|garbled / no_text_layer| K["OCR 모드만 선택"]
+    C -->|정상| J
+
+    J -->|text 선택| L["set_chapters(extraction_mode=text)"]
+    J -->|ocr 선택| M{"OCR 모델 캐시 있음?"}
+
+    K --> M
+
+    M -->|아니오| N["prepare_ocr"]
+    M -->|예| O["set_chapters(extraction_mode=ocr)"]
+    N --> O
+
+    L --> P["get_subagent_prompts"]
+    O --> P
+
+    P --> Q["get_chapter_content"]
+    Q --> R["save_chapter_result"]
+    R --> S{"확장 문제 사용?"}
+
+    S -->|예| T["search_extension_context"]
+    T --> U["save_extension_result"]
+    U --> V["list_pending_chapters"]
+
+    S -->|아니오| V
+
+    V --> W{"남은 챕터 있음?"}
+    W -->|예| Q
+    W -->|아니오| X["finalize_study"]
+```
+
 ## 경계
 
 서버가 맡는 경계는 PDF 처리, 챕터 원문 입력, 상태 저장, 출력 렌더링이다. 학습 자료의 실제 내용 품질은 클라이언트 모델이 맡지만, 서버는 저장 전에 필수 필드가 비어 있는 결과를 거부한다.
