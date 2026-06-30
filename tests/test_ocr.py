@@ -59,13 +59,50 @@ def test_worker_initializes_paddleocr_for_cpu_and_local_cache(monkeypatch, tmp_p
     assert worker.process_image("page-1.jpg") == "첫 문장\nsecond line"
     assert calls == [
         {
-            "lang": "korean",
             "device": "cpu",
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+            "text_detection_model_name": "PP-OCRv5_mobile_det",
+            "text_recognition_model_name": "korean_PP-OCRv5_mobile_rec",
+            "text_recognition_batch_size": 1,
+            "text_det_limit_side_len": 960,
+            "text_det_limit_type": "max",
+            "cpu_threads": 2,
         }
     ]
     assert os.environ["PADDLEOCR_HOME"] == str(cache_dir)
     assert os.environ["PADDLE_PDX_CACHE_HOME"] == str(cache_dir)
+    assert os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] == "True"
     assert cache_dir.is_dir()
+
+
+def test_worker_allows_lightweight_model_overrides(monkeypatch, tmp_path):
+    ocr = load_ocr_module(monkeypatch)
+    monkeypatch.setenv("PDF_STUDY_PADDLEOCR_DET_MODEL", "PP-OCRv6_tiny_det")
+    monkeypatch.setenv("PDF_STUDY_PADDLEOCR_REC_MODEL", "custom_rec")
+    monkeypatch.setenv("PDF_STUDY_PADDLEOCR_DET_LIMIT_SIDE_LEN", "736")
+    monkeypatch.setenv("PDF_STUDY_PADDLEOCR_CPU_THREADS", "1")
+    calls: list[dict[str, object]] = []
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+        def predict(self, image_path):
+            return [{"rec_texts": ["ok"]}]
+
+    worker = ocr.OCRWorker(
+        ocr_factory=FakePaddleOCR,
+        cache_dir=tmp_path / "models",
+        max_workers=1,
+    )
+
+    assert worker.process_image("page-1.jpg") == "ok"
+    assert calls[0]["text_detection_model_name"] == "PP-OCRv6_tiny_det"
+    assert calls[0]["text_recognition_model_name"] == "custom_rec"
+    assert calls[0]["text_det_limit_side_len"] == 736
+    assert calls[0]["cpu_threads"] == 1
 
 
 def test_worker_keeps_paddleocr_instance_thread_local(monkeypatch, tmp_path):

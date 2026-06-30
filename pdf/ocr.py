@@ -14,6 +14,11 @@ DEFAULT_CACHE_DIR = REPO_ROOT / ".paddleocr"
 CACHE_ENV = "PDF_STUDY_PADDLEOCR_CACHE"
 PADDLEOCR_CACHE_ENV = "PADDLEOCR_HOME"
 PADDLE_CACHE_ENVS = (PADDLEOCR_CACHE_ENV, "PADDLE_PDX_CACHE_HOME")
+PADDLE_SOURCE_CHECK_ENV = "PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"
+DET_MODEL_ENV = "PDF_STUDY_PADDLEOCR_DET_MODEL"
+REC_MODEL_ENV = "PDF_STUDY_PADDLEOCR_REC_MODEL"
+DET_LIMIT_SIDE_LEN_ENV = "PDF_STUDY_PADDLEOCR_DET_LIMIT_SIDE_LEN"
+CPU_THREADS_ENV = "PDF_STUDY_PADDLEOCR_CPU_THREADS"
 
 PaddleOCRFactory = Callable[..., Any]
 
@@ -40,6 +45,7 @@ def prepare_model_cache(cache_dir: str | os.PathLike[str] | None = None) -> Path
     resolved.mkdir(parents=True, exist_ok=True)
     for env_name in PADDLE_CACHE_ENVS:
         os.environ[env_name] = str(resolved)
+    os.environ.setdefault(PADDLE_SOURCE_CHECK_ENV, "True")
     return resolved
 
 
@@ -62,7 +68,27 @@ def _load_paddleocr_factory() -> PaddleOCRFactory:
 
 
 def _paddleocr_kwargs(factory: PaddleOCRFactory) -> dict[str, Any]:
-    desired_kwargs: dict[str, Any] = {"lang": "korean", "device": "cpu"}
+    desired_kwargs: dict[str, Any] = {
+        "device": "cpu",
+        # PaddleOCR 3.x enables document orientation/unwarping helpers by
+        # default. They load extra models and are too memory-heavy for local
+        # book-page OCR on small machines.
+        "use_doc_orientation_classify": False,
+        "use_doc_unwarping": False,
+        "use_textline_orientation": False,
+        "text_detection_model_name": os.environ.get(
+            DET_MODEL_ENV, "PP-OCRv5_mobile_det"
+        ),
+        "text_recognition_model_name": os.environ.get(
+            REC_MODEL_ENV, "korean_PP-OCRv5_mobile_rec"
+        ),
+        "text_recognition_batch_size": 1,
+        "text_det_limit_side_len": int(
+            os.environ.get(DET_LIMIT_SIDE_LEN_ENV, "960")
+        ),
+        "text_det_limit_type": "max",
+        "cpu_threads": int(os.environ.get(CPU_THREADS_ENV, "2")),
+    }
     try:
         parameters = inspect.signature(factory).parameters
     except (TypeError, ValueError):
