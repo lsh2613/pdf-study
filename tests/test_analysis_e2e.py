@@ -14,12 +14,18 @@ from pdf_study import analysis, workspace
 
 @pytest.fixture(autouse=True)
 def stub_toc_ocr(monkeypatch):
-    """scan_pdf 목차 OCR 테스트가 실제 PaddleOCR 모델을 로드하지 않게 한다."""
+    """목차 OCR 테스트가 실제 PaddleOCR 모델을 로드하지 않게 한다."""
     class StubWorker:
         def process_image(self, image_path):
             return f"OCR:{Path(image_path).name}"
 
     monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: StubWorker())
+    monkeypatch.setattr(analysis.ocr, "models_cached", lambda: True)
+    monkeypatch.setattr(
+        analysis.ocr,
+        "model_cache_status",
+        lambda: {"cache_dir": "fake", "models": [], "all_cached": True},
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -64,8 +70,8 @@ def test_scan_pdf_ko_with_toc_routes_to_from_outline(make_workspace, ko_with_toc
     assert workspace.load_state(wid)["phases"]["scanning"] == "completed"
 
 
-def test_scan_pdf_no_outline_routes_to_toc_ocr(make_workspace, ko_short):
-    """내장 목차가 없으면 목차 페이지를 렌더하고 OCR 텍스트를 함께 돌려준다."""
+def test_scan_pdf_no_outline_renders_toc_images_without_ocr(make_workspace, ko_short):
+    """내장 목차가 없으면 목차 페이지를 렌더하되 OCR은 별도 단계로 남긴다."""
     wid, _ = make_workspace(ko_short)
     out = analysis.scan_pdf_impl(wid)
     assert out["outline_present"] is False
@@ -76,35 +82,40 @@ def test_scan_pdf_no_outline_routes_to_toc_ocr(make_workspace, ko_short):
     assert out["toc_page_images"], "목차 페이지가 이미지로 렌더되어야 함"
     first = out["toc_page_images"][0]
     assert Path(first["path"]).exists()
-    assert first["ocr_text"].startswith("OCR:p")
+    assert first["ocr_text"] == ""
     assert first["ocr_error"] is None
+    assert first["ocr_status"] == analysis.TOC_OCR_NOT_STARTED
+    assert out["toc_ocr"]["status"] == analysis.TOC_OCR_NOT_STARTED
     assert "scan_page_images" not in out
 
 
-def test_scan_pdf_scanned_no_text_routes_to_toc_ocr_not_rejected(
+def test_scan_pdf_scanned_no_text_renders_toc_images_not_rejected(
     make_workspace, scanned_empty
 ):
-    """텍스트 레이어가 없어도 거부하지 않고 목차 이미지 OCR 경로로 간다."""
+    """텍스트 레이어가 없어도 거부하지 않고 목차 이미지 경로로 간다."""
     wid, _ = make_workspace(scanned_empty)
     out = analysis.scan_pdf_impl(wid)
     rec = out["recommendations"]
     assert rec.get("rejected") in (False, None)
     assert rec["primary_mode"] == "analyze_toc_from_images"
     assert out["toc_page_images"]
-    assert all("ocr_text" in item and "ocr_error" in item for item in out["toc_page_images"])
+    assert all(
+        item["ocr_status"] == analysis.TOC_OCR_NOT_STARTED
+        for item in out["toc_page_images"]
+    )
 
 
 def test_force_vision_skips_outline(make_workspace, ko_with_toc):
-    """force_vision=True면 내장 목차를 무시하고 목차 페이지 OCR로 간다."""
+    """force_vision=True면 내장 목차를 무시하고 목차 페이지 이미지 경로로 간다."""
     wid, _ = make_workspace(ko_with_toc)
     out = analysis.scan_pdf_impl(wid, force_vision=True)
     assert out["outline_present"] is False
     assert out["recommendations"]["primary_mode"] == "analyze_toc_from_images"
     assert out["toc_page_images"]
-    assert out["toc_page_images"][0]["ocr_error"] is None
+    assert out["toc_page_images"][0]["ocr_status"] == analysis.TOC_OCR_NOT_STARTED
 
 
-def test_scan_pdf_toc_ocr_partial_failure_does_not_fail(
+def test_scan_toc_with_ocr_partial_failure_does_not_fail(
     make_workspace, ko_short, monkeypatch
 ):
     """일부 목차 페이지 OCR 실패는 항목의 ocr_error에만 기록한다."""
@@ -118,7 +129,8 @@ def test_scan_pdf_toc_ocr_partial_failure_does_not_fail(
     monkeypatch.setattr(analysis.reader, "locate_toc_pages", lambda doc, scan_size: [1, 2])
 
     wid, _ = make_workspace(ko_short)
-    out = analysis.scan_pdf_impl(wid, scan_size=2)
+    analysis.scan_pdf_impl(wid, scan_size=2)
+    out = analysis.scan_toc_with_ocr_impl(wid)
 
     assert out["recommendations"]["primary_mode"] == "analyze_toc_from_images"
     assert [item["page"] for item in out["toc_page_images"]] == [1, 2]
@@ -126,6 +138,26 @@ def test_scan_pdf_toc_ocr_partial_failure_does_not_fail(
     assert out["toc_page_images"][0]["ocr_error"] is None
     assert out["toc_page_images"][1]["ocr_text"] == ""
     assert "p2 OCR failed" in out["toc_page_images"][1]["ocr_error"]
+    assert out["toc_ocr"]["status"] == "partial_failed"
+
+
+def test_scan_toc_with_ocr_requires_prepare_when_models_missing(
+    make_workspace, ko_short, monkeypatch
+):
+    monkeypatch.setattr(analysis.ocr, "models_cached", lambda: False)
+    monkeypatch.setattr(
+        analysis.ocr,
+        "model_cache_status",
+        lambda: {"cache_dir": "fake", "models": [], "all_cached": False},
+    )
+    wid, _ = make_workspace(ko_short)
+    analysis.scan_pdf_impl(wid)
+
+    out = analysis.scan_toc_with_ocr_impl(wid)
+
+    assert out["requires_prepare_ocr"] is True
+    assert out["ocr_cache"]["all_cached"] is False
+    assert out["toc_page_images"]
 
 
 def test_scan_pdf_outline_path_does_not_call_toc_ocr(

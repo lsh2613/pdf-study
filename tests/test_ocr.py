@@ -41,6 +41,26 @@ def test_default_cache_is_project_local_and_can_be_overridden(monkeypatch, tmp_p
     assert ocr.resolve_model_cache_dir() == custom_cache
 
 
+def test_model_cache_status_tracks_required_models(monkeypatch, tmp_path):
+    ocr = load_ocr_module(monkeypatch)
+    cache_dir = tmp_path / "models"
+
+    status = ocr.model_cache_status(cache_dir)
+    assert status["all_cached"] is False
+    assert {model["name"] for model in status["models"]} == {
+        "PP-OCRv5_mobile_det",
+        "korean_PP-OCRv5_mobile_rec",
+    }
+
+    for model in status["models"]:
+        model_dir = Path(model["path"])
+        model_dir.mkdir(parents=True)
+        (model_dir / "inference.json").write_text("{}", encoding="utf-8")
+        (model_dir / "inference.pdiparams").write_bytes(b"params")
+
+    assert ocr.models_cached(cache_dir) is True
+
+
 def test_worker_initializes_paddleocr_for_cpu_and_local_cache(monkeypatch, tmp_path):
     ocr = load_ocr_module(monkeypatch)
     calls: list[dict[str, object]] = []
@@ -103,6 +123,37 @@ def test_worker_allows_lightweight_model_overrides(monkeypatch, tmp_path):
     assert calls[0]["text_recognition_model_name"] == "custom_rec"
     assert calls[0]["text_det_limit_side_len"] == 736
     assert calls[0]["cpu_threads"] == 1
+
+
+def test_worker_prepare_loads_model_and_reports_download_need(monkeypatch, tmp_path):
+    ocr = load_ocr_module(monkeypatch)
+    calls: list[dict[str, object]] = []
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+            cache_dir = Path(os.environ["PADDLEOCR_HOME"])
+            for name in ocr.required_model_names():
+                model_dir = cache_dir / "official_models" / name
+                model_dir.mkdir(parents=True, exist_ok=True)
+                (model_dir / "inference.json").write_text("{}", encoding="utf-8")
+                (model_dir / "inference.pdiparams").write_bytes(b"params")
+
+        def predict(self, image_path):
+            return [{"rec_texts": ["ok"]}]
+
+    worker = ocr.OCRWorker(
+        ocr_factory=FakePaddleOCR,
+        cache_dir=tmp_path / "models",
+        max_workers=1,
+    )
+
+    data = worker.prepare()
+
+    assert calls
+    assert data["download_required"] is True
+    assert data["model_loaded"] is True
+    assert data["all_cached"] is True
 
 
 def test_worker_keeps_paddleocr_instance_thread_local(monkeypatch, tmp_path):

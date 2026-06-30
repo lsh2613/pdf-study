@@ -17,6 +17,13 @@ get_chapter_content/save_chapter_result(+ extension이면 save_extension_result)
 list_pending_chapters → finalize_study
 ```
 
+내장 목차가 없거나 목차 재분석이 필요하면 `scan_pdf` 뒤에 다음 단계를 거쳐
+챕터를 구성한 다음 `set_chapters`로 진행하세요.
+
+```text
+prepare_ocr → scan_toc_with_ocr
+```
+
 Do not directly summarize a PDF when the request is to create learning material
 from a PDF. Use this MCP workflow instead.
 

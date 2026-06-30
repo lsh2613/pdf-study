@@ -1,4 +1,4 @@
-"""FastMCP 서버 — pdf-study-builder의 12개 도구 등록.
+"""FastMCP 서버 — pdf-study-builder MCP 도구 등록.
 
 모든 도구는 {ok, error, data, next_action} 형식으로 응답하며,
 예외는 raise하지 않고 ok=False로 변환한다 (MCP 통신 안정성).
@@ -30,8 +30,12 @@ def _ok(data: Any = None, next_action: str | None = None) -> dict[str, Any]:
     return {"ok": True, "error": None, "data": data, "next_action": next_action}
 
 
-def _err(error: str, data: Any = None) -> dict[str, Any]:
-    return {"ok": False, "error": error, "data": data, "next_action": None}
+def _err(
+    error: str,
+    data: Any = None,
+    next_action: str | None = None,
+) -> dict[str, Any]:
+    return {"ok": False, "error": error, "data": data, "next_action": next_action}
 
 
 def _nonempty(v: Any) -> bool:
@@ -258,19 +262,20 @@ def scan_pdf(
     scan_size: int = 30,
     force_vision: bool = False,
 ) -> dict[str, Any]:
-    """PDF 메타 + 챕터 경계 소스(내장 목차 또는 목차 페이지 OCR) + offset.
+    """PDF 메타 + 챕터 경계 소스(내장 목차 또는 목차 후보 이미지) + offset.
 
     챕터 경계는 텍스트 레이어를 신뢰하지 않고 두 소스에서만 얻습니다:
     응답.data.recommendations.primary_mode 가
       - "from_outline": PDF 내장 목차(북마크)로 챕터를 구성. suggested_chapters에
         담겨 옵니다. **사용자에게 보여 확인**받고, 맞으면 그대로 set_chapters.
         **틀리면 scan_pdf(work_id, force_vision=True)로 재호출**하면 목차 페이지를
-        이미지로 렌더하고 서버가 PaddleOCR CPU 텍스트를 함께 제공합니다.
+        이미지로 렌더합니다. OCR은 prepare_ocr 후 scan_toc_with_ocr에서 수행합니다.
       - "analyze_toc_from_images": 내장 목차가 없음. 응답.data.toc_page_images
-        (목차 페이지 JPEG 경로, ocr_text, ocr_error)를 바탕으로 챕터를 구성하세요.
+        (목차 페이지 JPEG 경로, ocr_status)를 확인한 뒤 prepare_ocr와
+        scan_toc_with_ocr를 호출해 OCR 텍스트를 얻으세요.
         **PDF 텍스트나 파이썬 스크립트로 목차를 추정하지 마세요.**
     force_vision은 외부 계약 호환용 legacy 이름이며, 현재 동작은 목차 페이지
-    이미지 렌더 + 서버 OCR 텍스트 제공입니다.
+    이미지 렌더입니다.
 
     **페이지 오프셋 + 선택지 흐름 (필수)**:
     recommendations에 page_offset(물리 = 책 + offset), offset_confidence,
@@ -286,17 +291,66 @@ def scan_pdf(
     rec = data.get("recommendations", {})
     if rec.get("rejected"):
         return _err(rec.get("reason") or "scan rejected", data=data)
-    next_action = (
-        f'set_chapters(work_id="{work_id}", chapters=<from_outline면 '
-        "recommendations.suggested_chapters, 아니면 toc_page_images[].ocr_text와 "
-        'path 이미지를 확인해 구성>, execution_mode=<사용자 선택>, '
-        "extraction_mode=<사용자 선택>, book_info={...})"
-    )
+    if rec.get("primary_mode") == "analyze_toc_from_images":
+        next_action = (
+            f'prepare_ocr(work_id="{work_id}") 후 '
+            f'scan_toc_with_ocr(work_id="{work_id}")로 toc_page_images[].ocr_text를 '
+            "얻고, path 이미지와 함께 확인해 chapters를 구성하세요."
+        )
+    else:
+        next_action = (
+            f'set_chapters(work_id="{work_id}", chapters=recommendations.suggested_chapters, '
+            "execution_mode=<사용자 선택>, extraction_mode=<사용자 선택>, book_info={...})"
+        )
     return _ok(data, next_action=next_action)
 
 
 # ---------------------------------------------------------------------------
-# 3. set_chapters
+# 3. prepare_ocr / scan_toc_with_ocr
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+@_safe("prepare_ocr")
+def prepare_ocr(work_id: str) -> dict[str, Any]:
+    """PaddleOCR CPU 모델을 준비합니다.
+
+    첫 실행에서 모델 파일 다운로드와 모델 로드가 오래 걸릴 수 있으므로, OCR이
+    필요한 흐름에서는 이 도구를 별도로 호출해 사용자에게 지연 이유를 드러냅니다.
+    다음 단계: scan_toc_with_ocr(work_id) 또는 set_chapters(..., extraction_mode="ocr")
+    """
+    data = analysis.prepare_ocr_impl(work_id)
+    return _ok(data, next_action=(
+        f'scan_toc_with_ocr(work_id="{work_id}") 또는 '
+        f'set_chapters(work_id="{work_id}", ..., extraction_mode="ocr")'
+    ))
+
+
+@mcp.tool()
+@_safe("scan_toc_with_ocr")
+def scan_toc_with_ocr(work_id: str) -> dict[str, Any]:
+    """scan_pdf가 렌더한 목차 후보 이미지를 PaddleOCR CPU로 읽습니다.
+
+    이 도구는 챕터를 자동 확정하지 않습니다. 응답의 toc_page_images[].ocr_text와
+    path 이미지를 확인해 chapters를 구성한 뒤 set_chapters를 호출하세요.
+    """
+    data = analysis.scan_toc_with_ocr_impl(work_id)
+    if data.get("requires_prepare_ocr"):
+        return _err(
+            "OCR 모델 캐시가 없어 목차 OCR을 시작하지 않았습니다. "
+            "prepare_ocr(work_id)를 먼저 호출해 모델 다운로드/로드를 사용자가 볼 수 "
+            "있는 단계에서 수행하세요.",
+            data=data,
+            next_action=f'prepare_ocr(work_id="{work_id}")',
+        )
+    return _ok(data, next_action=(
+        f'set_chapters(work_id="{work_id}", chapters=<toc_page_images[].ocr_text와 '
+        "path 이미지로 구성>, execution_mode=<사용자 선택>, "
+        "extraction_mode=<사용자 선택>, book_info={...})"
+    ))
+
+
+# ---------------------------------------------------------------------------
+# 4. set_chapters
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -447,6 +501,17 @@ def set_chapters(
                     "execution_mode": execution_mode,
                 },
             )
+    elif extraction_mode == "ocr" and not analysis.ocr.models_cached():
+        return _err(
+            "OCR 모델 캐시가 없어 본문 OCR 선계산을 시작하지 않았습니다. "
+            "prepare_ocr(work_id)를 먼저 호출해 모델 다운로드/로드를 사용자가 볼 수 "
+            "있는 단계에서 수행하세요.",
+            data={
+                "ocr_cache": analysis.ocr.model_cache_status(),
+                "forced_next_step": "prepare_ocr",
+            },
+            next_action=f'prepare_ocr(work_id="{work_id}")',
+        )
 
     data = analysis.set_chapters_impl(
         work_id, chapters, execution_mode, extraction_mode,

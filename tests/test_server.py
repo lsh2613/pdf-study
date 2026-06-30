@@ -11,12 +11,28 @@ from pdf_study import server, workspace
 
 @pytest.fixture(autouse=True)
 def stub_scan_toc_ocr(monkeypatch):
-    """scan_pdf 목차 OCR 테스트가 실제 PaddleOCR 모델을 로드하지 않게 한다."""
+    """OCR 테스트가 실제 PaddleOCR 모델을 로드하지 않게 한다."""
     class StubWorker:
         def process_image(self, img_path):
             return "목차 OCR 텍스트"
 
+        def prepare(self):
+            return {
+                "cache_dir": "fake",
+                "models": [],
+                "all_cached": True,
+                "download_required": False,
+                "model_loaded": True,
+                "elapsed_sec": 0.0,
+            }
+
     monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda: StubWorker())
+    monkeypatch.setattr(server.analysis.ocr, "models_cached", lambda: True)
+    monkeypatch.setattr(
+        server.analysis.ocr,
+        "model_cache_status",
+        lambda: {"cache_dir": "fake", "models": [], "all_cached": True},
+    )
 
 
 def _check_envelope(resp: dict) -> None:
@@ -328,6 +344,32 @@ def test_set_chapters_ocr_failure_returns_failed_chapters(
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "failed"
 
 
+def test_set_chapters_ocr_requires_prepare_when_cache_missing(
+    tmp_path, ko_short, monkeypatch
+):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out_ocr_missing"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    monkeypatch.setattr(server.analysis.ocr, "models_cached", lambda: False)
+    monkeypatch.setattr(
+        server.analysis.ocr,
+        "model_cache_status",
+        lambda: {"cache_dir": "fake", "models": [], "all_cached": False},
+    )
+
+    r = server.set_chapters(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
+        execution_mode="sequential",
+        extraction_mode="ocr",
+        language="ko",
+    )
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["forced_next_step"] == "prepare_ocr"
+    assert r["next_action"] == f'prepare_ocr(work_id="{wid}")'
+
+
 def test_save_chapter_result_accepts_without_body_text(tmp_path, ko_short):
     """body_text 없이도 요약/문제 저장은 정상 완료된다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
@@ -552,10 +594,10 @@ def test_save_extension_result_rejects_empty_extension(tmp_path, ko_short):
 
 
 # ---------------------------------------------------------------------------
-# scan_pdf — 텍스트 레이어 없어도 거부하지 않고 목차 이미지 OCR 경로
+# scan_pdf / scan_toc_with_ocr — 텍스트 레이어 없어도 거부하지 않고 목차 이미지 경로
 # ---------------------------------------------------------------------------
 
-def test_scan_pdf_scanned_routes_to_toc_ocr_not_rejected(tmp_path, scanned_empty):
+def test_scan_pdf_scanned_renders_toc_images_without_ocr(tmp_path, scanned_empty):
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
     r = server.scan_pdf(wid)
     _check_envelope(r)
@@ -563,11 +605,59 @@ def test_scan_pdf_scanned_routes_to_toc_ocr_not_rejected(tmp_path, scanned_empty
     rec = r["data"]["recommendations"]
     assert rec["primary_mode"] == "analyze_toc_from_images"
     assert r["data"]["toc_page_images"]
-    assert r["data"]["toc_page_images"][0]["ocr_text"] == "목차 OCR 텍스트"
+    assert r["data"]["toc_page_images"][0]["ocr_text"] == ""
     assert r["data"]["toc_page_images"][0]["ocr_error"] is None
-    assert "ocr_text" in r["next_action"]
+    assert r["data"]["toc_page_images"][0]["ocr_status"] == "not_started"
+    assert "prepare_ocr" in r["next_action"]
+    assert "scan_toc_with_ocr" in r["next_action"]
     # 텍스트는 응답에 노출되지 않는다
     assert "scanned_text" not in r["data"]
+
+
+def test_scan_toc_with_ocr_returns_ocr_text(tmp_path, scanned_empty):
+    wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+
+    r = server.scan_toc_with_ocr(wid)
+
+    _check_envelope(r)
+    assert r["ok"] is True, r
+    assert r["data"]["toc_page_images"][0]["ocr_text"] == "목차 OCR 텍스트"
+    assert r["data"]["toc_page_images"][0]["ocr_error"] is None
+    assert r["data"]["toc_page_images"][0]["ocr_status"] == "completed"
+    assert "set_chapters" in r["next_action"]
+
+
+def test_scan_toc_with_ocr_requires_prepare_when_cache_missing(
+    tmp_path, scanned_empty, monkeypatch
+):
+    monkeypatch.setattr(server.analysis.ocr, "models_cached", lambda: False)
+    monkeypatch.setattr(
+        server.analysis.ocr,
+        "model_cache_status",
+        lambda: {"cache_dir": "fake", "models": [], "all_cached": False},
+    )
+    wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+
+    r = server.scan_toc_with_ocr(wid)
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["requires_prepare_ocr"] is True
+    assert r["next_action"] == f'prepare_ocr(work_id="{wid}")'
+
+
+def test_prepare_ocr_returns_model_diagnostics(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+
+    r = server.prepare_ocr(wid)
+
+    _check_envelope(r)
+    assert r["ok"] is True, r
+    assert r["data"]["model_loaded"] is True
+    assert r["data"]["all_cached"] is True
+    assert "elapsed_sec" in r["data"]
 
 
 def test_scan_skips_offset_and_language_on_no_text_layer(tmp_path, scanned_empty, monkeypatch):

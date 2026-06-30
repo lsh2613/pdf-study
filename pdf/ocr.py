@@ -4,6 +4,7 @@ import concurrent.futures
 import inspect
 import os
 import threading
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Callable
@@ -47,6 +48,40 @@ def prepare_model_cache(cache_dir: str | os.PathLike[str] | None = None) -> Path
         os.environ[env_name] = str(resolved)
     os.environ.setdefault(PADDLE_SOURCE_CHECK_ENV, "True")
     return resolved
+
+
+def required_model_names() -> list[str]:
+    return [
+        os.environ.get(DET_MODEL_ENV, "PP-OCRv5_mobile_det"),
+        os.environ.get(REC_MODEL_ENV, "korean_PP-OCRv5_mobile_rec"),
+    ]
+
+
+def model_cache_status(cache_dir: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+    resolved = resolve_model_cache_dir(cache_dir)
+    models = []
+    all_cached = True
+    for name in required_model_names():
+        model_dir = resolved / "official_models" / name
+        cached = (
+            (model_dir / "inference.json").exists()
+            and (model_dir / "inference.pdiparams").exists()
+        )
+        all_cached = all_cached and cached
+        models.append({
+            "name": name,
+            "path": str(model_dir),
+            "cached": cached,
+        })
+    return {
+        "cache_dir": str(resolved),
+        "models": models,
+        "all_cached": all_cached,
+    }
+
+
+def models_cached(cache_dir: str | os.PathLike[str] | None = None) -> bool:
+    return bool(model_cache_status(cache_dir)["all_cached"])
 
 
 def calculate_ocr_worker_limit(cpu_count: int | None | object = _AUTO_CPU_COUNT) -> int:
@@ -208,6 +243,22 @@ class OCRWorker:
     def process_image(self, image_path: str | os.PathLike[str]) -> str:
         future = self.executor.submit(self._extract_text, image_path)
         return future.result()
+
+    def prepare(self) -> dict[str, Any]:
+        before = model_cache_status(self._cache_dir)
+        started = time.perf_counter()
+        future = self.executor.submit(self._get_ocr)
+        future.result()
+        elapsed = time.perf_counter() - started
+        after = model_cache_status(self._cache_dir)
+        return {
+            "cache_dir": after["cache_dir"],
+            "models": after["models"],
+            "all_cached": after["all_cached"],
+            "download_required": not before["all_cached"],
+            "model_loaded": True,
+            "elapsed_sec": round(elapsed, 3),
+        }
 
     def _extract_text(self, image_path: str | os.PathLike[str]) -> str:
         ocr = self._get_ocr()

@@ -8,7 +8,7 @@
 
 ## 챕터 경계
 
-챕터 경계의 정상 출처는 PDF 내장 목차와 목차 페이지 이미지뿐이다. 내장 목차가 있으면 그 물리 페이지를 우선 후보로 삼고 사용자에게 확인한다. 내장 목차가 틀렸거나 없으면 서버가 목차 페이지 이미지를 렌더하고 PaddleOCR CPU로 읽은 `ocr_text`를 함께 제공하며, 클라이언트는 그 텍스트와 필요 시 이미지를 확인해 챕터를 구성한다.
+챕터 경계의 정상 출처는 PDF 내장 목차와 목차 페이지 이미지뿐이다. 내장 목차가 있으면 그 물리 페이지를 우선 후보로 삼고 사용자에게 확인한다. 내장 목차가 틀렸거나 없으면 `scan_pdf`가 목차 페이지 이미지를 렌더하고, 클라이언트는 `prepare_ocr` 후 `scan_toc_with_ocr`로 PaddleOCR CPU `ocr_text`를 받아 필요 시 이미지와 함께 확인해 챕터를 구성한다.
 
 PDF 텍스트 레이어로 목차를 추정하면 안 된다. 스캔본, 깨진 글꼴, 발췌본에서는 텍스트의 줄 정렬과 페이지 번호가 믿을 수 없기 때문이다. 목차 이미지를 읽을 수 없을 때만 균등 청크나 직접 입력을 선택할 수 있다.
 
@@ -20,7 +20,7 @@ PDF 텍스트 레이어로 목차를 추정하면 안 된다. 스캔본, 깨진 
 
 text 모드는 PDF 텍스트 레이어를 신뢰할 수 있을 때만 쓴다. 텍스트 레이어가 없거나 모지바케로 깨진 PDF에서 text 모드를 쓰면 의미 없는 본문이 저장되므로 서버는 OCR 모드 선택을 요구해야 한다.
 
-OCR 모드에서는 `set_chapters` 시점에 서버가 본문 챕터의 페이지 이미지를 PaddleOCR CPU로 읽어 `chapters_raw/chN.json`에 `text`와 `char_count`로 저장한다. skip 챕터는 OCR과 저장 대상에서 제외된다. 같은 `page_range`의 유효한 OCR raw 본문이 이미 있으면 재OCR하지 않고 저장된 값을 재사용한다. OCR 선처리 병렬 상한은 서버 프로세스 전역으로 공유되며, 여러 호출이 겹쳐도 동시에 OCR되는 챕터 수는 최대 2개(CPU 1코어면 1개)를 넘지 않는다. 페이지 OCR 예외가 발생하거나 챕터 전체 OCR 결과가 공백이면 해당 챕터는 실패로 표시하고 partial raw 본문은 저장하지 않는다. 이 실패는 `set_chapters`와 `get_subagent_prompts`의 `failed_chapters`로 드러나며, 정상 sub-agent 흐름으로 넘어가면 안 된다. `get_subagent_prompts`와 `get_chapter_content`는 raw `text`와 `char_count`가 준비되지 않은 챕터를 거부한다. 요약 저장 payload에 `body_text`가 들어와도 raw 본문을 덮어쓰지 않는다.
+OCR 모드에서는 `set_chapters` 시점에 서버가 본문 챕터의 페이지 이미지를 PaddleOCR CPU로 읽어 `chapters_raw/chN.json`에 `text`와 `char_count`로 저장한다. 모델 캐시가 없으면 `set_chapters`는 본문 OCR을 시작하지 않고 `prepare_ocr`를 먼저 호출하게 해야 한다. 모델 캐시가 있으면 내부 모델 로드는 허용한다. skip 챕터는 OCR과 저장 대상에서 제외된다. 같은 `page_range`의 유효한 OCR raw 본문이 이미 있으면 재OCR하지 않고 저장된 값을 재사용한다. OCR 선처리 병렬 상한은 서버 프로세스 전역으로 공유되며, 여러 호출이 겹쳐도 동시에 OCR되는 챕터 수는 최대 2개(CPU 1코어면 1개)를 넘지 않는다. 페이지 OCR 예외가 발생하거나 챕터 전체 OCR 결과가 공백이면 해당 챕터는 실패로 표시하고 partial raw 본문은 저장하지 않는다. 이 실패는 `set_chapters`와 `get_subagent_prompts`의 `failed_chapters`로 드러나며, 정상 sub-agent 흐름으로 넘어가면 안 된다. `get_subagent_prompts`와 `get_chapter_content`는 raw `text`와 `char_count`가 준비되지 않은 챕터를 거부한다. 요약 저장 payload에 `body_text`가 들어와도 raw 본문을 덮어쓰지 않는다.
 
 처리 모드는 목차 분석 방식이 아니라 본문 입력과 챕터 처리 방식만 결정한다. 사용자가 text/OCR과 순차/병렬 조합을 고르기 전에는 서버가 기본값을 임의로 적용하면 안 된다.
 
