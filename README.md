@@ -36,6 +36,6 @@ from a PDF. Use this MCP workflow instead.
 ./scripts/setup_mcp.sh
 ```
 
-스크립트가 `.venv` 생성, 의존성 설치, import 검증을 수행한 뒤 MCP 클라이언트에
-복사할 JSON 설정을 출력합니다. 자세한 내용은 [docs/10-mcp-setup.md](docs/10-mcp-setup.md)를
+스크립트가 `.venv` 생성, 의존성 설치, import 검증을 수행한 뒤 Claude Code,
+Codex CLI, Antigravity CLI 설정을 자동 적용합니다. 자세한 내용은 [docs/10-mcp-setup.md](docs/10-mcp-setup.md)를
 참조하세요.
