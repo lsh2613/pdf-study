@@ -35,17 +35,17 @@
 
 `get_chapter_content(work_id, chapter_id)`는 챕터 입력을 반환한다. text 모드와 OCR 모드 모두 `text`가 들어간다. OCR 모드의 `text`는 `set_chapters` 시점에 PaddleOCR CPU로 선계산해 `chapters_raw/chN.json`에 저장한 본문이다. 등록되지 않은 `chapter_id`, skip 챕터, 아직 챕터가 설정되지 않은 작업은 실패한다.
 
-`save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다. `summary`, `key_points`, 활성화된 `multiple_choice`, `short_answer`, `reflection` 중 필요한 값이 비어 있으면 실패하고 `data.missing`에 누락 필드를 담는다. `body_text`는 요구하지 않으며, 들어오더라도 저장 전에 제거되어 `chapters_raw`의 canonical `text`와 `char_count`를 덮어쓰지 않는다.
+`save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다. `summary`, `key_points`, 활성화된 `questions.multiple_choice`, `questions.short_answer`, `questions.reflection` 중 필요한 값이 없거나 비어 있으면 실패하고 `data.missing`에 누락 필드를 담는다. 실패한 저장은 해당 챕터를 completed로 바꾸면 안 된다. `body_text`는 요구하지 않으며, 들어오더라도 저장 전에 제거되어 `chapters_raw`의 canonical `text`와 `char_count`를 덮어쓰지 않는다.
 
-`search_extension_context(work_id, chapter_id, query)`는 확장 문제용 검색 결과를 반환한다. 빈 검색어는 실패한다. 외부 검색 자체의 오류는 `ok=true`, `data.exa_ok=false`, `data.results=[]`로 표현해 챕터 처리를 계속하게 한다.
+`search_extension_context(work_id, chapter_id, query)`는 확장 문제용 검색 결과를 반환한다. 빈 검색어는 실패한다. 챕터에서 고른 키워드나 주제 수준 검색어는 외부 검색으로 전달될 수 있다. 외부 검색 자체의 오류는 `ok=true`, `data.exa_ok=false`, `data.results=[]`로 표현해 챕터 처리를 계속하게 한다.
 
-`save_extension_result(work_id, chapter_id, data)`는 확장 문제를 저장한다. `questions.extension`이 비어 있으면 실패한다.
+`save_extension_result(work_id, chapter_id, data)`는 확장 문제를 저장한다. `questions.extension`이 없거나 비어 있으면 실패하고 `data.missing=["questions.extension"]`을 담는다. 실패한 저장은 해당 챕터의 extension 상태를 completed로 바꾸면 안 된다.
 
 `get_work_state(work_id)`는 상태 파일 전체를 반환한다. 알 수 없는 작업은 실패한다.
 
-`list_pending_chapters(work_id)`는 완료되지 않은 요약과 확장 챕터 ID를 반환한다. skip과 completed는 남은 작업으로 보지 않는다.
+`list_pending_chapters(work_id)`는 완료되지 않은 요약과 확장 챕터 ID를 반환한다. save 도구의 검증을 통과해 completed가 된 챕터와 skip 챕터만 남은 작업에서 제외된다.
 
-`finalize_study(work_id, output_format, keep_work_dir, force)`는 최종 결과물을 만든다. `output_format`은 `html` 또는 `md_tui`만 허용한다. 값이 없으면 실패 응답의 `data.choices`를 사용자에게 그대로 보여줘야 한다. 남은 챕터가 있으면 `force=true`가 아닌 한 실패한다.
+`finalize_study(work_id, output_format, keep_work_dir, force)`는 최종 결과물을 만든다. `output_format`은 `html` 또는 `md_tui`만 허용한다. 값이 없으면 실패 응답의 `data.choices`를 사용자에게 그대로 보여줘야 한다. 남은 챕터가 있으면 `force=true`가 아닌 한 실패하며, 처리되지 않은 챕터를 조용히 제외하고 결과물을 만들면 안 된다.
 
 출력 형식 선택 실패 응답의 선택지는 `value`, `label`, `desc`를 담는다. 클라이언트는 `html`과 `md_tui` 외의 값을 만들어 제시하면 안 된다.
 

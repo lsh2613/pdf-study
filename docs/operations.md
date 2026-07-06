@@ -12,7 +12,9 @@
 ./scripts/setup_mcp.sh
 ```
 
-이 명령은 저장소 안에 `.venv`를 만들고, 패키지를 editable로 설치하고, `mcp`, `fitz`, `PIL`, `rich`, `markdown_it`, `pdf_study` import를 확인한다. 마지막에 MCP 클라이언트 설정에 복사할 JSON을 출력한다.
+이 명령은 저장소 안에 `.venv`를 만들고, 패키지를 editable로 설치하고, `mcp`, `fitz`, `PIL`, `rich`, `markdown_it`, `paddle`, `paddleocr`, `pdf_study` import를 확인한다. 검증이 끝나면 Claude Code, Codex CLI, Antigravity CLI 설정을 자동 적용한다. 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다.
+
+특정 클라이언트만 갱신하려면 `--claude`, `--codex`, `--antigravity-cli` 중 필요한 옵션을 붙인다. 기본은 현재 프로젝트의 로컬 설정이며, 전역 설정에 적용하려면 `--global`을 붙인다.
 
 설정만 다시 출력하려면 다음 명령을 쓴다.
 
@@ -20,11 +22,17 @@
 ./scripts/setup_mcp.sh --print-config
 ```
 
+`--print-config`는 설치나 설정 적용 없이 현재 checkout 기준 JSON만 출력한다.
+
 이미 만든 환경이 정상인지 확인하려면 다음 명령을 쓴다.
 
 ```bash
 ./scripts/setup_mcp.sh --check
 ```
+
+`--check`는 기존 `.venv`에서 필수 import가 가능한지만 확인한다. `.venv`를 만들거나 패키지를 설치하거나 클라이언트 설정을 적용하지 않는다.
+
+`uv`가 없으면 스크립트가 자동 설치를 시도할 수 있다. macOS에서 `libomp`가 없고 Homebrew가 있으면 PaddleOCR 실행을 위해 `brew install libomp`를 시도할 수 있다.
 
 ## 개발 중 실행
 
