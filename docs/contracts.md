@@ -35,11 +35,11 @@
 
 `get_chapter_content(work_id, chapter_id)`는 챕터 입력을 반환한다. text 모드와 OCR 모드 모두 `text`가 들어간다. OCR 모드의 `text`는 `set_chapters` 시점에 PaddleOCR CPU로 선계산해 `chapters_raw/chN.json`에 저장한 본문이다. 등록되지 않은 `chapter_id`, skip 챕터, 아직 챕터가 설정되지 않은 작업은 실패한다.
 
-`save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다. `summary`, `key_points`, 활성화된 `questions.multiple_choice`, `questions.short_answer`, `questions.reflection` 중 필요한 값이 없거나 비어 있으면 실패하고 `data.missing`에 누락 필드를 담는다. 실패한 저장은 해당 챕터를 completed로 바꾸면 안 된다. `body_text`는 요구하지 않으며, 들어오더라도 저장 전에 제거되어 `chapters_raw`의 canonical `text`와 `char_count`를 덮어쓰지 않는다.
+`save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다. `summary`는 비어 있지 않은 문자열, `key_points`는 비어 있지 않은 문자열 배열이어야 한다. `questions`는 객체여야 하며 `multiple_choice`, `short_answer`, `reflection` 키를 모두 배열로 가져야 한다. 활성화된 기본 문제 유형은 빈 배열이면 실패하고, 비활성화된 유형도 키는 유지해야 한다. 객관식 항목은 비어 있지 않은 `id`, `question`, `explanation`, 최소 2개의 비어 있지 않은 `options`, 범위 안의 정수 `answer_index`를 가져야 한다. 단답형과 성찰형 항목은 비어 있지 않은 `id`, `question`, `model_answer`를 가져야 한다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 하고, `title`이 있으면 문자열이어야 한다. 실패하면 `data.missing`에 `questions.multiple_choice[0].options` 같은 경로를 담고, 해당 챕터를 completed로 바꾸거나 요약·퀴즈 파일을 남기면 안 된다. `body_text`는 요구하지 않으며, 들어오더라도 저장 전에 제거되어 `chapters_raw`의 canonical `text`와 `char_count`를 덮어쓰지 않는다.
 
 `search_extension_context(work_id, chapter_id, query)`는 확장 문제용 검색 결과를 반환한다. 빈 검색어는 실패한다. 챕터에서 고른 키워드나 주제 수준 검색어는 외부 검색으로 전달될 수 있다. 외부 검색 자체의 오류는 `ok=true`, `data.exa_ok=false`, `data.results=[]`로 표현해 챕터 처리를 계속하게 한다.
 
-`save_extension_result(work_id, chapter_id, data)`는 확장 문제를 저장한다. `questions.extension`이 없거나 비어 있으면 실패하고 `data.missing=["questions.extension"]`을 담는다. 실패한 저장은 해당 챕터의 extension 상태를 completed로 바꾸면 안 된다.
+`save_extension_result(work_id, chapter_id, data)`는 확장 문제를 저장한다. `questions.extension`은 비어 있지 않은 배열이어야 한다. 각 항목은 비어 있지 않은 `id`, `question`, `model_answer`, 문자열 `context`, 문자열 배열 `sources`를 가져야 한다. `sources=[]`는 검색 실패나 결과 없음에서 유효하며 이때 `context`도 빈 문자열일 수 있다. `sources`가 하나 이상 있으면 `context`도 비어 있으면 안 된다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 한다. 실패하면 `data.missing`에 경로를 담고, 해당 챕터의 extension 상태를 completed로 바꾸거나 확장 문제 파일을 남기면 안 된다. `body_text`가 들어오면 저장 전에 제거된다.
 
 `get_work_state(work_id)`는 상태 파일 전체를 반환한다. 알 수 없는 작업은 실패한다.
 
