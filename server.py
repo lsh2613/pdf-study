@@ -38,32 +38,156 @@ def _err(
     return {"ok": False, "error": error, "data": data, "next_action": next_action}
 
 
-def _nonempty(v: Any) -> bool:
-    """필수 값 존재 판정: None/빈 문자열/빈 리스트·딕셔너리는 '없음'으로 본다."""
-    if v is None:
+def _is_nonempty_str(v: Any) -> bool:
+    return isinstance(v, str) and bool(v.strip())
+
+
+def _is_int(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _validate_string_list(v: Any, path: str, missing: list[str], *, allow_empty: bool) -> bool:
+    if not isinstance(v, list):
+        missing.append(path)
         return False
-    if isinstance(v, str):
-        return bool(v.strip())
-    if isinstance(v, (list, dict, tuple)):
-        return len(v) > 0
-    return True
+    if not allow_empty and not v:
+        missing.append(path)
+        return False
+    ok = True
+    for idx, item in enumerate(v):
+        if not _is_nonempty_str(item):
+            missing.append(f"{path}[{idx}]")
+            ok = False
+    return ok
 
 
-def _missing_summary_fields(data: dict[str, Any], options: dict[str, bool]) -> list[str]:
+def _validate_required_strings(
+    item: dict[str, Any],
+    fields: tuple[str, ...],
+    path: str,
+    missing: list[str],
+) -> None:
+    for field in fields:
+        if not _is_nonempty_str(item.get(field)):
+            missing.append(f"{path}.{field}")
+
+
+def _validate_basic_question_items(
+    items: list[Any],
+    qtype: str,
+    missing: list[str],
+) -> None:
+    for idx, item in enumerate(items):
+        path = f"questions.{qtype}[{idx}]"
+        if not isinstance(item, dict):
+            missing.append(path)
+            continue
+
+        if qtype == "multiple_choice":
+            _validate_required_strings(item, ("id", "question", "explanation"), path, missing)
+
+            options = item.get("options")
+            options_ok = _validate_string_list(
+                options,
+                f"{path}.options",
+                missing,
+                allow_empty=False,
+            )
+            if isinstance(options, list) and len(options) < 2:
+                missing.append(f"{path}.options")
+                options_ok = False
+
+            answer_index = item.get("answer_index")
+            if not _is_int(answer_index):
+                missing.append(f"{path}.answer_index")
+            elif options_ok and not (0 <= answer_index < len(options)):
+                missing.append(f"{path}.answer_index")
+        else:
+            _validate_required_strings(item, ("id", "question", "model_answer"), path, missing)
+
+
+def _missing_summary_fields(
+    data: dict[str, Any],
+    options: dict[str, bool],
+    chapter_id: str,
+) -> list[str]:
     """save_chapter_result 페이로드에서 비었거나 누락된 필수 필드 목록.
 
-    summary·key_points는 항상 필수, 기본 문제 유형은 **활성화된 것만** 비어있지
-    않아야 한다(스케일 표상 활성 유형은 챕터마다 최소 1개가 나온다).
+    prompts.py의 기본 문제 JSON 스키마를 서버 경계에서도 강제한다.
     """
     missing: list[str] = []
-    if not _nonempty(data.get("summary")):
+    if not isinstance(data, dict):
+        return ["data"]
+
+    if "chapter_id" in data and data.get("chapter_id") != chapter_id:
+        missing.append("chapter_id")
+    if "title" in data and not isinstance(data.get("title"), str):
+        missing.append("title")
+
+    if not _is_nonempty_str(data.get("summary")):
         missing.append("summary")
-    if not _nonempty(data.get("key_points")):
-        missing.append("key_points")
-    questions = data.get("questions") or {}
-    for t in ("multiple_choice", "short_answer", "reflection"):
-        if options.get(t) and not _nonempty(questions.get(t)):
-            missing.append(f"questions.{t}")
+
+    _validate_string_list(data.get("key_points"), "key_points", missing, allow_empty=False)
+
+    questions = data.get("questions")
+    if not isinstance(questions, dict):
+        missing.append("questions")
+        questions = {}
+
+    for qtype in ("multiple_choice", "short_answer", "reflection"):
+        if qtype not in questions or not isinstance(questions.get(qtype), list):
+            missing.append(f"questions.{qtype}")
+            continue
+        items = questions[qtype]
+        if options.get(qtype) and not items:
+            missing.append(f"questions.{qtype}")
+        _validate_basic_question_items(items, qtype, missing)
+
+    return missing
+
+
+def _missing_extension_fields(data: dict[str, Any], chapter_id: str) -> list[str]:
+    """save_extension_result 페이로드의 extension JSON 스키마 검증."""
+    missing: list[str] = []
+    if not isinstance(data, dict):
+        return ["data"]
+
+    if "chapter_id" in data and data.get("chapter_id") != chapter_id:
+        missing.append("chapter_id")
+
+    questions = data.get("questions")
+    if not isinstance(questions, dict):
+        missing.append("questions")
+        questions = {}
+
+    extension = questions.get("extension")
+    if not isinstance(extension, list) or not extension:
+        missing.append("questions.extension")
+        return missing
+
+    for idx, item in enumerate(extension):
+        path = f"questions.extension[{idx}]"
+        if not isinstance(item, dict):
+            missing.append(path)
+            continue
+
+        _validate_required_strings(item, ("id", "question", "model_answer"), path, missing)
+
+        context = item.get("context")
+        if not isinstance(context, str):
+            missing.append(f"{path}.context")
+
+        sources = item.get("sources")
+        if not isinstance(sources, list):
+            missing.append(f"{path}.sources")
+            continue
+        for source_idx, source in enumerate(sources):
+            if not isinstance(source, str):
+                missing.append(f"{path}.sources[{source_idx}]")
+
+        if sources and isinstance(context, str) and not context.strip():
+            missing.append(f"{path}.context")
+
     return missing
 
 
@@ -629,8 +753,8 @@ def save_chapter_result(
 
     스키마는 get_subagent_prompts의 summarizer_prompt에 명시. 동시성 안전.
 
-    저장 전 필수 값(summary·key_points·활성 문제 유형)이 모두 채워졌는지 검증한다.
-    하나라도 비었으면 completed로 마킹하지 않고 ok=False로 거부 — "모두 성공"이라
+    저장 전 prompts.py의 기본 결과 JSON 스키마와 활성 문제 유형을 검증한다.
+    하나라도 어긋나면 completed로 마킹하지 않고 ok=False로 거부 — "모두 성공"이라
     단정했지만 실제로 누락된 결과가 조용히 completed 되는 것을 막는다.
     """
     options = workspace.load_state(work_id).get("question_options", {})
@@ -640,7 +764,7 @@ def save_chapter_result(
     data_to_save = dict(data)
     data_to_save.pop("body_text", None)
 
-    missing = _missing_summary_fields(data, options)
+    missing = _missing_summary_fields(data_to_save, options, chapter_id)
     if missing:
         return _err(
             f"챕터 결과에 필수 값이 비었거나 누락됐습니다: {missing}. "
@@ -673,18 +797,21 @@ def save_extension_result(
 ) -> dict[str, Any]:
     """extension sub-agent의 결과 JSON을 저장합니다. 동시성 안전.
 
-    저장 전 questions.extension이 비어있지 않은지 검증한다(빈 결과가 completed로
-    조용히 마킹되는 것 방지).
+    저장 전 prompts.py의 확장 결과 JSON 스키마를 검증한다(빈 결과나 불완전한
+    결과가 completed로 조용히 마킹되는 것 방지).
     """
-    questions = data.get("questions") or {}
-    if not _nonempty(questions.get("extension")):
+    data_to_save = dict(data)
+    data_to_save.pop("body_text", None)
+
+    missing = _missing_extension_fields(data_to_save, chapter_id)
+    if missing:
         return _err(
             "확장 결과에 questions.extension(비어있지 않은 배열)이 필요합니다. "
             f'save_extension_result(work_id="{work_id}", chapter_id="{chapter_id}", '
             "data=...)로 확장 문제를 채워 다시 저장하세요.",
-            data={"missing": ["questions.extension"], "chapter_id": chapter_id},
+            data={"missing": missing, "chapter_id": chapter_id},
         )
-    path = workspace.save_extension_result(work_id, chapter_id, data)
+    path = workspace.save_extension_result(work_id, chapter_id, data_to_save)
     return _ok({"saved_path": str(path)}, next_action=(
         f"{chapter_id} 확장 문제 저장 완료. 남은 chapter_id로 진행하세요. "
         f"모두 끝나면 list_pending_chapters(work_id=\"{work_id}\")로 확인 후 "
