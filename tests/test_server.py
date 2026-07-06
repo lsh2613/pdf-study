@@ -431,6 +431,7 @@ def test_save_chapter_result_rejects_bad_work_id_without_files(tmp_path, ko_shor
 
     _check_envelope(r)
     assert r["ok"] is False
+    assert r["data"]["missing"] == ["work_id"]
     _assert_no_chapter_result_files(wid, "ch1")
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
 
@@ -444,6 +445,7 @@ def test_save_chapter_result_rejects_unknown_chapter_without_files(tmp_path, ko_
 
     _check_envelope(r)
     assert r["ok"] is False
+    assert r["data"]["missing"] == ["chapter_id"]
     _assert_no_chapter_result_files(wid, "ch999")
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
 
@@ -462,6 +464,8 @@ def test_save_results_reject_skip_chapter_without_files(tmp_path, ko_short):
     _check_envelope(extension)
     assert summary["ok"] is False
     assert extension["ok"] is False
+    assert summary["data"]["missing"] == ["chapter_id"]
+    assert extension["data"]["missing"] == ["chapter_id"]
     _assert_no_chapter_result_files(wid, "ch1")
     entry = workspace.load_state(wid)["chapters"]["ch1"]
     assert entry["summary_status"] == "skipped"
@@ -480,6 +484,8 @@ def test_save_extension_result_rejects_bad_targets_without_files(tmp_path, ko_sh
     _check_envelope(unknown_chapter)
     assert bad_work["ok"] is False
     assert unknown_chapter["ok"] is False
+    assert bad_work["data"]["missing"] == ["work_id"]
+    assert unknown_chapter["data"]["missing"] == ["chapter_id"]
     _assert_no_chapter_result_files(wid, "ch1")
     _assert_no_chapter_result_files(wid, "ch999")
     assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] == "pending"

@@ -38,6 +38,15 @@ def _err(
     return {"ok": False, "error": error, "data": data, "next_action": next_action}
 
 
+def _save_target_error(exc: BaseException, chapter_id: str) -> dict[str, Any]:
+    message = str(exc)
+    missing = ["work_id"] if "unknown work_id" in message else ["chapter_id"]
+    return _err(
+        f"{type(exc).__name__}: {message}",
+        data={"missing": missing, "chapter_id": chapter_id},
+    )
+
+
 def _is_nonempty_str(v: Any) -> bool:
     return isinstance(v, str) and bool(v.strip())
 
@@ -757,12 +766,16 @@ def save_chapter_result(
     하나라도 어긋나면 completed로 마킹하지 않고 ok=False로 거부 — "모두 성공"이라
     단정했지만 실제로 누락된 결과가 조용히 completed 되는 것을 막는다.
     """
-    options = workspace.load_state(work_id).get("question_options", {})
+    try:
+        options = workspace.load_state(work_id).get("question_options", {})
+    except (KeyError, FileNotFoundError, ValueError) as e:
+        return _save_target_error(e, chapter_id)
 
     # 에이전트가 예전 프롬프트나 환각으로 body_text를 보내더라도
     # 서버의 캐시(get_chapter_content에서 추출한 text)를 덮어쓰지 않도록 제거
-    data_to_save = dict(data)
-    data_to_save.pop("body_text", None)
+    data_to_save = dict(data) if isinstance(data, dict) else data
+    if isinstance(data_to_save, dict):
+        data_to_save.pop("body_text", None)
 
     missing = _missing_summary_fields(data_to_save, options, chapter_id)
     if missing:
@@ -774,7 +787,10 @@ def save_chapter_result(
             "직접 확인하세요.)",
             data={"missing": missing, "chapter_id": chapter_id},
         )
-    path = workspace.save_chapter_result(work_id, chapter_id, data_to_save)
+    try:
+        path = workspace.save_chapter_result(work_id, chapter_id, data_to_save)
+    except (KeyError, ValueError) as e:
+        return _save_target_error(e, chapter_id)
     return _ok({"saved_path": str(path)}, next_action=(
         f"{chapter_id} 요약/문제 저장 완료. extension이 활성이면 이 챕터의 "
         "확장 문제도(search_extension_context→save_extension_result) 처리하세요. "
@@ -800,8 +816,9 @@ def save_extension_result(
     저장 전 prompts.py의 확장 결과 JSON 스키마를 검증한다(빈 결과나 불완전한
     결과가 completed로 조용히 마킹되는 것 방지).
     """
-    data_to_save = dict(data)
-    data_to_save.pop("body_text", None)
+    data_to_save = dict(data) if isinstance(data, dict) else data
+    if isinstance(data_to_save, dict):
+        data_to_save.pop("body_text", None)
 
     missing = _missing_extension_fields(data_to_save, chapter_id)
     if missing:
@@ -811,7 +828,10 @@ def save_extension_result(
             "data=...)로 확장 문제를 채워 다시 저장하세요.",
             data={"missing": missing, "chapter_id": chapter_id},
         )
-    path = workspace.save_extension_result(work_id, chapter_id, data_to_save)
+    try:
+        path = workspace.save_extension_result(work_id, chapter_id, data_to_save)
+    except (KeyError, ValueError) as e:
+        return _save_target_error(e, chapter_id)
     return _ok({"saved_path": str(path)}, next_action=(
         f"{chapter_id} 확장 문제 저장 완료. 남은 chapter_id로 진행하세요. "
         f"모두 끝나면 list_pending_chapters(work_id=\"{work_id}\")로 확인 후 "
