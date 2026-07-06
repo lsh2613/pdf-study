@@ -6,7 +6,7 @@ MCP 클라이언트 설정에는 실행할 Python 경로가 들어간다. 전역
 
 ## 결정
 
-설치 스크립트는 저장소 안 `.venv`를 만들고, MCP 클라이언트 설정에는 `.venv/bin/python`의 절대 경로를 출력한다. 환경 검증은 이 Python에서 런타임 의존성과 `pdf_study` import를 확인한다.
+설치 스크립트는 저장소 안 `.venv`를 만들고, MCP 클라이언트 설정에는 `.venv/bin/python`의 절대 경로를 등록한다. 기본 실행은 `.venv` 생성, 패키지 설치, import 검증 뒤 Claude Code, Codex CLI, Antigravity CLI 설정을 자동 적용한다. 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다. 환경 검증은 이 Python에서 런타임 의존성과 `pdf_study` import를 확인한다.
 
 ## 대안
 
@@ -16,4 +16,4 @@ MCP 클라이언트 설정에는 실행할 Python 경로가 들어간다. 전역
 
 ## 결과
 
-설정 안내는 절대 경로를 그대로 복사하는 방식이어야 한다. 의존성 추가 시 설치 스크립트의 검증 모듈과 `pyproject.toml`을 함께 확인해야 한다. `.venv`는 커밋 대상이 아니다.
+설정 안내는 기본 자동 적용 흐름을 기준으로 해야 한다. `--print-config`는 설치나 설정 적용 없이 현재 checkout 기준 JSON만 출력하는 보조 명령이고, `--check`는 기존 `.venv`의 import 가능 여부만 확인한다. `uv`가 없으면 스크립트가 자동 설치를 시도할 수 있고, macOS에서 `libomp`가 없고 Homebrew가 있으면 설치를 시도할 수 있다. 의존성 추가 시 설치 스크립트의 검증 모듈과 `pyproject.toml`을 함께 확인해야 한다. `.venv`는 커밋 대상이 아니다.

@@ -58,7 +58,7 @@ def _result(summary="요약"):
         "summary": summary, "key_points": ["p1", "p2"],
         "questions": {
             "multiple_choice": [{"id": "mc1", "question": "?", "options": ["A", "B"],
-                                 "answer_index": 0, "explanation": ""}],
+                                 "answer_index": 0, "explanation": "A가 정답입니다."}],
             "short_answer": [{"id": "sa1", "question": "?", "model_answer": "a"}],
             "reflection": [{"id": "rf1", "question": "?", "model_answer": "a"}],
         },
@@ -70,6 +70,12 @@ def _ext():
     return {"questions": {"extension": [
         {"id": "ex1", "question": "?", "context": "c", "model_answer": "a", "sources": []}
     ]}}
+
+
+def _assert_no_chapter_result_files(wid: str, chapter_id: str) -> None:
+    assert not (workspace.summaries_dir(wid) / f"{chapter_id}.json").exists()
+    assert not (workspace.quiz_dir(wid) / f"{chapter_id}.json").exists()
+    assert not (workspace.extension_quiz_dir(wid) / f"{chapter_id}.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +422,154 @@ def test_save_chapter_result_body_text_does_not_overwrite_ocr_raw(
     assert workspace.load_state(wid)["chapters"]["ch1"]["char_count"] == raw0["char_count"]
 
 
+def test_save_chapter_result_rejects_bad_work_id_without_files(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    r = server.save_chapter_result(f"{wid}-missing", "ch1", _result())
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["missing"] == ["work_id"]
+    _assert_no_chapter_result_files(wid, "ch1")
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
+
+
+def test_save_chapter_result_rejects_unknown_chapter_without_files(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    r = server.save_chapter_result(wid, "ch999", _result())
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["missing"] == ["chapter_id"]
+    _assert_no_chapter_result_files(wid, "ch999")
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
+
+
+def test_save_chapter_result_reports_target_before_payload_shape(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    r = server.save_chapter_result(wid, "ch999", {"questions": {}})
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["missing"] == ["chapter_id"]
+    _assert_no_chapter_result_files(wid, "ch999")
+
+
+def test_save_results_reject_skip_chapter_without_files(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [
+        {"chapter_id": "ch1", "title": "색인", "page_range": [1, 1], "skip": True},
+    ])
+
+    summary = server.save_chapter_result(wid, "ch1", _result())
+    extension = server.save_extension_result(wid, "ch1", _ext())
+
+    _check_envelope(summary)
+    _check_envelope(extension)
+    assert summary["ok"] is False
+    assert extension["ok"] is False
+    assert summary["data"]["missing"] == ["chapter_id"]
+    assert extension["data"]["missing"] == ["chapter_id"]
+    _assert_no_chapter_result_files(wid, "ch1")
+    entry = workspace.load_state(wid)["chapters"]["ch1"]
+    assert entry["summary_status"] == "skipped"
+    assert entry["extension_status"] == "skipped"
+
+
+def test_save_extension_result_rejects_bad_targets_without_files(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    bad_work = server.save_extension_result(f"{wid}-missing", "ch1", _ext())
+    unknown_chapter = server.save_extension_result(wid, "ch999", _ext())
+
+    _check_envelope(bad_work)
+    _check_envelope(unknown_chapter)
+    assert bad_work["ok"] is False
+    assert unknown_chapter["ok"] is False
+    assert bad_work["data"]["missing"] == ["work_id"]
+    assert unknown_chapter["data"]["missing"] == ["chapter_id"]
+    _assert_no_chapter_result_files(wid, "ch1")
+    _assert_no_chapter_result_files(wid, "ch999")
+    assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] == "pending"
+
+
+def test_save_extension_result_reports_target_before_payload_shape(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    bad_work = server.save_extension_result(f"{wid}-missing", "ch1", {})
+    unknown_chapter = server.save_extension_result(wid, "ch999", {})
+
+    _check_envelope(bad_work)
+    _check_envelope(unknown_chapter)
+    assert bad_work["ok"] is False
+    assert unknown_chapter["ok"] is False
+    assert bad_work["data"]["missing"] == ["work_id"]
+    assert unknown_chapter["data"]["missing"] == ["chapter_id"]
+    _assert_no_chapter_result_files(wid, "ch1")
+    _assert_no_chapter_result_files(wid, "ch999")
+
+
+def test_save_chapter_result_reports_state_failure_without_files(
+    tmp_path, ko_short, monkeypatch
+):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    original_save_state = workspace.save_state
+
+    def fail_completed_state(work_id, state):
+        if state["chapters"]["ch1"].get("summary_status") == "completed":
+            raise RuntimeError("state write failed")
+        original_save_state(work_id, state)
+
+    monkeypatch.setattr(workspace, "save_state", fail_completed_state)
+
+    r = server.save_chapter_result(wid, "ch1", _result())
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["missing"] == ["state"]
+    _assert_no_chapter_result_files(wid, "ch1")
+
+
+def test_save_extension_result_reports_state_failure_without_files(
+    tmp_path, ko_short, monkeypatch
+):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    original_save_state = workspace.save_state
+
+    def fail_completed_state(work_id, state):
+        if state["chapters"]["ch1"].get("extension_status") == "completed":
+            raise RuntimeError("state write failed")
+        original_save_state(work_id, state)
+
+    monkeypatch.setattr(workspace, "save_state", fail_completed_state)
+
+    r = server.save_extension_result(wid, "ch1", _ext())
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["missing"] == ["state"]
+    _assert_no_chapter_result_files(wid, "ch1")
+
+
 @pytest.mark.parametrize(
     ("case", "expected_code"),
     [
@@ -584,6 +738,83 @@ def test_save_chapter_result_rejects_empty_enabled_question_type(tmp_path, ko_sh
     assert "questions.reflection" not in r["data"]["missing"]
 
 
+@pytest.mark.parametrize(
+    ("mutate", "expected_missing"),
+    [
+        (lambda d: d.update({"chapter_id": "ch2"}), "chapter_id"),
+        (lambda d: d.update({"title": 123}), "title"),
+        (lambda d: d.update({"summary": "   "}), "summary"),
+        (lambda d: d.update({"key_points": ["p1", ""]}), "key_points[1]"),
+        (lambda d: d["questions"].pop("reflection"), "questions.reflection"),
+        (
+            lambda d: d["questions"].__setitem__("multiple_choice", {}),
+            "questions.multiple_choice",
+        ),
+        (
+            lambda d: d["questions"]["multiple_choice"][0].pop("explanation"),
+            "questions.multiple_choice[0].explanation",
+        ),
+        (
+            lambda d: d["questions"]["multiple_choice"][0].__setitem__(
+                "options", ["A"]
+            ),
+            "questions.multiple_choice[0].options",
+        ),
+        (
+            lambda d: d["questions"]["multiple_choice"][0].__setitem__(
+                "answer_index", 2
+            ),
+            "questions.multiple_choice[0].answer_index",
+        ),
+        (
+            lambda d: d["questions"]["short_answer"][0].__setitem__(
+                "model_answer", ""
+            ),
+            "questions.short_answer[0].model_answer",
+        ),
+        (
+            lambda d: d["questions"]["reflection"][0].__setitem__(
+                "question", "   "
+            ),
+            "questions.reflection[0].question",
+        ),
+    ],
+)
+def test_save_chapter_result_rejects_invalid_json_shape(
+    tmp_path, ko_short, mutate, expected_missing
+):
+    """기본 결과 JSON은 prompts.py의 스키마와 필드 타입까지 검증한다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    data = _result()
+    mutate(data)
+    r = server.save_chapter_result(wid, "ch1", data)
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert expected_missing in r["data"]["missing"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+
+
+def test_save_chapter_result_requires_disabled_question_keys(tmp_path, ko_short):
+    """비활성 문제 유형도 questions 키는 유지해야 한다."""
+    wid = server.init_work(
+        str(ko_short), str(tmp_path / "out"), enable_reflection=False,
+    )["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    data = _result()
+    data["questions"].pop("reflection")
+    r = server.save_chapter_result(wid, "ch1", data)
+
+    assert r["ok"] is False
+    assert "questions.reflection" in r["data"]["missing"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+
+
 def test_save_extension_result_rejects_empty_extension(tmp_path, ko_short):
     """questions.extension이 비어 있으면 거부."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
@@ -593,6 +824,79 @@ def test_save_extension_result_rejects_empty_extension(tmp_path, ko_short):
     assert r["ok"] is False
     assert r["data"]["missing"] == ["questions.extension"]
     assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] != "completed"
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_missing"),
+    [
+        (lambda d: d.update({"chapter_id": "ch2"}), "chapter_id"),
+        (
+            lambda d: d["questions"]["extension"][0].__setitem__("id", ""),
+            "questions.extension[0].id",
+        ),
+        (
+            lambda d: d["questions"]["extension"][0].pop("context"),
+            "questions.extension[0].context",
+        ),
+        (
+            lambda d: d["questions"]["extension"][0].__setitem__("sources", [123]),
+            "questions.extension[0].sources[0]",
+        ),
+        (
+            lambda d: (
+                d["questions"]["extension"][0].__setitem__("sources", ["https://example.com"]),
+                d["questions"]["extension"][0].__setitem__("context", " "),
+            ),
+            "questions.extension[0].context",
+        ),
+    ],
+)
+def test_save_extension_result_rejects_invalid_json_shape(
+    tmp_path, ko_short, mutate, expected_missing
+):
+    """확장 결과 JSON도 extension 항목별 필드 타입과 출처/맥락 규칙을 검증한다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    data = _ext()
+    mutate(data)
+    r = server.save_extension_result(wid, "ch1", data)
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert expected_missing in r["data"]["missing"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] != "completed"
+
+
+def test_save_extension_result_allows_empty_sources_and_context(tmp_path, ko_short):
+    """외부 검색 결과가 없으면 sources=[]와 빈 context가 함께 유효하다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    data = _ext()
+    data["questions"]["extension"][0]["context"] = ""
+    data["questions"]["extension"][0]["sources"] = []
+    r = server.save_extension_result(wid, "ch1", data)
+
+    assert r["ok"] is True, r
+    assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] == "completed"
+
+
+def test_save_extension_result_drops_body_text(tmp_path, ko_short):
+    """확장 결과에 body_text가 섞여 와도 저장 파일에는 남기지 않는다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    data = _ext()
+    data["body_text"] = "저장하면 안 되는 원문"
+    r = server.save_extension_result(wid, "ch1", data)
+
+    assert r["ok"] is True, r
+    saved = workspace.extension_quiz_dir(wid).joinpath("ch1.json").read_text(encoding="utf-8")
+    assert "body_text" not in saved
 
 
 # ---------------------------------------------------------------------------
@@ -811,10 +1115,7 @@ def test_md_tui_renderer_finalizes_ok(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     server.scan_pdf(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
-    server.save_chapter_result(wid, "ch1", {
-        "chapter_id": "ch1", "summary": "본문", "key_points": ["p"],
-        "questions": {"multiple_choice": [], "short_answer": [], "reflection": []}
-    })
+    server.save_chapter_result(wid, "ch1", _result())
     r = server.finalize_study(wid, output_format="md_tui", force=True)
     _check_envelope(r)
     assert r["ok"] is True, r

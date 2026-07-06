@@ -25,7 +25,7 @@ def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):
     questions = {
         "multiple_choice": [
             {"id": f"{cid}_mc", "question": "?",
-             "options": ["A", "B"], "answer_index": 0, "explanation": ""}
+             "options": ["A", "B"], "answer_index": 0, "explanation": "해설"}
         ] if mc else [],
         "short_answer": [
             {"id": f"{cid}_sa", "question": "?", "model_answer": "ans"}
