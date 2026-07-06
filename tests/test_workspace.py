@@ -154,6 +154,63 @@ def test_save_extension_result_rejects_unknown_chapter_without_files(tmp_path, f
     assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] == "pending"
 
 
+def test_save_chapter_result_restores_files_when_state_save_fails(
+    tmp_path, fake_pdf, monkeypatch
+):
+    wid = workspace.create_workspace(
+        fake_pdf, tmp_path / "out", options={"multiple_choice": True},
+    )
+    workspace.set_chapters_in_state(wid, [
+        {"chapter_id": "ch1", "title": "A", "page_range": [1, 5]},
+    ])
+    summary_path = workspace.summaries_dir(wid) / "ch1.json"
+    quiz_path = workspace.quiz_dir(wid) / "ch1.json"
+
+    original_save_state = workspace.save_state
+
+    def fail_after_files(work_id, state):
+        if state["chapters"]["ch1"].get("summary_status") == "completed":
+            raise RuntimeError("state write failed")
+        original_save_state(work_id, state)
+
+    monkeypatch.setattr(workspace, "save_state", fail_after_files)
+
+    with pytest.raises(RuntimeError, match="state write failed"):
+        workspace.save_chapter_result(wid, "ch1", {"chapter_id": "ch1"})
+
+    assert not summary_path.exists()
+    assert not quiz_path.exists()
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
+
+
+def test_save_extension_result_restores_previous_file_when_state_save_fails(
+    tmp_path, fake_pdf, monkeypatch
+):
+    wid = workspace.create_workspace(
+        fake_pdf, tmp_path / "out", options={"multiple_choice": True},
+    )
+    workspace.set_chapters_in_state(wid, [
+        {"chapter_id": "ch1", "title": "A", "page_range": [1, 5]},
+    ])
+    path = workspace.extension_quiz_dir(wid) / "ch1.json"
+    path.write_text('{"keep": true}', encoding="utf-8")
+
+    original_save_state = workspace.save_state
+
+    def fail_after_files(work_id, state):
+        if state["chapters"]["ch1"].get("extension_status") == "completed":
+            raise RuntimeError("state write failed")
+        original_save_state(work_id, state)
+
+    monkeypatch.setattr(workspace, "save_state", fail_after_files)
+
+    with pytest.raises(RuntimeError, match="state write failed"):
+        workspace.save_extension_result(wid, "ch1", {"chapter_id": "ch1"})
+
+    assert path.read_text(encoding="utf-8") == '{"keep": true}'
+    assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] == "pending"
+
+
 def test_mark_chapter_failed_increments_retry(tmp_path, fake_pdf):
     wid = workspace.create_workspace(
         fake_pdf, tmp_path / "out", options={"multiple_choice": True},

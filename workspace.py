@@ -421,6 +421,40 @@ def _require_result_target(state: dict[str, Any], chapter_id: str) -> dict[str, 
     return entry
 
 
+def _snapshot_files(paths: list[Path]) -> dict[Path, bytes | None]:
+    return {path: path.read_bytes() if path.exists() else None for path in paths}
+
+
+def _restore_files(snapshot: dict[Path, bytes | None]) -> None:
+    for path, content in snapshot.items():
+        try:
+            if content is None:
+                if path.exists():
+                    path.unlink()
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = tempfile.NamedTemporaryFile(
+                    mode="wb",
+                    dir=str(path.parent),
+                    delete=False,
+                    suffix=".tmp",
+                )
+                tmp_path = Path(tmp.name)
+                try:
+                    tmp.write(content)
+                    tmp.flush()
+                    os.fsync(tmp.fileno())
+                    tmp.close()
+                    os.replace(str(tmp_path), str(path))
+                except Exception:
+                    tmp.close()
+                    if tmp_path.exists():
+                        tmp_path.unlink()
+                    raise
+        except OSError:
+            logger.warning("failed to restore result file after state save error: %s", path)
+
+
 def save_chapter_result(
     work_id: str,
     chapter_id: str,
@@ -447,15 +481,21 @@ def save_chapter_result(
         "questions": data.get("questions") or {},
     }
     out = summaries_dir(work_id) / f"{chapter_id}.json"
+    quiz_out = quiz_dir(work_id) / f"{chapter_id}.json"
 
     with _get_lock(work_id):
         state = load_state(work_id)
         entry = _require_result_target(state, chapter_id)
-        _atomic_write_json(out, summary_part)
-        _atomic_write_json(quiz_dir(work_id) / f"{chapter_id}.json", quiz_part)
-        entry["summary_status"] = "completed"
-        entry["error"] = None
-        save_state(work_id, state)
+        snapshot = _snapshot_files([out, quiz_out])
+        try:
+            _atomic_write_json(out, summary_part)
+            _atomic_write_json(quiz_out, quiz_part)
+            entry["summary_status"] = "completed"
+            entry["error"] = None
+            save_state(work_id, state)
+        except Exception:
+            _restore_files(snapshot)
+            raise
 
     return out
 
@@ -471,9 +511,14 @@ def save_extension_result(
     with _get_lock(work_id):
         state = load_state(work_id)
         entry = _require_result_target(state, chapter_id)
-        _atomic_write_json(out, data)
-        entry["extension_status"] = "completed"
-        save_state(work_id, state)
+        snapshot = _snapshot_files([out])
+        try:
+            _atomic_write_json(out, data)
+            entry["extension_status"] = "completed"
+            save_state(work_id, state)
+        except Exception:
+            _restore_files(snapshot)
+            raise
 
     return out
 
