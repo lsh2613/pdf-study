@@ -72,6 +72,12 @@ def _ext():
     ]}}
 
 
+def _assert_no_chapter_result_files(wid: str, chapter_id: str) -> None:
+    assert not (workspace.summaries_dir(wid) / f"{chapter_id}.json").exists()
+    assert not (workspace.quiz_dir(wid) / f"{chapter_id}.json").exists()
+    assert not (workspace.extension_quiz_dir(wid) / f"{chapter_id}.json").exists()
+
+
 # ---------------------------------------------------------------------------
 # init_work — 모드 인자를 더 이상 받지 않는다 (set_chapters에서 결정)
 # ---------------------------------------------------------------------------
@@ -414,6 +420,69 @@ def test_save_chapter_result_body_text_does_not_overwrite_ocr_raw(
     raw1 = workspace.get_chapter_raw(wid, "ch1")
     assert raw1 == raw0
     assert workspace.load_state(wid)["chapters"]["ch1"]["char_count"] == raw0["char_count"]
+
+
+def test_save_chapter_result_rejects_bad_work_id_without_files(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    r = server.save_chapter_result(f"{wid}-missing", "ch1", _result())
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    _assert_no_chapter_result_files(wid, "ch1")
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
+
+
+def test_save_chapter_result_rejects_unknown_chapter_without_files(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    r = server.save_chapter_result(wid, "ch999", _result())
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    _assert_no_chapter_result_files(wid, "ch999")
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
+
+
+def test_save_results_reject_skip_chapter_without_files(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [
+        {"chapter_id": "ch1", "title": "색인", "page_range": [1, 1], "skip": True},
+    ])
+
+    summary = server.save_chapter_result(wid, "ch1", _result())
+    extension = server.save_extension_result(wid, "ch1", _ext())
+
+    _check_envelope(summary)
+    _check_envelope(extension)
+    assert summary["ok"] is False
+    assert extension["ok"] is False
+    _assert_no_chapter_result_files(wid, "ch1")
+    entry = workspace.load_state(wid)["chapters"]["ch1"]
+    assert entry["summary_status"] == "skipped"
+    assert entry["extension_status"] == "skipped"
+
+
+def test_save_extension_result_rejects_bad_targets_without_files(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    bad_work = server.save_extension_result(f"{wid}-missing", "ch1", _ext())
+    unknown_chapter = server.save_extension_result(wid, "ch999", _ext())
+
+    _check_envelope(bad_work)
+    _check_envelope(unknown_chapter)
+    assert bad_work["ok"] is False
+    assert unknown_chapter["ok"] is False
+    _assert_no_chapter_result_files(wid, "ch1")
+    _assert_no_chapter_result_files(wid, "ch999")
+    assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] == "pending"
 
 
 @pytest.mark.parametrize(

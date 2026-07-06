@@ -411,6 +411,16 @@ def get_chapter_raw(work_id: str, chapter_id: str) -> dict[str, Any]:
 # sub-agent 결과 저장 — 동시성 안전
 # ---------------------------------------------------------------------------
 
+def _require_result_target(state: dict[str, Any], chapter_id: str) -> dict[str, Any]:
+    chapters = state.get("chapters", {})
+    entry = chapters.get(chapter_id)
+    if entry is None:
+        raise KeyError(f"chapter not in state: {chapter_id}")
+    if entry.get("skip"):
+        raise ValueError(f"chapter is skipped: {chapter_id}")
+    return entry
+
+
 def save_chapter_result(
     work_id: str,
     chapter_id: str,
@@ -437,14 +447,12 @@ def save_chapter_result(
         "questions": data.get("questions") or {},
     }
     out = summaries_dir(work_id) / f"{chapter_id}.json"
-    _atomic_write_json(out, summary_part)
-    _atomic_write_json(quiz_dir(work_id) / f"{chapter_id}.json", quiz_part)
 
     with _get_lock(work_id):
         state = load_state(work_id)
-        entry = state["chapters"].get(chapter_id)
-        if entry is None:
-            raise KeyError(f"chapter not in state: {chapter_id}")
+        entry = _require_result_target(state, chapter_id)
+        _atomic_write_json(out, summary_part)
+        _atomic_write_json(quiz_dir(work_id) / f"{chapter_id}.json", quiz_part)
         entry["summary_status"] = "completed"
         entry["error"] = None
         save_state(work_id, state)
@@ -459,13 +467,11 @@ def save_extension_result(
 ) -> Path:
     """extension sub-agent 결과 저장 + state 갱신."""
     out = extension_quiz_dir(work_id) / f"{chapter_id}.json"
-    _atomic_write_json(out, data)
 
     with _get_lock(work_id):
         state = load_state(work_id)
-        entry = state["chapters"].get(chapter_id)
-        if entry is None:
-            raise KeyError(f"chapter not in state: {chapter_id}")
+        entry = _require_result_target(state, chapter_id)
+        _atomic_write_json(out, data)
         entry["extension_status"] = "completed"
         save_state(work_id, state)
 
