@@ -40,11 +40,24 @@ def _err(
 
 def _save_target_error(exc: BaseException, chapter_id: str) -> dict[str, Any]:
     message = str(exc)
-    missing = ["work_id"] if "unknown work_id" in message else ["chapter_id"]
+    if "unknown work_id" in message:
+        missing = ["work_id"]
+    elif isinstance(exc, (RuntimeError, OSError)):
+        missing = ["state"]
+    else:
+        missing = ["chapter_id"]
     return _err(
         f"{type(exc).__name__}: {message}",
         data={"missing": missing, "chapter_id": chapter_id},
     )
+
+
+def _ensure_save_target(state: dict[str, Any], chapter_id: str) -> None:
+    entry = state.get("chapters", {}).get(chapter_id)
+    if entry is None:
+        raise KeyError(f"chapter not in state: {chapter_id}")
+    if entry.get("skip"):
+        raise ValueError(f"chapter is skipped: {chapter_id}")
 
 
 def _is_nonempty_str(v: Any) -> bool:
@@ -767,9 +780,11 @@ def save_chapter_result(
     단정했지만 실제로 누락된 결과가 조용히 completed 되는 것을 막는다.
     """
     try:
-        options = workspace.load_state(work_id).get("question_options", {})
+        state = workspace.load_state(work_id)
+        _ensure_save_target(state, chapter_id)
     except (KeyError, FileNotFoundError, ValueError) as e:
         return _save_target_error(e, chapter_id)
+    options = state.get("question_options", {})
 
     # 에이전트가 예전 프롬프트나 환각으로 body_text를 보내더라도
     # 서버의 캐시(get_chapter_content에서 추출한 text)를 덮어쓰지 않도록 제거
@@ -789,7 +804,7 @@ def save_chapter_result(
         )
     try:
         path = workspace.save_chapter_result(work_id, chapter_id, data_to_save)
-    except (KeyError, ValueError) as e:
+    except (KeyError, ValueError, RuntimeError, OSError) as e:
         return _save_target_error(e, chapter_id)
     return _ok({"saved_path": str(path)}, next_action=(
         f"{chapter_id} 요약/문제 저장 완료. extension이 활성이면 이 챕터의 "
@@ -816,6 +831,12 @@ def save_extension_result(
     저장 전 prompts.py의 확장 결과 JSON 스키마를 검증한다(빈 결과나 불완전한
     결과가 completed로 조용히 마킹되는 것 방지).
     """
+    try:
+        state = workspace.load_state(work_id)
+        _ensure_save_target(state, chapter_id)
+    except (KeyError, FileNotFoundError, ValueError) as e:
+        return _save_target_error(e, chapter_id)
+
     data_to_save = dict(data) if isinstance(data, dict) else data
     if isinstance(data_to_save, dict):
         data_to_save.pop("body_text", None)
@@ -830,7 +851,7 @@ def save_extension_result(
         )
     try:
         path = workspace.save_extension_result(work_id, chapter_id, data_to_save)
-    except (KeyError, ValueError) as e:
+    except (KeyError, ValueError, RuntimeError, OSError) as e:
         return _save_target_error(e, chapter_id)
     return _ok({"saved_path": str(path)}, next_action=(
         f"{chapter_id} 확장 문제 저장 완료. 남은 chapter_id로 진행하세요. "

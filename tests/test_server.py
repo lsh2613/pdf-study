@@ -450,6 +450,19 @@ def test_save_chapter_result_rejects_unknown_chapter_without_files(tmp_path, ko_
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
 
 
+def test_save_chapter_result_reports_target_before_payload_shape(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    r = server.save_chapter_result(wid, "ch999", {"questions": {}})
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["missing"] == ["chapter_id"]
+    _assert_no_chapter_result_files(wid, "ch999")
+
+
 def test_save_results_reject_skip_chapter_without_files(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     server.scan_pdf(wid)
@@ -489,6 +502,72 @@ def test_save_extension_result_rejects_bad_targets_without_files(tmp_path, ko_sh
     _assert_no_chapter_result_files(wid, "ch1")
     _assert_no_chapter_result_files(wid, "ch999")
     assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] == "pending"
+
+
+def test_save_extension_result_reports_target_before_payload_shape(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    bad_work = server.save_extension_result(f"{wid}-missing", "ch1", {})
+    unknown_chapter = server.save_extension_result(wid, "ch999", {})
+
+    _check_envelope(bad_work)
+    _check_envelope(unknown_chapter)
+    assert bad_work["ok"] is False
+    assert unknown_chapter["ok"] is False
+    assert bad_work["data"]["missing"] == ["work_id"]
+    assert unknown_chapter["data"]["missing"] == ["chapter_id"]
+    _assert_no_chapter_result_files(wid, "ch1")
+    _assert_no_chapter_result_files(wid, "ch999")
+
+
+def test_save_chapter_result_reports_state_failure_without_files(
+    tmp_path, ko_short, monkeypatch
+):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    original_save_state = workspace.save_state
+
+    def fail_completed_state(work_id, state):
+        if state["chapters"]["ch1"].get("summary_status") == "completed":
+            raise RuntimeError("state write failed")
+        original_save_state(work_id, state)
+
+    monkeypatch.setattr(workspace, "save_state", fail_completed_state)
+
+    r = server.save_chapter_result(wid, "ch1", _result())
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["missing"] == ["state"]
+    _assert_no_chapter_result_files(wid, "ch1")
+
+
+def test_save_extension_result_reports_state_failure_without_files(
+    tmp_path, ko_short, monkeypatch
+):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    server.scan_pdf(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    original_save_state = workspace.save_state
+
+    def fail_completed_state(work_id, state):
+        if state["chapters"]["ch1"].get("extension_status") == "completed":
+            raise RuntimeError("state write failed")
+        original_save_state(work_id, state)
+
+    monkeypatch.setattr(workspace, "save_state", fail_completed_state)
+
+    r = server.save_extension_result(wid, "ch1", _ext())
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["missing"] == ["state"]
+    _assert_no_chapter_result_files(wid, "ch1")
 
 
 @pytest.mark.parametrize(
