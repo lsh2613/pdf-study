@@ -72,7 +72,7 @@ git branch --show-current
 - `perf` — 성능 개선
 - `chore` — 빌드/설정/버전업 등 주변부
 - `docs` — 문서만
-- `agent` — `.claude/skills/` 하위 Claude Code skill 파일의 생성/수정/삭제. scope는 **skill 이름**. 예: `skill(commit): 신규 생성`, `skill(ui-design-system): 색상 토큰 섹션 보강`
+- `skill` — `.claude/skills/` 하위 Claude Code skill 파일의 생성/수정/삭제. scope는 **skill 이름**. 예: `skill(commit): 신규 생성`, `skill(ui-design-system): 색상 토큰 섹션 보강`
 
 **scope** (관찰된 것 우선, 변경 위치에 맞게)
 
@@ -82,7 +82,7 @@ git branch --show-current
 - `turbo` — 모노레포 루트 빌드/설정
 - 그 외 필요시 패키지/영역 이름으로 추가
 - 여러 scope에 걸치면 `(web,dashboard)` 또는 scope 생략
-- `agent` type의 scope는 항상 대상 skill 또는 sub-agent의 이름 (예: `commit`, `plan-and-build`, `ui-design-system`)
+- `skill` type의 scope는 항상 대상 skill 또는 sub-agent의 이름 (예: `commit`, `plan-and-build`, `ui-design-system`)
 
 **요약 규칙**
 
