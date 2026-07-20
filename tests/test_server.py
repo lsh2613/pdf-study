@@ -292,7 +292,6 @@ def test_get_chapter_content_ocr_returns_precomputed_text_without_lazy_ocr(
         [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
         execution_mode="sequential",
         extraction_mode="ocr",
-        language="ko",
     )
     assert r["ok"]
     assert len(calls) == 2
@@ -339,7 +338,6 @@ def test_set_chapters_ocr_failure_returns_failed_chapters(
         [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
         execution_mode="parallel",
         extraction_mode="ocr",
-        language="ko",
     )
 
     _check_envelope(r)
@@ -369,7 +367,6 @@ def test_set_chapters_ocr_requires_prepare_when_cache_missing(
         [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
         execution_mode="sequential",
         extraction_mode="ocr",
-        language="ko",
     )
 
     _check_envelope(r)
@@ -407,7 +404,6 @@ def test_save_chapter_result_body_text_does_not_overwrite_ocr_raw(
         [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
         execution_mode="sequential",
         extraction_mode="ocr",
-        language="ko",
     )
     assert r["ok"], r
     raw0 = workspace.get_chapter_raw(wid, "ch1")
@@ -596,7 +592,6 @@ def test_get_subagent_prompts_rejects_invalid_ocr_raw(
         [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
         execution_mode="sequential",
         extraction_mode="ocr",
-        language="ko",
     )
     assert r["ok"], r
 
@@ -666,7 +661,6 @@ def test_get_chapter_content_rejects_invalid_raw(
         [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
         execution_mode="sequential",
         extraction_mode="ocr",
-        language="ko",
     )
     assert r["ok"], r
 
@@ -966,8 +960,8 @@ def test_prepare_ocr_returns_model_diagnostics(tmp_path, ko_short):
     assert "elapsed_sec" in r["data"]
 
 
-def test_scan_skips_offset_and_language_on_no_text_layer(tmp_path, scanned_empty, monkeypatch):
-    """스캔본(no_text_layer)에선 offset/language 측정을 건너뛴다(불필요한 페이지 읽기 회피)."""
+def test_scan_skips_offset_on_no_text_layer(tmp_path, scanned_empty, monkeypatch):
+    """스캔본(no_text_layer)에선 offset 측정을 건너뛴다."""
     from pdf_study import analysis
 
     calls = {"offset": 0}
@@ -982,7 +976,7 @@ def test_scan_skips_offset_and_language_on_no_text_layer(tmp_path, scanned_empty
     server.scan_pdf(wid)
     st = workspace.load_state(wid)
     assert st["text_quality"] == "no_text_layer"
-    assert st["language"] is None
+    assert "language" not in st
     assert st["page_offset"] is None
     assert st["page_offset_confidence"] == "none"
     assert calls["offset"] == 0  # detect_page_offset 자체가 호출되지 않음
@@ -1039,7 +1033,7 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
     # 프롬프트
     r5 = server.get_subagent_prompts(wid)
     _check_envelope(r5); assert r5["ok"]
-    assert r5["data"]["language"] == "ko"
+    assert "language" not in r5["data"]
     assert r5["data"]["chapter_ids"] == ["ch1"]
     assert "JSON 객체 하나만" in r5["data"]["summarizer_prompt"]
 

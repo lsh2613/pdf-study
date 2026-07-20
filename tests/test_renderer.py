@@ -146,7 +146,7 @@ def test_disabled_question_types_omit_sections(ko_with_toc, tmp_path):
     assert 'id="ex"' not in html
 
 
-def test_html_lang_reflects_state_language(ko_with_toc, tmp_path):
+def test_html_uses_fixed_korean_document_language(ko_with_toc, tmp_path):
     _, out, _ = _build_multi(ko_with_toc, tmp_path)
     html = (out / "ch1.html").read_text(encoding="utf-8")
     assert '<html lang="ko"' in html

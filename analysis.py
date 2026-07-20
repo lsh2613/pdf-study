@@ -1,6 +1,6 @@
 """scan_pdf / set_chapters 통합 로직.
 
-이 모듈은 pdf/* + lang + workspace를 묶어 메인 LLM이 호출하기 쉬운
+이 모듈은 pdf/* + workspace를 묶어 메인 LLM이 호출하기 쉬운
 형태로 다듬는다. MCP 도구는 server.py에서 thin wrapper로 노출.
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ import logging
 from concurrent.futures import as_completed
 from typing import Any
 
-from . import lang, workspace
+from . import workspace
 from .pdf import chapter as chapter_mod
 from .pdf import ocr
 from .pdf import reader
@@ -147,8 +147,7 @@ def _with_offset_meta(
             + "suggested_chapters는 비어 있습니다(서버는 목차 이미지를 제공하지만 "
             "챕터 경계를 자동 확정하지 않음). ocr_error가 있거나 OCR 텍스트만으로 "
             "부족하면 path 이미지를 확인하세요. chunk_fallback은 목차를 도저히 못 "
-            "읽을 때만. 본문 언어도 파악해 set_chapters(language=\"ko\"|\"en\")로 "
-            "전달하세요. "
+            "읽을 때만. "
             + excerpt_note + two_number + choices_policy
             + "① 이대로 진행 ② 직접 입력 ③ 청크. " + manual_chunk
         )
@@ -381,7 +380,7 @@ def scan_pdf_impl(
     force_vision=True는 외부 계약 호환용 legacy 이름이다. True면 (1)을 건너뛰고
     항상 (2)로 간다(내장 목차가 틀렸을 때).
 
-    state.json에 language, page_count, page_offset을 채우고
+    state.json에 page_count, page_offset을 채우고
     phases.scanning을 completed로 갱신한다. extraction_mode는 set_chapters에서
     정하므로 이 단계는 모드와 무관하다. scanned_text는 노출하지 않는다.
     """
@@ -395,22 +394,16 @@ def scan_pdf_impl(
         page_count = doc.page_count
         book_metadata = reader.extract_metadata(doc)
 
-        # 텍스트 레이어 품질 평가(mojibake 판정). scan_size(기본 30)p를 한 번 읽어
-        # 그 sample_text를 언어 감지에 재사용한다 → 품질·언어가 같은 읽기를 공유.
+        # 텍스트 레이어 품질을 scan_size(기본 30)p 표본으로 평가한다.
         quality = reader.evaluate_text_quality(doc, scan_size)
         text_quality = quality["quality"]
         scan_end = min(scan_size, page_count) if page_count else 0
 
         if text_quality == "no_text_layer":
-            # 텍스트 레이어가 없으면(스캔본) 언어·offset 측정이 무의미하다.
-            # → 측정을 건너뛰어 불필요한 페이지 읽기(최대 page_count p 꼬리말 스캔 +
-            #   언어 샘플)를 회피. 언어는 이후 set_chapters(ocr)에서 LLM이 이미지로
-            #   파악해 전달하고, offset도 없음(none)으로 둔다.
-            language = None
+            # 텍스트 레이어가 없으면(스캔본) offset 측정이 무의미하다.
+            # → 불필요한 페이지 읽기(최대 page_count p 꼬리말 스캔)를 피한다.
             offset_info = {"offset": None, "confidence": "none"}
         else:
-            # 언어 감지: 품질 평가가 이미 읽은 샘플 텍스트 재사용 (재독 없음).
-            language = lang.detect_language(quality["sample_text"])
             # 인쇄 페이지번호 ↔ PDF 물리 인덱스 오프셋 (꼬리말 번호 다수결)
             offset_info = reader.detect_page_offset(doc)
 
@@ -449,7 +442,6 @@ def scan_pdf_impl(
         work_id,
         page_count=page_count,
         text_quality=text_quality,
-        language=language,
         page_offset=page_offset,
         page_offset_confidence=offset_confidence,
         toc_ocr_status=toc_ocr["status"],
@@ -459,7 +451,6 @@ def scan_pdf_impl(
     workspace.save_outline(work_id, {
         "page_count": page_count,
         "text_quality": text_quality,
-        "language": language,
         "page_offset": page_offset,
         "page_offset_confidence": offset_confidence,
         "outline_present": use_outline,
@@ -473,7 +464,6 @@ def scan_pdf_impl(
         "book_metadata": book_metadata,
         "text_quality": text_quality,
         "avg_chars_per_page": quality["avg_chars_per_page"],
-        "language": language,
         "page_offset": page_offset,
         "page_offset_confidence": offset_confidence,
         "outline_present": use_outline,
@@ -627,7 +617,6 @@ def set_chapters_impl(
     execution_mode: str,
     extraction_mode: str,
     book_info: dict[str, Any] | None = None,
-    language: str = "",
 ) -> dict[str, Any]:
     """챕터 구조 확정 + 처리 모드 확정 → 챕터별 텍스트 추출 + 저장.
 
@@ -638,9 +627,6 @@ def set_chapters_impl(
         extraction_mode: "text" | "ocr". 본문 추출 방식(목차 단계와 무관).
                   text=라이브러리 추출 / ocr=PaddleOCR CPU 선계산.
         book_info: 메인 LLM이 보강한 책 정보. None이면 PDF 메타만 사용.
-        language: "ko" | "en". OCR 모드에서 목차 정보나 사용자 확인으로 파악한
-                  본문 언어를 전달하면 state.language를 갱신한다.
-
     Returns:
         {"chapter_count", "total_chars", "chapters": [...]}
 
@@ -673,10 +659,6 @@ def set_chapters_impl(
         raise RuntimeError(
             "page_count not in state. call scan_pdf before set_chapters."
         )
-
-    # OCR 모드: 목차 정보나 사용자 확인으로 파악한 언어를 state에 반영
-    if language and language.lower() in ("ko", "en"):
-        workspace.update_state(work_id, language=language.lower())
 
     # 검증 + 정규화
     normalized = [_validate_chapter_def(ch, page_count) for ch in chapters]

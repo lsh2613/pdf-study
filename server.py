@@ -513,7 +513,6 @@ def set_chapters(
     execution_mode: str = "",
     extraction_mode: str = "",
     book_info: dict[str, Any] | None = None,
-    language: str = "",
 ) -> dict[str, Any]:
     """챕터 구조 + 처리 모드를 확정하고 챕터별 본문을 추출합니다.
 
@@ -541,10 +540,6 @@ def set_chapters(
       sub-agent 디스패치, 렌더링 모두에서 제외됩니다. **찾아보기·색인·
       판권·저자 소개 같은 비본문 페이지가 섞여 들어왔을 때 사용**하세요.
     - book_info: 메인 LLM이 PDF 메타·목차로 보강한 책 정보
-    - language: "ko" | "en". **OCR(extraction_mode="ocr")에서는 텍스트 언어 감지가
-      불가능하므로, 목차 정보에서 파악한 본문 언어를 반드시 전달**하세요.
-      (text 모드는 scan_pdf가 자동 감지하므로 생략 가능)
-
     extraction_mode="ocr"에서는 set_chapters 시점에 PaddleOCR CPU로 본문 텍스트를
     선계산합니다. 서브에이전트는 get_chapter_content가 반환한 text를 읽습니다.
 
@@ -595,8 +590,7 @@ def set_chapters(
                 "④ Parallel + OCR — PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리.\n"
                 "OCR 선처리는 execution_mode와 별개로 서버 내부 상한(최대 2개 챕터, "
                 "CPU 1코어면 1개)으로 제한됩니다. extraction_mode는 'ocr' 고정, "
-                "execution_mode만 'sequential'|'parallel'에서 선택. OCR은 텍스트 언어 "
-                "감지가 불가하니 language도 함께 전달하세요.\n"
+                "execution_mode만 'sequential'|'parallel'에서 선택.\n"
             )
             data = {
                 "choices": choices,
@@ -645,7 +639,6 @@ def set_chapters(
                 f"이 PDF는 {reason} text 모드 추출 결과를 신뢰할 수 없습니다 "
                 f"(text_quality={tq}). extraction_mode='ocr'로 다시 호출하세요 — "
                 "PaddleOCR CPU로 본문을 선계산합니다. "
-                "(OCR은 텍스트 언어 감지가 불가하니 language도 함께 전달하세요.) "
                 "execution_mode는 고른 값을 그대로 유지하면 됩니다.",
                 data={
                     "text_quality": tq,
@@ -667,7 +660,7 @@ def set_chapters(
 
     data = analysis.set_chapters_impl(
         work_id, chapters, execution_mode, extraction_mode,
-        book_info=book_info, language=language,
+        book_info=book_info,
     )
     failed_chapters = data.get("failed_chapters") or []
     if extraction_mode == "ocr" and failed_chapters:

@@ -103,7 +103,6 @@ def build_ko_with_toc(out_path: Path) -> Path:
         p.21-28 제3장 분산 시스템 (8p, 그림 1장)
 
     검증 포인트:
-        - language = "ko"
         - 내장 목차(set_toc, 물리 p.5/13/21) → recommendations.primary_mode = "from_outline"
         - 멀티 챕터 finalize → index.html + ch{1,2,3}.html + 사이드바
         - 이미지: 풀페이지 배경/작은 아이콘은 본문 렌더에 그대로 둠
@@ -230,7 +229,6 @@ def build_ko_short(out_path: Path) -> Path:
 
     검증 포인트:
         - page_count < 50
-        - language = "ko"
         - toc_candidates.is_candidate = False
         - recommendations.primary_mode = "single_unit"
         - 단일 챕터 finalize → main.html (사이드바 없음)

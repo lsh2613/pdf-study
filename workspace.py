@@ -230,7 +230,6 @@ def create_workspace(
         "started_at": _now_iso(),
         "execution_mode": execution_mode,
         "extraction_mode": extraction_mode,
-        "language": None,
         "question_options": question_options,
         "user_context": user_context or "",
         "page_count": None,

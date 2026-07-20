@@ -229,19 +229,14 @@ def extract_page_text(doc: fitz.Document, page_number: int) -> str:
 
 
 def evaluate_text_quality(doc: fitz.Document, sample_size: int = 30) -> dict[str, Any]:
-    """텍스트 레이어 품질 평가 (+ 언어 감지에 재사용할 sample_text 반환).
-
-    sample_size는 scan_pdf의 scan_size와 동일하게 맞춰(기본 30) 품질 평가와 언어
-    감지가 **같은 한 번의 30p 읽기**를 공유한다(별도 추출 패스 없음).
+    """텍스트 레이어 품질을 표본 페이지로 평가한다.
 
     Returns:
         {
             "quality": "high" | "medium" | "low" | "no_text_layer" | "garbled",
             "avg_chars_per_page": float,
-            "sample_text": str,   # 샘플한 페이지들의 정리된 본문 (언어 감지 재사용용)
         }
         (avg_mojibake는 garbled 분류에만 내부적으로 쓰고 반환하지 않는다.)
-        sample_text를 함께 돌려줘 호출자가 언어 감지에 재사용 → 별도 추출 패스 제거.
 
     임계값:
         no_text_layer: avg_chars < 50  (OCR 권장)
@@ -252,8 +247,7 @@ def evaluate_text_quality(doc: fitz.Document, sample_size: int = 30) -> dict[str
     """
     n = min(sample_size, doc.page_count)
     if n == 0:
-        return {"quality": "no_text_layer", "avg_chars_per_page": 0.0,
-                "sample_text": ""}
+        return {"quality": "no_text_layer", "avg_chars_per_page": 0.0}
 
     # 처음 / 중간 / 끝 부근을 고루 샘플링
     if doc.page_count <= sample_size:
@@ -301,8 +295,7 @@ def evaluate_text_quality(doc: fitz.Document, sample_size: int = 30) -> dict[str
     else:
         quality = "high"
 
-    return {"quality": quality, "avg_chars_per_page": round(avg, 1),
-            "sample_text": "\n\n".join(sample_parts)}
+    return {"quality": quality, "avg_chars_per_page": round(avg, 1)}
 
 
 def extract_text_range(doc: fitz.Document, start_page: int, end_page: int) -> str:

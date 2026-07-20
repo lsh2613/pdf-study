@@ -51,11 +51,11 @@ def make_workspace(tmp_path):
     return _make
 
 
-def test_scan_pdf_ko_with_toc_routes_to_from_outline(make_workspace, ko_with_toc):
+def test_scan_pdf_with_toc_routes_to_from_outline_without_language_detection(make_workspace, ko_with_toc):
     """내장 목차(북마크)가 있으면 from_outline으로 챕터를 구성한다."""
     wid, _ = make_workspace(ko_with_toc)
     out = analysis.scan_pdf_impl(wid)
-    assert out["language"] == "ko"
+    assert "language" not in out
     assert out["outline_present"] is True
     rec = out["recommendations"]
     assert rec["primary_mode"] == "from_outline"
@@ -215,12 +215,11 @@ def test_ocr_mode_set_chapters_precomputes_raw_text(
         [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 3]}],
         "sequential", "ocr",
         book_info={"title": "테스트용 한국어 책"},
-        language="ko",
     )
     expected = "text from p1\n\ntext from p2\n\ntext from p3"
     assert res["chapters"][0]["char_count"] == len(expected)
     state = workspace.load_state(wid)
-    assert state["language"] == "ko"
+    assert "language" not in state
     assert state["extraction_mode"] == "ocr"
     assert state["chapters"]["ch1"]["char_count"] == len(expected)
 
@@ -262,7 +261,7 @@ def test_ocr_mode_reuses_existing_raw_text(
     res = analysis.set_chapters_impl(
         wid,
         [{"chapter_id": "ch1", "title": "새 제목", "page_range": [1, 2]}],
-        "parallel", "ocr", language="ko",
+        "parallel", "ocr",
     )
 
     assert res["failed_chapters"] == []
@@ -290,7 +289,7 @@ def test_ocr_mode_does_not_reuse_text_mode_raw(
 
     monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
     res = analysis.set_chapters_impl(
-        wid, [chapter], "sequential", "ocr", language="ko",
+        wid, [chapter], "sequential", "ocr",
     )
 
     assert res["failed_chapters"] == []
@@ -325,7 +324,7 @@ def test_ocr_mode_does_not_promote_legacy_raw_after_failed_retry(
     res = analysis.set_chapters_impl(
         wid,
         [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
-        "parallel", "ocr", language="ko",
+        "parallel", "ocr",
     )
 
     assert res["failed_chapters"] == []
@@ -347,7 +346,7 @@ def test_ocr_body_text_does_not_overwrite_raw(make_workspace, ko_with_toc):
     with patch("pdf_study.analysis.ocr.get_ocr_worker", return_value=MockWorker()):
         analysis.set_chapters_impl(
             wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
-            "sequential", "ocr", language="ko",
+            "sequential", "ocr",
         )
     raw0 = workspace.get_chapter_raw(wid, "ch1")
     assert raw0["text"] == "초기 OCR 본문"
@@ -387,7 +386,7 @@ def test_ocr_page_exception_marks_chapter_failed_without_partial_raw(
     res = analysis.set_chapters_impl(
         wid,
         [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
-        "sequential", "ocr", language="ko",
+        "sequential", "ocr",
     )
     assert res["chapters"][0]["error"]
     assert res["failed_chapters"][0]["chapter_id"] == "ch1"
@@ -416,7 +415,7 @@ def test_ocr_empty_chapter_marks_failed_without_raw(
     res = analysis.set_chapters_impl(
         wid,
         [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
-        "sequential", "ocr", language="ko",
+        "sequential", "ocr",
     )
     assert "empty text" in res["chapters"][0]["error"]
     assert res["failed_chapters"][0]["chapter_id"] == "ch1"
@@ -448,7 +447,7 @@ def test_ocr_skips_skip_chapters(make_workspace, ko_with_toc, monkeypatch):
             {"chapter_id": "ch1", "title": "표지", "page_range": [1, 1], "skip": True},
             {"chapter_id": "ch2", "title": "본문", "page_range": [2, 2]},
         ],
-        "sequential", "ocr", language="ko",
+        "sequential", "ocr",
     )
     assert len(calls) == 1
     with pytest.raises(FileNotFoundError):
@@ -485,7 +484,7 @@ def test_ocr_chapter_parallelism_honors_worker_limit(
             {"chapter_id": "ch1", "title": "A", "page_range": [1, 1]},
             {"chapter_id": "ch2", "title": "B", "page_range": [2, 2]},
         ],
-        "parallel", "ocr", language="ko",
+        "parallel", "ocr",
     )
     assert max_active == 1
 
@@ -522,10 +521,10 @@ def test_ocr_chapter_parallelism_limit_is_global_across_calls(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         futures = [
-            pool.submit(
-                analysis.set_chapters_impl,
-                wid, chapters, "parallel", "ocr", None, "ko",
-            )
+                pool.submit(
+                    analysis.set_chapters_impl,
+                    wid, chapters, "parallel", "ocr",
+                )
             for wid in (wid1, wid2)
         ]
         results = [future.result(timeout=10) for future in futures]

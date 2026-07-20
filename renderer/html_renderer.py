@@ -596,10 +596,6 @@ class HtmlRenderer(Renderer):
             raise RuntimeError("no chapters to render. did set_chapters run?")
 
         opts = state.get("question_options") or {}
-        language = (state.get("language") or "en").lower()
-        if language not in ("ko", "en"):
-            language = "en"
-
         output_dir.mkdir(parents=True, exist_ok=True)
         _copy_assets(output_dir)
 
@@ -612,7 +608,7 @@ class HtmlRenderer(Renderer):
                 '<article>' + _chapter_body(ch, opts) + '</article>'
             )
             html_text = _page_shell(
-                lang=language,
+                lang="ko",
                 title=str(book_title),
                 body=body,
                 page_kind="chapter",
@@ -628,7 +624,7 @@ class HtmlRenderer(Renderer):
             idx_body = _index_body(book_info, chapters)
             (output_dir / "index.html").write_text(
                 _page_shell(
-                    lang=language,
+                    lang="ko",
                     title=str(book_title),
                     body=idx_body,
                     page_kind="index",
@@ -646,7 +642,7 @@ class HtmlRenderer(Renderer):
                 )
                 (output_dir / f"{cid}.html").write_text(
                     _page_shell(
-                        lang=language,
+                        lang="ko",
                         title=f"{book_title} · {ch_title}",
                         body=article_body,
                         page_kind="chapter",

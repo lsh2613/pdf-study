@@ -8,7 +8,7 @@ pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, �
 - `analysis.py`는 작업 흐름의 결정 지점을 묶는다. PDF 스캔 결과를 챕터 후보와 사용자 선택지로 바꾸고, 확정된 챕터를 실제 본문 입력으로 만든다.
 - `workspace.py`는 `<output_dir>/.work/`의 상태·원문·요약·문제 파일을 관리한다. 같은 작업의 상태 갱신은 작업별 잠금과 원자적 JSON 저장을 거친다.
 - `pdf/`는 PDF 파일을 여는 경계다. 외부로 보이는 페이지 번호는 1부터 시작하며, 내부 라이브러리의 0부터 시작하는 페이지 번호는 이 모듈 안에서만 쓴다.
-- `prompts.py`는 책 정보, 학습자 맥락, 언어, 문제 유형, 처리 모드를 넣어 챕터 처리 프롬프트를 만든다.
+- `prompts.py`는 책 정보, 학습자 맥락, 문제 유형, 처리 모드를 넣어 한국어 챕터 처리 프롬프트를 만든다.
 - `exa_client.py`는 확장 문제용 검색을 HTTP MCP로 호출한다. 검색 실패는 빈 결과로 바뀌어 본문 기반 문제 생성을 막지 않는다.
 - `renderer/`는 저장된 중립 JSON을 HTML 사이트 또는 Markdown+TUI 폴더로 변환한다. 렌더러는 PDF를 다시 읽지 않는다.
 - `templates/`는 최종 결과물에 복사되는 런처, 정적 자산, TUI 엔진을 담는다.
@@ -18,11 +18,11 @@ pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, �
 
 사용자가 PDF 경로와 학습 자료 생성을 요청하면 클라이언트는 `init_work`로 작업 폴더와 `work_id`를 만든다. 서버는 PDF를 읽지 않고 상태 파일과 빈 저장소를 만든 뒤 `scan_pdf`를 요구한다.
 
-`scan_pdf`는 PDF 메타데이터, 텍스트 레이어 품질, 언어, 페이지 오프셋, 내장 목차를 확인한다. 내장 목차가 있으면 물리 페이지 범위가 담긴 챕터 후보를 반환한다. 내장 목차가 없거나 재분석이 필요하면 목차 페이지를 JPEG로 렌더하되 OCR 모델을 준비하거나 실행하지 않는다. 클라이언트는 `prepare_ocr` 후 `scan_toc_with_ocr`로 목차 OCR 텍스트를 얻고, 그 텍스트와 이미지를 확인해 챕터를 구성한다.
+`scan_pdf`는 PDF 메타데이터, 텍스트 레이어 품질, 페이지 오프셋, 내장 목차를 확인한다. 내장 목차가 있으면 물리 페이지 범위가 담긴 챕터 후보를 반환한다. 내장 목차가 없거나 재분석이 필요하면 목차 페이지를 JPEG로 렌더하되 OCR 모델을 준비하거나 실행하지 않는다. 클라이언트는 `prepare_ocr` 후 `scan_toc_with_ocr`로 목차 OCR 텍스트를 얻고, 그 텍스트와 이미지를 확인해 챕터를 구성한다.
 
 클라이언트가 챕터와 처리 방식을 확정하면 `set_chapters`가 상태 파일에 챕터를 등록한다. text 모드에서는 이 시점에 본문 텍스트를 추출해 `chapters_raw`에 저장한다. OCR 모드에서는 이 시점에 본문 페이지 이미지를 렌더링하고 PaddleOCR CPU로 읽어 `chapters_raw`에 `text`와 `char_count`를 저장한다.
 
-`get_subagent_prompts`는 처리 모드와 언어에 맞는 프롬프트를 돌려준다. 각 챕터 처리자는 `get_chapter_content`로 입력을 받고, 요약·핵심 포인트·활성 문제 유형을 만든 뒤 `save_chapter_result`로 저장한다. 확장 문제가 켜져 있으면 `search_extension_context`가 검색 결과를 보조 자료로 주고 `save_extension_result`가 확장 문제를 저장한다.
+`get_subagent_prompts`는 처리 모드에 맞는 한국어 프롬프트를 돌려준다. 각 챕터 처리자는 `get_chapter_content`로 입력을 받고, 요약·핵심 포인트·활성 문제 유형을 한국어로 만든 뒤 `save_chapter_result`로 저장한다. 확장 문제가 켜져 있으면 `search_extension_context`가 검색 결과를 보조 자료로 주고 `save_extension_result`가 확장 문제를 저장한다.
 
 `list_pending_chapters`가 남은 요약 또는 확장 문제를 확인한다. 남은 챕터가 있으면 `finalize_study`는 기본적으로 거부한다. 모두 끝난 뒤 `finalize_study`가 HTML 또는 Markdown+TUI 결과물을 같은 중립 JSON에서 만든다.
 
