@@ -417,33 +417,13 @@ def _extension_section(items: list[dict[str, Any]]) -> str:
     parts = ['<section id="ex"><h2>확장형</h2>']
     for q in items:
         qid = _esc(q.get("id") or "")
-        context = q.get("context") or ""
         model_answer = q.get("model_answer") or ""
-        sources = q.get("sources") or []
-        ctx_html = (
-            '<div class="ext-context">'
-            '<strong>참고 맥락</strong>'
-            '<p class="context-note">문제 풀이에 참고할 외부 자료 요약입니다. '
-            '모범답안은 아래 버튼으로 따로 확인하세요.</p>'
-            f'<p>{_esc(context)}</p>'
-            '</div>'
-            if context else ""
-        )
-        sources_html = ""
-        if sources:
-            links = "".join(
-                f'<li><a href="{_esc(u)}" target="_blank" rel="noopener">{_esc(u)}</a></li>'
-                for u in sources
-            )
-            sources_html = f'<ul class="sources">{links}</ul>'
         parts.append(
             f'<div class="question text" data-qid="{qid}">'
             f'<p class="q-prompt">{_esc(q.get("question") or "")}</p>'
-            f'{ctx_html}'
             f'<textarea placeholder="여기에 답변을 입력하세요"></textarea>'
             f'<button type="button" class="reveal" aria-expanded="false">모범답안 보기</button>'
             f'<div class="model-answer" hidden>{_esc(model_answer)}</div>'
-            f'{sources_html}'
             '</div>'
         )
     parts.append("</section>")

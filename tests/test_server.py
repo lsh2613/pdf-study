@@ -45,6 +45,18 @@ def _init(pdf, out, **kw):
     return r
 
 
+def _scan(wid, **kw):
+    """미정 문제 유형을 테스트 기본값(True)으로 명시해 scan_pdf 호출."""
+    options = workspace.load_state(wid)["question_options"]
+    selections = {
+        "enable_short_answer": True if options.get("short_answer") is None else None,
+        "enable_reflection": True if options.get("reflection") is None else None,
+        "enable_extension": True if options.get("extension") is None else None,
+    }
+    selections.update(kw)
+    return server.scan_pdf(wid, **selections)
+
+
 def _sc(wid, chapters, **kw):
     """set_chapters — 모드 기본값(sequential/text) 고정 헬퍼."""
     return server.set_chapters(
@@ -68,7 +80,7 @@ def _result(summary="요약"):
 def _ext():
     """save_extension_result용 유효 페이로드(extension 1개)."""
     return {"questions": {"extension": [
-        {"id": "ex1", "question": "?", "context": "c", "model_answer": "a", "sources": []}
+        {"id": "ex1", "question": "?", "model_answer": "a"}
     ]}}
 
 
@@ -81,6 +93,86 @@ def _assert_no_chapter_result_files(wid: str, chapter_id: str) -> None:
 # ---------------------------------------------------------------------------
 # init_work — 모드 인자를 더 이상 받지 않는다 (set_chapters에서 결정)
 # ---------------------------------------------------------------------------
+
+def test_init_work_requests_optional_question_types_and_user_context(tmp_path, ko_short):
+    r = server.init_work(str(ko_short), str(tmp_path / "out"))
+
+    _check_envelope(r)
+    assert r["ok"] is True
+    assert r["data"]["question_options"] == {
+        "multiple_choice": True,
+        "short_answer": None,
+        "reflection": None,
+        "extension": None,
+    }
+    setup = r["data"]["question_setup"]
+    assert setup["pending_fields"] == [
+        "enable_short_answer", "enable_reflection", "enable_extension",
+    ]
+    assert [item["field"] for item in setup["questions"]] == setup["pending_fields"]
+    assert all(
+        {choice["value"] for choice in item["choices"]} == {True, False}
+        for item in setup["questions"]
+    )
+    assert setup["user_context_request"]["required"] is False
+    assert "학습 목적" in setup["user_context_request"]["desc"]
+    assert "scan_pdf" in r["next_action"]
+
+
+def test_scan_pdf_rejects_missing_question_choices_without_scanning(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+
+    r = server.scan_pdf(wid)
+
+    _check_envelope(r)
+    assert r["ok"] is False
+    assert r["data"]["missing"] == [
+        "enable_short_answer", "enable_reflection", "enable_extension",
+    ]
+    state = workspace.load_state(wid)
+    assert state["current_phase"] == "init"
+    assert state["page_count"] is None
+    assert state["question_options"]["extension"] is None
+
+
+def test_scan_pdf_confirms_choices_and_user_context(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+
+    r = server.scan_pdf(
+        wid,
+        enable_short_answer=True,
+        enable_reflection=False,
+        enable_extension=True,
+        user_context="  데이터베이스를 처음 배우는 직장인  ",
+    )
+
+    assert r["ok"], r
+    assert r["data"]["question_options"] == {
+        "multiple_choice": True,
+        "short_answer": True,
+        "reflection": False,
+        "extension": True,
+    }
+    assert r["data"]["user_context"] == "데이터베이스를 처음 배우는 직장인"
+    state = workspace.load_state(wid)
+    assert state["question_options"] == r["data"]["question_options"]
+    assert state["user_context"] == r["data"]["user_context"]
+
+
+def test_scan_pdf_does_not_silently_change_confirmed_choice(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    first = server.scan_pdf(
+        wid,
+        enable_short_answer=True,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    assert first["ok"], first
+
+    changed = server.scan_pdf(wid, enable_extension=True)
+
+    assert changed["ok"] is False
+    assert workspace.load_state(wid)["question_options"]["extension"] is False
 
 def test_init_work_rejects_all_disabled(tmp_path, ko_short):
     r = server.init_work(
@@ -172,7 +264,7 @@ def _assert_mode_choices(r):
 def test_set_chapters_requires_execution_mode(tmp_path, ko_short):
     """execution_mode 미지정 시 거부 + 4조합 안내."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
                                    "page_range": [1, 12]}])  # 모드 생략
     _assert_mode_choices(r)
@@ -181,7 +273,7 @@ def test_set_chapters_requires_execution_mode(tmp_path, ko_short):
 def test_set_chapters_requires_extraction_mode(tmp_path, ko_short):
     """execution_mode만 주고 extraction_mode 미지정 시 거부 + 4조합 안내."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
                                    "page_range": [1, 12]}],
                             execution_mode="sequential")  # extraction_mode 생략
@@ -191,7 +283,7 @@ def test_set_chapters_requires_extraction_mode(tmp_path, ko_short):
 def test_mode_choices_narrowed_to_ocr_when_no_text_layer(tmp_path, scanned_empty):
     """스캔본(no_text_layer)이면 모드 미지정 거부 시 OCR 2조합만 제시한다."""
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
                                    "page_range": [1, 3]}])  # 모드 생략
     _check_envelope(r)
@@ -206,7 +298,7 @@ def test_mode_choices_narrowed_to_ocr_when_no_text_layer(tmp_path, scanned_empty
 def test_mode_choices_narrowed_to_ocr_when_garbled(tmp_path, ko_short):
     """garbled(mojibake)면 모드 미지정 거부 시 OCR 조합만 제시한다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     workspace.update_state(wid, text_quality="garbled")
     r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
                                    "page_range": [1, 12]}],
@@ -219,7 +311,7 @@ def test_mode_choices_narrowed_to_ocr_when_garbled(tmp_path, ko_short):
 def test_set_chapters_text_mode_blocked_on_no_text_layer(tmp_path, scanned_empty):
     """스캔본(text_quality=no_text_layer)에 text 모드를 고르면 거부 + OCR 강제."""
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     assert workspace.load_state(wid)["text_quality"] == "no_text_layer"
     r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
                                    "page_range": [1, 3]}],
@@ -234,7 +326,7 @@ def test_set_chapters_text_mode_blocked_on_no_text_layer(tmp_path, scanned_empty
 def test_set_chapters_text_mode_blocked_on_garbled(tmp_path, ko_short):
     """text_quality=garbled면(인코딩 깨짐) text 모드 거부 + OCR 강제."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     workspace.update_state(wid, text_quality="garbled")  # 깨진 텍스트 레이어 가정
     r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
                                    "page_range": [1, 12]}],
@@ -247,7 +339,7 @@ def test_set_chapters_text_mode_blocked_on_garbled(tmp_path, ko_short):
 def test_set_chapters_text_mode_ok_when_quality_good(tmp_path, ko_short):
     """정상 텍스트 레이어(medium/high)면 text 모드가 통과한다(오탐 방지)."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     assert workspace.load_state(wid)["text_quality"] in ("low", "medium", "high")
     r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
                                    "page_range": [1, 12]}],
@@ -258,7 +350,7 @@ def test_set_chapters_text_mode_ok_when_quality_good(tmp_path, ko_short):
 def test_get_chapter_content_marks_summary_in_progress(tmp_path, ko_short):
     """get_chapter_content 호출 시 summary_status가 in_progress로, 저장 시 completed로 전이."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
 
@@ -278,7 +370,7 @@ def test_get_chapter_content_ocr_returns_precomputed_text_without_lazy_ocr(
 ):
     """OCR 모드에서도 get_chapter_content는 저장된 text만 반환하고 worker를 다시 부르지 않는다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     calls = []
 
     class MockWorker:
@@ -324,7 +416,7 @@ def test_set_chapters_ocr_failure_returns_failed_chapters(
 ):
     """OCR 선처리 실패는 ok=false와 data.failed_chapters로 즉시 드러난다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out_ocr_fail"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
 
     class MockWorker:
         def process_image(self, img_path):
@@ -354,7 +446,7 @@ def test_set_chapters_ocr_requires_prepare_when_cache_missing(
     tmp_path, ko_short, monkeypatch
 ):
     wid = server.init_work(str(ko_short), str(tmp_path / "out_ocr_missing"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     monkeypatch.setattr(server.analysis.ocr, "models_cached", lambda: False)
     monkeypatch.setattr(
         server.analysis.ocr,
@@ -378,7 +470,7 @@ def test_set_chapters_ocr_requires_prepare_when_cache_missing(
 def test_save_chapter_result_accepts_without_body_text(tmp_path, ko_short):
     """body_text 없이도 요약/문제 저장은 정상 완료된다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     r = server.save_chapter_result(wid, "ch1", _result())
@@ -392,7 +484,7 @@ def test_save_chapter_result_body_text_does_not_overwrite_ocr_raw(
 ):
     """server 경계로 body_text가 들어와도 OCR raw text/char_count는 유지된다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
 
     class MockWorker:
         def process_image(self, img_path):
@@ -420,7 +512,7 @@ def test_save_chapter_result_body_text_does_not_overwrite_ocr_raw(
 
 def test_save_chapter_result_rejects_bad_work_id_without_files(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     r = server.save_chapter_result(f"{wid}-missing", "ch1", _result())
@@ -434,7 +526,7 @@ def test_save_chapter_result_rejects_bad_work_id_without_files(tmp_path, ko_shor
 
 def test_save_chapter_result_rejects_unknown_chapter_without_files(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     r = server.save_chapter_result(wid, "ch999", _result())
@@ -448,7 +540,7 @@ def test_save_chapter_result_rejects_unknown_chapter_without_files(tmp_path, ko_
 
 def test_save_chapter_result_reports_target_before_payload_shape(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     r = server.save_chapter_result(wid, "ch999", {"questions": {}})
@@ -461,7 +553,7 @@ def test_save_chapter_result_reports_target_before_payload_shape(tmp_path, ko_sh
 
 def test_save_results_reject_skip_chapter_without_files(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [
         {"chapter_id": "ch1", "title": "색인", "page_range": [1, 1], "skip": True},
     ])
@@ -483,7 +575,7 @@ def test_save_results_reject_skip_chapter_without_files(tmp_path, ko_short):
 
 def test_save_extension_result_rejects_bad_targets_without_files(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     bad_work = server.save_extension_result(f"{wid}-missing", "ch1", _ext())
@@ -502,7 +594,7 @@ def test_save_extension_result_rejects_bad_targets_without_files(tmp_path, ko_sh
 
 def test_save_extension_result_reports_target_before_payload_shape(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     bad_work = server.save_extension_result(f"{wid}-missing", "ch1", {})
@@ -522,7 +614,7 @@ def test_save_chapter_result_reports_state_failure_without_files(
     tmp_path, ko_short, monkeypatch
 ):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     original_save_state = workspace.save_state
@@ -546,7 +638,7 @@ def test_save_extension_result_reports_state_failure_without_files(
     tmp_path, ko_short, monkeypatch
 ):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     original_save_state = workspace.save_state
@@ -580,7 +672,7 @@ def test_get_subagent_prompts_rejects_invalid_ocr_raw(
 ):
     """OCR 모드에서 raw text/char_count가 불완전하면 sub-agent 프롬프트를 주지 않는다."""
     wid = server.init_work(str(ko_short), str(tmp_path / f"out_{case}"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
 
     class MockWorker:
         def process_image(self, img_path):
@@ -649,7 +741,7 @@ def test_get_chapter_content_rejects_invalid_raw(
 ):
     """get_chapter_content도 raw 누락/char_count 불일치를 실패로 반환한다."""
     wid = server.init_work(str(ko_short), str(tmp_path / f"out_content_{case}"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
 
     class MockWorker:
         def process_image(self, img_path):
@@ -686,7 +778,7 @@ def test_get_chapter_content_rejects_invalid_raw(
 def test_mark_chapter_in_progress_guards_done_and_missing(tmp_path, ko_short):
     """in_progress 마킹은 completed/skipped를 안 건드리고, 없는 챕터는 조용히 무시."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     workspace.mark_chapter_in_progress(wid, "ch1", kind="extension")
@@ -702,7 +794,7 @@ def test_mark_chapter_in_progress_guards_done_and_missing(tmp_path, ko_short):
 def test_save_chapter_result_rejects_missing_summary(tmp_path, ko_short):
     """summary 누락 시 ok=False로 거부하고 completed로 마킹하지 않는다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     bad = _result()
@@ -720,7 +812,7 @@ def test_save_chapter_result_rejects_empty_enabled_question_type(tmp_path, ko_sh
     # reflection만 비활성화 → reflection 비어도 통과, short_answer 비면 거부
     wid = server.init_work(str(ko_short), str(tmp_path / "out"),
                            enable_reflection=False)["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     data = _result()
@@ -779,7 +871,7 @@ def test_save_chapter_result_rejects_invalid_json_shape(
 ):
     """기본 결과 JSON은 prompts.py의 스키마와 필드 타입까지 검증한다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     data = _result()
@@ -797,7 +889,7 @@ def test_save_chapter_result_requires_disabled_question_keys(tmp_path, ko_short)
     wid = server.init_work(
         str(ko_short), str(tmp_path / "out"), enable_reflection=False,
     )["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     data = _result()
@@ -812,12 +904,28 @@ def test_save_chapter_result_requires_disabled_question_keys(tmp_path, ko_short)
 def test_save_extension_result_rejects_empty_extension(tmp_path, ko_short):
     """questions.extension이 비어 있으면 거부."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
     r = server.save_extension_result(wid, "ch1", {"questions": {"extension": []}})
     assert r["ok"] is False
     assert r["data"]["missing"] == ["questions.extension"]
     assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] != "completed"
+
+
+def test_save_extension_result_rejects_disabled_extension(tmp_path, ko_short):
+    wid = server.init_work(
+        str(ko_short),
+        str(tmp_path / "out"),
+        enable_extension=False,
+    )["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
+
+    r = server.save_extension_result(wid, "ch1", _ext())
+
+    assert r["ok"] is False
+    assert r["data"]["missing"] == ["question_options.extension"]
+    assert not (workspace.extension_quiz_dir(wid) / "ch1.json").exists()
 
 
 @pytest.mark.parametrize(
@@ -829,28 +937,21 @@ def test_save_extension_result_rejects_empty_extension(tmp_path, ko_short):
             "questions.extension[0].id",
         ),
         (
-            lambda d: d["questions"]["extension"][0].pop("context"),
-            "questions.extension[0].context",
+            lambda d: d["questions"]["extension"][0].__setitem__("question", " "),
+            "questions.extension[0].question",
         ),
         (
-            lambda d: d["questions"]["extension"][0].__setitem__("sources", [123]),
-            "questions.extension[0].sources[0]",
-        ),
-        (
-            lambda d: (
-                d["questions"]["extension"][0].__setitem__("sources", ["https://example.com"]),
-                d["questions"]["extension"][0].__setitem__("context", " "),
-            ),
-            "questions.extension[0].context",
+            lambda d: d["questions"]["extension"][0].pop("model_answer"),
+            "questions.extension[0].model_answer",
         ),
     ],
 )
 def test_save_extension_result_rejects_invalid_json_shape(
     tmp_path, ko_short, mutate, expected_missing
 ):
-    """확장 결과 JSON도 extension 항목별 필드 타입과 출처/맥락 규칙을 검증한다."""
+    """확장 결과 JSON도 extension 항목별 필드 타입을 검증한다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     data = _ext()
@@ -863,25 +964,25 @@ def test_save_extension_result_rejects_invalid_json_shape(
     assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] != "completed"
 
 
-def test_save_extension_result_allows_empty_sources_and_context(tmp_path, ko_short):
-    """외부 검색 결과가 없으면 sources=[]와 빈 context가 함께 유효하다."""
+def test_save_extension_result_keeps_only_local_question_schema(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     data = _ext()
-    data["questions"]["extension"][0]["context"] = ""
-    data["questions"]["extension"][0]["sources"] = []
+    data["questions"]["extension"][0]["legacy_extra"] = "drop me"
     r = server.save_extension_result(wid, "ch1", data)
 
     assert r["ok"] is True, r
     assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] == "completed"
+    saved = workspace.extension_quiz_dir(wid).joinpath("ch1.json").read_text(encoding="utf-8")
+    assert "legacy_extra" not in saved
 
 
 def test_save_extension_result_drops_body_text(tmp_path, ko_short):
     """확장 결과에 body_text가 섞여 와도 저장 파일에는 남기지 않는다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
 
     data = _ext()
@@ -899,7 +1000,7 @@ def test_save_extension_result_drops_body_text(tmp_path, ko_short):
 
 def test_scan_pdf_scanned_renders_toc_images_without_ocr(tmp_path, scanned_empty):
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
-    r = server.scan_pdf(wid)
+    r = _scan(wid)
     _check_envelope(r)
     assert r["ok"] is True, r
     rec = r["data"]["recommendations"]
@@ -916,7 +1017,7 @@ def test_scan_pdf_scanned_renders_toc_images_without_ocr(tmp_path, scanned_empty
 
 def test_scan_toc_with_ocr_returns_ocr_text(tmp_path, scanned_empty):
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
 
     r = server.scan_toc_with_ocr(wid)
 
@@ -938,7 +1039,7 @@ def test_scan_toc_with_ocr_requires_prepare_when_cache_missing(
         lambda: {"cache_dir": "fake", "models": [], "all_cached": False},
     )
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
 
     r = server.scan_toc_with_ocr(wid)
 
@@ -973,7 +1074,7 @@ def test_scan_skips_offset_on_no_text_layer(tmp_path, scanned_empty, monkeypatch
 
     monkeypatch.setattr(analysis.reader, "detect_page_offset", counted)
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     st = workspace.load_state(wid)
     assert st["text_quality"] == "no_text_layer"
     assert "language" not in st
@@ -984,7 +1085,7 @@ def test_scan_skips_offset_on_no_text_layer(tmp_path, scanned_empty, monkeypatch
 
 def test_scan_pdf_outline_routes_to_from_outline(tmp_path, ko_with_toc):
     wid = server.init_work(str(ko_with_toc), str(tmp_path / "out"))["data"]["work_id"]
-    r = server.scan_pdf(wid)
+    r = _scan(wid)
     assert r["ok"], r
     rec = r["data"]["recommendations"]
     assert rec["primary_mode"] == "from_outline"
@@ -1012,7 +1113,7 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
     _check_envelope(r1); assert r1["ok"]
     wid = r1["data"]["work_id"]
 
-    r2 = server.scan_pdf(wid)
+    r2 = _scan(wid)
     _check_envelope(r2); assert r2["ok"]
     # ko_short은 내장 목차가 없어 목차 OCR 경로 — 챕터는 직접 구성
     chs = [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}]
@@ -1082,7 +1183,7 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
 def test_finalize_requires_output_format(tmp_path, ko_short):
     """output_format 미지정 시 거부 + 사용자에게 물어보라는 안내."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
     server.save_chapter_result(wid, "ch1", _result())
     r = server.finalize_study(wid)  # output_format 생략
@@ -1096,7 +1197,7 @@ def test_finalize_requires_output_format(tmp_path, ko_short):
 
 def test_finalize_rejects_unknown_format(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
     server.save_chapter_result(wid, "ch1", _result())
     r = server.finalize_study(wid, output_format="bogus")
@@ -1107,7 +1208,7 @@ def test_finalize_rejects_unknown_format(tmp_path, ko_short):
 
 def test_md_tui_renderer_finalizes_ok(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}])
     server.save_chapter_result(wid, "ch1", _result())
     r = server.finalize_study(wid, output_format="md_tui", force=True)
@@ -1129,7 +1230,7 @@ def test_finalize_blocks_on_pending_then_force(tmp_path, ko_short):
     force=True면 부분 결과로 강제 렌더링한다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"),
                            enable_extension=False)["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [
         {"chapter_id": "ch1", "title": "A", "page_range": [1, 6]},
         {"chapter_id": "ch2", "title": "B", "page_range": [7, 12]},
@@ -1153,7 +1254,7 @@ def test_resume_work_restores_registry_after_restart(tmp_path, ko_short):
     out = tmp_path / "out"
     wid = server.init_work(str(ko_short), str(out),
                            enable_extension=False)["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [
         {"chapter_id": "ch1", "title": "A", "page_range": [1, 6]},
         {"chapter_id": "ch2", "title": "B", "page_range": [7, 12]},
@@ -1174,6 +1275,22 @@ def test_resume_work_restores_registry_after_restart(tmp_path, ko_short):
 
     assert server.get_work_state(wid)["ok"]
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "completed"
+
+
+def test_resume_work_restores_pending_question_setup(tmp_path, ko_short):
+    out = tmp_path / "out_pending_setup"
+    wid = server.init_work(str(ko_short), str(out))["data"]["work_id"]
+    workspace._registry.clear()
+
+    resumed = server.resume_work(output_dir=str(out))
+
+    assert resumed["ok"], resumed
+    assert resumed["data"]["work_id"] == wid
+    assert resumed["data"]["question_setup"]["pending_fields"] == [
+        "enable_short_answer", "enable_reflection", "enable_extension",
+    ]
+    assert "scan_pdf" in resumed["next_action"]
+    assert workspace.load_state(wid)["page_count"] is None
 
 
 def test_resume_work_requires_output_or_pdf():

@@ -14,7 +14,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from . import analysis, exa_client, prompts, workspace
+from . import analysis, prompts, workspace
 from .renderer import RENDERERS
 
 logger = logging.getLogger(__name__)
@@ -195,21 +195,6 @@ def _missing_extension_fields(data: dict[str, Any], chapter_id: str) -> list[str
 
         _validate_required_strings(item, ("id", "question", "model_answer"), path, missing)
 
-        context = item.get("context")
-        if not isinstance(context, str):
-            missing.append(f"{path}.context")
-
-        sources = item.get("sources")
-        if not isinstance(sources, list):
-            missing.append(f"{path}.sources")
-            continue
-        for source_idx, source in enumerate(sources):
-            if not isinstance(source, str):
-                missing.append(f"{path}.sources[{source_idx}]")
-
-        if sources and isinstance(context, str) and not context.strip():
-            missing.append(f"{path}.context")
-
     return missing
 
 
@@ -228,6 +213,116 @@ def _failed_chapters_from_invalid(invalid: list[dict[str, Any]]) -> list[dict[st
 
 
 _SAFE_NAME_RE = re.compile(r"[^\w가-힣.\-]+")  # 영숫자 / 한글 / _ . - 외엔 치환
+
+
+_QUESTION_SETUP_DEFS = (
+    {
+        "field": "enable_short_answer",
+        "state_key": "short_answer",
+        "question": "단답형 문제를 생성할까요?",
+        "choices": [
+            {
+                "value": True,
+                "label": "단답형 문제 포함",
+                "desc": "챕터 핵심 개념을 짧은 문장으로 답하는 문제를 만듭니다.",
+            },
+            {
+                "value": False,
+                "label": "단답형 문제 제외",
+                "desc": "단답형 문제를 만들지 않습니다.",
+            },
+        ],
+    },
+    {
+        "field": "enable_reflection",
+        "state_key": "reflection",
+        "question": "주관식 문제를 생성할까요?",
+        "choices": [
+            {
+                "value": True,
+                "label": "주관식 문제 포함",
+                "desc": "본문 근거를 설명하는 서술형 검증 문제를 만듭니다.",
+            },
+            {
+                "value": False,
+                "label": "주관식 문제 제외",
+                "desc": "주관식 문제를 만들지 않습니다.",
+            },
+        ],
+    },
+    {
+        "field": "enable_extension",
+        "state_key": "extension",
+        "question": "확장 문제를 생성할까요?",
+        "choices": [
+            {
+                "value": True,
+                "label": "확장 문제 포함",
+                "desc": (
+                    "PDF 개념을 학습자의 현실·실무 맥락과 연결하는 응용 문제를 "
+                    "외부 검색 없이 만듭니다."
+                ),
+            },
+            {
+                "value": False,
+                "label": "확장 문제 제외",
+                "desc": "확장 문제를 만들지 않습니다.",
+            },
+        ],
+    },
+)
+
+
+def _question_setup_payload(state: dict[str, Any]) -> dict[str, Any]:
+    """아직 답하지 않은 문제 유형과 선택적 학습자 정보 요청을 반환한다."""
+    options = state.get("question_options") or {}
+    questions = [
+        {
+            "field": item["field"],
+            "question": item["question"],
+            "choices": [dict(choice) for choice in item["choices"]],
+        }
+        for item in _QUESTION_SETUP_DEFS
+        if options.get(item["state_key"]) is None
+    ]
+    return {
+        "pending_fields": [item["field"] for item in questions],
+        "questions": questions,
+        "user_context_request": (
+            None
+            if state.get("user_context_confirmed") or state.get("user_context")
+            else {
+                "field": "user_context",
+                "required": False,
+                "label": "학습자 정보 (선택)",
+                "desc": (
+                    "학습 목적, 배경지식, 관심 분야, 현재 수준을 알려주면 문제의 "
+                    "난이도·표현·예시·관점을 학습자에게 맞출 수 있습니다. "
+                    "제공하지 않아도 진행할 수 있습니다."
+                ),
+            }
+        ),
+    }
+
+
+def _question_setup_next_action(work_id: str, setup: dict[str, Any]) -> str:
+    instructions: list[str] = []
+    if setup["questions"]:
+        instructions.append(
+            "data.question_setup.questions의 항목과 설명을 바꾸지 말고 사용자에게 "
+            "모두 물어보세요."
+        )
+    if setup["user_context_request"]:
+        instructions.append(
+            "data.question_setup.user_context_request도 함께 안내해 선택적으로 학습자 "
+            "정보를 받으세요."
+        )
+    args = [f'work_id="{work_id}"']
+    args.extend(f"{field}=<사용자 선택>" for field in setup["pending_fields"])
+    if setup["user_context_request"]:
+        args.append("user_context=<사용자 정보 또는 빈 문자열>")
+    instructions.append(f"답을 받은 뒤 scan_pdf({', '.join(args)})를 호출하세요.")
+    return " ".join(instructions)
 
 
 def _pdf_name_slug(pdf_path: str) -> str:
@@ -282,9 +377,9 @@ def init_work(
     pdf_path: str,
     output_dir: str = "",
     enable_multiple_choice: bool = True,
-    enable_short_answer: bool = True,
-    enable_reflection: bool = True,
-    enable_extension: bool = True,
+    enable_short_answer: bool | None = None,
+    enable_reflection: bool | None = None,
+    enable_extension: bool | None = None,
     user_context: str = "",
 ) -> dict[str, Any]:
     """워크스페이스를 생성하고 work_id를 발급합니다.
@@ -316,8 +411,13 @@ def init_work(
       아래에 `result/<pdf_basename>/` 형태로 자동 생성됩니다 (PDF 파일명에서
       안전하지 않은 문자는 `_`로 치환). 같은 PDF로 재실행하면 같은 폴더에
       **덮어씌워지므로**, 이전 결과를 보존하려면 명시적으로 다른 경로를 주세요.
-    - enable_*: 4가지 문제 유형 활성/비활성 (모두 False 금지)
-    - user_context: 학습자 정보 (학년/배경 등). sub-agent 프롬프트에 주입.
+    - enable_multiple_choice: 객관식 활성/비활성. 기존 호환을 위해 기본 활성.
+    - enable_short_answer / enable_reflection / enable_extension: 사용자가 이미 명시한
+      값만 전달합니다. 미지정(None)이면 응답의 question_setup 선택지를 설명 그대로
+      보여주고, 사용자 답을 scan_pdf에 전달해야 합니다. 기본값은 없습니다.
+    - user_context: 학습 목적, 배경지식, 관심 분야, 현재 수준 같은 학습자 정보.
+      비어 있으면 응답에서 선택적으로 입력하도록 안내합니다. 이 정보는 요약과 문제의
+      난이도·표현·예시·관점을 조정하는 데 사용됩니다.
 
     처리 모드(순차/병렬 · text/ocr)는 이 단계에서 받지 않습니다 — 목차를 분석해
     챕터를 확정한 뒤 **set_chapters에서** 사용자에게 물어 정합니다.
@@ -340,13 +440,24 @@ def init_work(
         user_context=user_context,
         work_id=work_id,
     )
+    state = workspace.load_state(work_id)
+    question_setup = _question_setup_payload(state)
+    needs_user_input = bool(
+        question_setup["pending_fields"] or question_setup["user_context_request"]
+    )
     return _ok(
         {
             "work_id": work_id,
             "work_dir": str(workspace.get_work_dir(work_id)),
             "output_dir": resolved_dir,
+            "question_options": state["question_options"],
+            "question_setup": question_setup,
         },
-        next_action=f'scan_pdf(work_id="{work_id}", scan_size=30)',
+        next_action=(
+            _question_setup_next_action(work_id, question_setup)
+            if needs_user_input
+            else f'scan_pdf(work_id="{work_id}", scan_size=30)'
+        ),
     )
 
 
@@ -378,6 +489,23 @@ def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
 
     state = workspace.resume_workspace(resolved)
     work_id = state["work_id"]
+    question_setup = _question_setup_payload(state)
+    if question_setup["pending_fields"] or (
+        state.get("page_count") is None and question_setup["user_context_request"]
+    ):
+        return _ok(
+            {
+                "work_id": work_id,
+                "output_dir": state.get("output_dir"),
+                "current_phase": state.get("current_phase"),
+                "question_options": state.get("question_options"),
+                "question_setup": question_setup,
+                "summary_pending": [],
+                "extension_pending": [],
+            },
+            next_action=_question_setup_next_action(work_id, question_setup),
+        )
+
     pending = workspace.list_pending_chapters_impl(work_id)
     opts = state.get("question_options", {})
     ext_pending = pending["extension_pending"] if opts.get("extension") else []
@@ -413,6 +541,10 @@ def scan_pdf(
     work_id: str,
     scan_size: int = 30,
     force_vision: bool = False,
+    enable_short_answer: bool | None = None,
+    enable_reflection: bool | None = None,
+    enable_extension: bool | None = None,
+    user_context: str | None = None,
 ) -> dict[str, Any]:
     """PDF 메타 + 챕터 경계 소스(내장 목차 또는 목차 후보 이미지) + offset.
 
@@ -429,6 +561,11 @@ def scan_pdf(
     force_vision은 외부 계약 호환용 legacy 이름이며, 현재 동작은 목차 페이지
     이미지 렌더입니다.
 
+    init_work에서 단답형·주관식·확장형 선택이 미정이면 이 도구를 호출할 때
+    enable_short_answer, enable_reflection, enable_extension에 사용자의 명시적 선택을
+    모두 전달해야 합니다. user_context는 선택 입력이며 학습 목적·배경지식·관심 분야·
+    현재 수준을 받으면 함께 전달합니다. 선택이 빠지면 PDF를 스캔하지 않습니다.
+
     **페이지 오프셋 + 선택지 흐름 (필수)**:
     recommendations에 page_offset(물리 = 책 + offset), offset_confidence,
     각 챕터의 page_range(PDF 물리)·printed_range(책 페이지), user_choices,
@@ -437,9 +574,60 @@ def scan_pdf(
     제시해(임의로 항목을 만들거나 빼지 말 것) 선택을 받으세요.
     다음 단계: set_chapters(work_id, chapters, execution_mode, extraction_mode, book_info)
     """
+    state = workspace.load_state(work_id)
+    supplied = {
+        "enable_short_answer": enable_short_answer,
+        "enable_reflection": enable_reflection,
+        "enable_extension": enable_extension,
+    }
+    setup = _question_setup_payload(state)
+    missing = [
+        field for field in setup["pending_fields"]
+        if supplied.get(field) is None
+    ]
+    invalid = [
+        field for field, value in supplied.items()
+        if value is not None and not isinstance(value, bool)
+    ]
+    if user_context is not None and not isinstance(user_context, str):
+        invalid.append("user_context")
+    if missing or invalid:
+        return _err(
+            "문제 유형 선택이 빠졌거나 형식이 올바르지 않아 PDF를 스캔하지 않았습니다. "
+            "서버가 제공한 선택지를 그대로 보여주고 사용자의 명시적 답을 받으세요.",
+            data={
+                "missing": missing,
+                "invalid": invalid,
+                "question_setup": setup,
+            },
+            next_action=_question_setup_next_action(work_id, setup),
+        )
+
+    try:
+        state = workspace.confirm_question_setup(
+            work_id,
+            enable_short_answer=enable_short_answer,
+            enable_reflection=enable_reflection,
+            enable_extension=enable_extension,
+            user_context=user_context,
+        )
+    except ValueError as e:
+        setup = _question_setup_payload(state)
+        return _err(
+            str(e),
+            data={"question_setup": setup},
+            next_action=(
+                _question_setup_next_action(work_id, setup)
+                if setup["pending_fields"] or setup["user_context_request"]
+                else None
+            ),
+        )
+
     data = analysis.scan_pdf_impl(
         work_id, scan_size=scan_size, force_vision=force_vision,
     )
+    data["question_options"] = state["question_options"]
+    data["user_context"] = state.get("user_context", "")
     rec = data.get("recommendations", {})
     if rec.get("rejected"):
         return _err(rec.get("reason") or "scan rejected", data=data)
@@ -706,7 +894,7 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
     return _ok(raw, next_action=(
         guide + f"save_chapter_result(work_id=\"{work_id}\", "
         f"chapter_id=\"{chapter_id}\", data=...)로 저장하세요. extension이 "
-        "활성이면 같은 챕터에 대해 search_extension_context→extension→"
+        "활성이면 같은 text와 extension_prompt로 확장 문제를 만들어 "
         "save_extension_result도 처리한 뒤, 다음 챕터로 넘어가세요."
     ))
 
@@ -747,7 +935,7 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
         f"workflow_instructions를 따라 chapter_ids({data['chapter_ids']})를 "
         "순회하세요. 각 챕터: get_chapter_content(그 chapter_id) → summarizer_prompt로 "
         "요약/문제 생성 → save_chapter_result"
-        + ("(+ extension 활성: search_extension_context→save_extension_result)" if ext_on else "")
+        + ("(+ extension 활성: 같은 본문과 extension_prompt로 생성→save_extension_result)" if ext_on else "")
         + ". chapter_id는 반드시 위 목록의 값(ch1·ch2…)을 쓰고, 페이지 범위 문자열은 "
         "쓰지 마세요. mode가 'ocr'이어도 set_chapters에서 선계산된 text를 읽습니다."
     ))
@@ -800,8 +988,8 @@ def save_chapter_result(
     except (KeyError, ValueError, RuntimeError, OSError) as e:
         return _save_target_error(e, chapter_id)
     return _ok({"saved_path": str(path)}, next_action=(
-        f"{chapter_id} 요약/문제 저장 완료. extension이 활성이면 이 챕터의 "
-        "확장 문제도(search_extension_context→save_extension_result) 처리하세요. "
+        f"{chapter_id} 요약/문제 저장 완료. extension이 활성이면 같은 챕터 본문과 "
+        "extension_prompt로 확장 문제를 만들어 save_extension_result로 저장하세요. "
         "그다음 남은 chapter_id로 진행하고, 전부 끝나면 "
         f"list_pending_chapters(work_id=\"{work_id}\")로 누락이 없는지 확인 후 "
         "finalize_study를 호출하세요."
@@ -829,6 +1017,11 @@ def save_extension_result(
         _ensure_save_target(state, chapter_id)
     except (KeyError, FileNotFoundError, ValueError) as e:
         return _save_target_error(e, chapter_id)
+    if not state.get("question_options", {}).get("extension"):
+        return _err(
+            "이 작업은 확장 문제를 사용하지 않습니다.",
+            data={"missing": ["question_options.extension"], "chapter_id": chapter_id},
+        )
 
     data_to_save = dict(data) if isinstance(data, dict) else data
     if isinstance(data_to_save, dict):
@@ -842,6 +1035,15 @@ def save_extension_result(
             "data=...)로 확장 문제를 채워 다시 저장하세요.",
             data={"missing": missing, "chapter_id": chapter_id},
         )
+    data_to_save = {
+        "chapter_id": data_to_save.get("chapter_id", chapter_id),
+        "questions": {
+            "extension": [
+                {key: item[key] for key in ("id", "question", "model_answer")}
+                for item in data_to_save["questions"]["extension"]
+            ],
+        },
+    }
     try:
         path = workspace.save_extension_result(work_id, chapter_id, data_to_save)
     except (KeyError, ValueError, RuntimeError, OSError) as e:
@@ -854,43 +1056,7 @@ def save_extension_result(
 
 
 # ---------------------------------------------------------------------------
-# 8. search_extension_context (async)
-# ---------------------------------------------------------------------------
-
-@mcp.tool()
-@_safe("search_extension_context")
-async def search_extension_context(
-    work_id: str,
-    chapter_id: str,
-    query: str,
-) -> dict[str, Any]:
-    """Exa Web Research MCP로 외부 자료 검색 (API key 불필요).
-
-    Exa 호출 자체가 실패해도 ok=True + 빈 results로 응답하여 sub-agent가
-    본문 지식만으로 확장 문제를 만들 수 있게 한다. 알 수 없는 work_id 같은
-    클라이언트 오류만 ok=False로 변환된다.
-    """
-    # work_id 유효성 (registry에 없으면 KeyError → _safe가 처리)
-    workspace.get_work_dir(work_id)
-    # 확장 자료 검색 시점 = 확장 처리 시작 → 진행 모니터링용 in_progress 마킹
-    workspace.mark_chapter_in_progress(work_id, chapter_id, kind="extension")
-    result = await exa_client.search(query)
-    return _ok({
-        "query": query,
-        "chapter_id": chapter_id,
-        "results": result["results"],
-        "exa_ok": result["ok"],
-        "exa_error": result["error"],
-    }, next_action=(
-        "results(외부 자료)로 챕터와 연결된 확장 문제를 만들어 "
-        f"save_extension_result(work_id=\"{work_id}\", chapter_id=\"{chapter_id}\", "
-        "data=...)로 저장하세요. results가 비었으면 본문 지식만으로 만들고 "
-        "각 문제의 sources는 빈 배열로 두세요."
-    ))
-
-
-# ---------------------------------------------------------------------------
-# 9. get_work_state
+# 8. get_work_state
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -907,7 +1073,7 @@ def get_work_state(work_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 10. list_pending_chapters
+# 9. list_pending_chapters
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -945,7 +1111,7 @@ def list_pending_chapters(work_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 11. finalize_study
+# 10. finalize_study
 # ---------------------------------------------------------------------------
 
 @mcp.tool()

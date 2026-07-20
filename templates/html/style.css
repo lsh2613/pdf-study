@@ -297,24 +297,13 @@ main { padding-bottom: 5rem; }
 .question .options label.correct { border-color: var(--correct); }
 .question .options label.wrong { border-color: var(--wrong); }
 .question .explanation,
-.question .model-answer,
-.question .ext-context {
+.question .model-answer {
   margin-top: .75rem;
   padding: .5rem .75rem;
   background: var(--accent-soft);
   border-radius: 6px;
   font-size: .9rem;
 }
-.question .ext-context strong {
-  display: block;
-  margin-bottom: .2rem;
-}
-.question .ext-context .context-note {
-  margin: 0 0 .35rem;
-  color: var(--muted);
-  font-size: .82rem;
-}
-.question .ext-context p:last-child { margin-bottom: 0; }
 .question textarea {
   width: 100%;
   min-height: 5rem;
@@ -336,15 +325,6 @@ main { padding-bottom: 5rem; }
   cursor: pointer;
   font: inherit;
 }
-.question .sources {
-  margin-top: .5rem;
-  font-size: .8rem;
-}
-.question .sources a {
-  color: var(--accent);
-  word-break: break-all;
-}
-
 .mc-summary {
   margin: 0 0 .75rem;
   font-size: .9rem;

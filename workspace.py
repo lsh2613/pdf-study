@@ -164,10 +164,28 @@ VALID_EXECUTION_MODES = ("sequential", "parallel")
 VALID_EXTRACTION_MODES = ("text", "ocr")
 
 
-def _validate_options(options: dict[str, bool]) -> dict[str, bool]:
-    keys = ("multiple_choice", "short_answer", "reflection", "extension")
-    normalized = {k: bool(options.get(k, True)) for k in keys}
-    if not any(normalized.values()):
+def _validate_options(
+    options: dict[str, bool | None],
+) -> dict[str, bool | None]:
+    """문제 유형 설정을 검증한다.
+
+    객관식만 기존 기본 활성 상태를 유지한다. 단답형·주관식·확장형의 ``None``은
+    init_work 뒤 사용자 선택을 기다리는 상태이며 scan_pdf에서 확정된다.
+    """
+    defaults: dict[str, bool | None] = {
+        "multiple_choice": True,
+        "short_answer": None,
+        "reflection": None,
+        "extension": None,
+    }
+    normalized: dict[str, bool | None] = {}
+    for key, default in defaults.items():
+        value = options.get(key, default)
+        if value is not None and not isinstance(value, bool):
+            raise ValueError(f"{key} must be true, false, or null")
+        normalized[key] = value
+
+    if all(value is False for value in normalized.values()):
         raise ValueError("at least one question type must be enabled")
     return normalized
 
@@ -175,7 +193,7 @@ def _validate_options(options: dict[str, bool]) -> dict[str, bool]:
 def create_workspace(
     pdf_path: str | os.PathLike,
     output_dir: str | os.PathLike,
-    options: dict[str, bool],
+    options: dict[str, bool | None],
     user_context: str = "",
     execution_mode: str | None = None,
     extraction_mode: str | None = None,
@@ -205,6 +223,8 @@ def create_workspace(
         raise ValueError(
             f"extraction_mode must be one of {VALID_EXTRACTION_MODES}, got {extraction_mode!r}"
         )
+    if not isinstance(user_context, str):
+        raise ValueError("user_context must be a string")
 
     question_options = _validate_options(options)
 
@@ -231,7 +251,8 @@ def create_workspace(
         "execution_mode": execution_mode,
         "extraction_mode": extraction_mode,
         "question_options": question_options,
-        "user_context": user_context or "",
+        "user_context": user_context.strip(),
+        "user_context_confirmed": bool(user_context.strip()),
         "page_count": None,
         "text_quality": None,
         # current_phase 문자열만 소비된다(get_work_state 응답·에러 메시지). phases는
@@ -301,6 +322,61 @@ def update_state(work_id: str, **top_level_updates: Any) -> dict[str, Any]:
     with _get_lock(work_id):
         state = load_state(work_id)
         state.update(top_level_updates)
+        save_state(work_id, state)
+        return state
+
+
+def confirm_question_setup(
+    work_id: str,
+    *,
+    enable_short_answer: bool | None = None,
+    enable_reflection: bool | None = None,
+    enable_extension: bool | None = None,
+    user_context: str | None = None,
+) -> dict[str, Any]:
+    """init_work에서 미정인 문제 유형을 한 번만 확정한다.
+
+    모든 검증은 같은 잠금 구간에서 끝낸 뒤 한 번에 저장한다. 이미 확정된 선택을
+    scan_pdf 재호출이 조용히 바꾸는 것도 거부한다.
+    """
+    supplied = {
+        "short_answer": enable_short_answer,
+        "reflection": enable_reflection,
+        "extension": enable_extension,
+    }
+    with _get_lock(work_id):
+        state = load_state(work_id)
+        options = dict(state.get("question_options") or {})
+
+        for key, value in supplied.items():
+            current = options.get(key)
+            if value is not None and not isinstance(value, bool):
+                raise ValueError(f"enable_{key} must be true or false")
+            if current is None:
+                if value is None:
+                    raise ValueError(f"enable_{key} selection is required")
+                options[key] = value
+            elif value is not None and value != current:
+                raise ValueError(f"enable_{key} is already confirmed as {current}")
+
+        if any(options.get(key) is None for key in (
+            "short_answer", "reflection", "extension",
+        )):
+            raise ValueError("all pending question type selections are required")
+        if not any(options.values()):
+            raise ValueError("at least one question type must be enabled")
+
+        if user_context is not None:
+            if not isinstance(user_context, str):
+                raise ValueError("user_context must be a string")
+            normalized_context = user_context.strip()
+            current_context = state.get("user_context", "") or ""
+            if current_context and normalized_context != current_context:
+                raise ValueError("user_context is already confirmed")
+            state["user_context"] = normalized_context
+        state["user_context_confirmed"] = True
+
+        state["question_options"] = options
         save_state(work_id, state)
         return state
 
@@ -547,10 +623,9 @@ def mark_chapter_failed(
 def mark_chapter_in_progress(work_id: str, chapter_id: str, *, kind: str) -> None:
     """'처리 시작'을 표시. kind는 'summary' | 'extension'.
 
-    진행 모니터링용 soft 신호다 (get_chapter_content=summary,
-    search_extension_context=extension 시점에 호출). 이미 끝난 completed/skipped는
-    건드리지 않고, state에 없는 chapter_id면 조용히 무시한다(모니터링 표시 때문에
-    실제 작업을 깨뜨리지 않기 위함). pending·failed·in_progress → in_progress.
+    진행 모니터링용 soft 신호다. 이미 끝난 completed/skipped는 건드리지 않고,
+    state에 없는 chapter_id면 조용히 무시한다(모니터링 표시 때문에 실제 작업을
+    깨뜨리지 않기 위함). pending·failed·in_progress → in_progress.
     """
     if kind not in ("summary", "extension"):
         raise ValueError(f"kind must be 'summary' or 'extension', got {kind!r}")

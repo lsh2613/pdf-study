@@ -17,11 +17,13 @@
 
 ## 도구 흐름
 
-`init_work(pdf_path, output_dir, enable_*, user_context)`는 작업 폴더를 만든다. 입력 PDF가 없거나 모든 문제 유형이 꺼져 있으면 실패한다. 성공 응답은 `work_id`, `.work` 경로, 실제 출력 경로를 담고 `scan_pdf`를 다음 단계로 안내한다.
+`init_work(pdf_path, output_dir, enable_multiple_choice, enable_short_answer, enable_reflection, enable_extension, user_context)`는 작업 폴더를 만든다. 객관식은 기존 호환을 위해 기본 활성이다. 단답형·주관식·확장형은 기본값이 없으며, 사용자가 이미 명시하지 않은 값은 `null`로 저장한다. 입력 PDF가 없거나 모든 문제 유형을 명시적으로 끄면 실패한다. 성공 응답은 `work_id`, `.work` 경로, 실제 출력 경로, 현재 `question_options`, `question_setup`을 담는다.
 
-`resume_work(output_dir, pdf_path)`는 서버 재시작 후 디스크의 `.work/state.json`을 다시 등록한다. `output_dir`과 `pdf_path`가 모두 없거나, 대상 폴더에 상태 파일이 없으면 실패한다. 성공 응답은 남은 요약·확장 챕터 목록을 담는다.
+`question_setup.questions`는 미정인 문제 유형마다 `field`, `question`, `choices`를 담는다. 각 선택지는 `value`, `label`, `desc`를 가지며 클라이언트는 이를 바꾸거나 합치거나 추천을 붙이지 않고 그대로 보여줘야 한다. `question_setup.user_context_request`는 선택 입력인 학습 목적, 배경지식, 관심 분야, 현재 수준을 안내한다. 이미 학습자 정보가 있으면 이 값은 `null`이다. 클라이언트는 선택과 학습자 응답을 받은 뒤 `scan_pdf`에 전달한다.
 
-`scan_pdf(work_id, scan_size, force_vision)`는 PDF 메타, 텍스트 품질, 페이지 오프셋, 챕터 경계 추천을 반환한다. 내장 목차가 있으면 `recommendations.suggested_chapters`에 물리 페이지 범위가 들어간다. 내장 목차가 없거나 `force_vision=true`이면 `toc_page_images`를 반환한다. 각 항목은 목차 페이지 JPEG 경로와 `ocr_status="not_started"`, 빈 `ocr_text`, `ocr_error=null`을 담는다. `scan_pdf`는 PaddleOCR 모델 다운로드, 모델 로드, OCR 실행을 하지 않는다. `force_vision`은 외부 계약 호환을 위한 기존 파라미터명이다. 알 수 없는 `work_id`나 손상된 PDF는 실패한다.
+`resume_work(output_dir, pdf_path)`는 서버 재시작 후 디스크의 `.work/state.json`을 다시 등록한다. `output_dir`과 `pdf_path`가 모두 없거나, 대상 폴더에 상태 파일이 없으면 실패한다. 문제 유형 선택이 아직 미정이면 성공 응답에 `question_setup`을 담아 사용자 선택부터 이어가게 한다. 선택이 끝난 작업은 남은 요약·확장 챕터 목록을 담는다.
+
+`scan_pdf(work_id, scan_size, force_vision, enable_short_answer, enable_reflection, enable_extension, user_context)`는 미정인 문제 유형 선택을 먼저 확정한 뒤 PDF 메타, 텍스트 품질, 페이지 오프셋, 챕터 경계 추천을 반환한다. 미정인 선택이 하나라도 전달되지 않았거나 boolean이 아니면 상태를 바꾸거나 PDF를 스캔하지 않고 `ok=false`와 같은 `question_setup`을 반환한다. 선택적 `user_context`는 앞뒤 공백을 제거해 상태에 저장한다. 한번 확정된 문제 유형을 이후 재스캔에서 다른 값으로 조용히 바꿀 수 없다. 내장 목차가 있으면 `recommendations.suggested_chapters`에 물리 페이지 범위가 들어간다. 내장 목차가 없거나 `force_vision=true`이면 `toc_page_images`를 반환한다. 각 항목은 목차 페이지 JPEG 경로와 `ocr_status="not_started"`, 빈 `ocr_text`, `ocr_error=null`을 담는다. `scan_pdf`는 PaddleOCR 모델 다운로드, 모델 로드, OCR 실행을 하지 않는다. `force_vision`은 외부 계약 호환을 위한 기존 파라미터명이다. 알 수 없는 `work_id`나 손상된 PDF는 실패한다.
 
 `prepare_ocr(work_id)`는 PaddleOCR CPU 모델을 준비한다. 모델 캐시가 없으면 이 단계에서 다운로드와 로드가 발생할 수 있다. 성공 응답은 캐시 경로, 모델별 캐시 여부, 다운로드 필요 여부, 모델 로드 여부, 소요 시간을 담는다. 이 도구는 PDF 본문이나 목차 이미지를 OCR하지 않는다.
 
@@ -37,9 +39,7 @@
 
 `save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다. `summary`는 비어 있지 않은 문자열, `key_points`는 비어 있지 않은 문자열 배열이어야 한다. `questions`는 객체여야 하며 `multiple_choice`, `short_answer`, `reflection` 키를 모두 배열로 가져야 한다. 활성화된 기본 문제 유형은 빈 배열이면 실패하고, 비활성화된 유형도 키는 유지해야 한다. 객관식 항목은 비어 있지 않은 `id`, `question`, `explanation`, 최소 2개의 비어 있지 않은 `options`, 범위 안의 정수 `answer_index`를 가져야 한다. 단답형과 성찰형 항목은 비어 있지 않은 `id`, `question`, `model_answer`를 가져야 한다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 하고, `title`이 있으면 문자열이어야 한다. 실패하면 `data.missing`에 `questions.multiple_choice[0].options`, `work_id`, `chapter_id`, `state` 같은 경로를 담고, 해당 챕터를 completed로 바꾸거나 요약·퀴즈 파일을 남기면 안 된다. `body_text`는 요구하지 않으며, 들어오더라도 저장 전에 제거되어 `chapters_raw`의 canonical `text`와 `char_count`를 덮어쓰지 않는다.
 
-`search_extension_context(work_id, chapter_id, query)`는 확장 문제용 검색 결과를 반환한다. 빈 검색어는 실패한다. 챕터에서 고른 키워드나 주제 수준 검색어는 외부 검색으로 전달될 수 있다. 외부 검색 자체의 오류는 `ok=true`, `data.exa_ok=false`, `data.results=[]`로 표현해 챕터 처리를 계속하게 한다.
-
-`save_extension_result(work_id, chapter_id, data)`는 확장 문제를 저장한다. `questions.extension`은 비어 있지 않은 배열이어야 한다. 각 항목은 비어 있지 않은 `id`, `question`, `model_answer`, 문자열 `context`, 문자열 배열 `sources`를 가져야 한다. `sources=[]`는 검색 실패나 결과 없음에서 유효하며 이때 `context`도 빈 문자열일 수 있다. `sources`가 하나 이상 있으면 `context`도 비어 있으면 안 된다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 한다. 실패하면 `data.missing`에 필드 경로나 `work_id`, `chapter_id`, `state`를 담고, 해당 챕터의 extension 상태를 completed로 바꾸거나 확장 문제 파일을 남기면 안 된다. `body_text`가 들어오면 저장 전에 제거된다.
+`save_extension_result(work_id, chapter_id, data)`는 외부 검색 없이 챕터 본문과 학습자 정보로 만든 확장 문제를 저장한다. 확장형이 비활성인 작업은 실패한다. `questions.extension`은 비어 있지 않은 배열이어야 하고, 각 항목은 비어 있지 않은 `id`, `question`, `model_answer`를 가져야 한다. 저장 스키마에 없는 추가 필드는 제거한다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 한다. 실패하면 `data.missing`에 필드 경로나 `work_id`, `chapter_id`, `state`를 담고, 해당 챕터의 extension 상태를 completed로 바꾸거나 확장 문제 파일을 남기면 안 된다. `body_text`가 들어오면 저장 전에 제거된다.
 
 `get_work_state(work_id)`는 상태 파일 전체를 반환한다. 알 수 없는 작업은 실패한다.
 

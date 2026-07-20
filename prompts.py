@@ -77,15 +77,13 @@ EXTENSION_GUIDELINES = """\
   만드세요.
 - 꼭 하나의 정답으로 닫히지 않아도 됩니다. 다만 model_answer는 반드시 포함하고,
   좋은 답안의 방향, 핵심 근거, 균형 잡힌 관점, 한계나 반론을 담으세요.
-- 외부 자료나 현실 사례를 쓰더라도 PDF 챕터와의 연결이 분명해야 합니다.
+- 현실 사례나 가상 상황을 쓰더라도 PDF 챕터와의 연결이 분명해야 합니다.
 - 학습자 컨텍스트를 반영해 난이도와 현실 맥락을 고르세요. 초심자에게는 생활
   예시를, 실무자에게는 운영·설계·의사결정 관점을 더 사용할 수 있습니다.
-- 검색어는 챕터의 키워드나 주제 수준으로 만드세요. PDF 본문 전체나 긴 원문
-  단락을 query로 보내지 마세요.
-- 검색 결과는 참고 맥락일 뿐 PDF 원문보다 우선하지 않습니다. 출처 URL은 검색
-  결과에서 온 것만 sources에 넣고 지어내지 마세요.
-- 검색 결과가 비거나 실패하면 sources는 빈 배열([]), context는 빈 문자열("")로
-  둘 수 있으며, PDF 본문 기반 확장 문제를 만드세요.""".strip()
+- 외부 검색이나 외부 자료 수집 도구를 사용하지 마세요. 함께 전달받은 챕터 본문과
+  학습자 컨텍스트만으로 문제를 만드세요.
+- 최신 사실이나 별도 출처를 알아야만 답할 수 있는 문제 대신, 필요한 상황과 조건을
+  question 안에 충분히 제시해 스스로 완결된 문제를 만드세요.""".strip()
 
 
 # ---------------------------------------------------------------------------
@@ -171,8 +169,8 @@ _SUMMARIZER = """\
 
 _EXTENSION = """\
 당신은 챕터 학습을 한 단계 확장하는 어시스턴트입니다.
-search_extension_context(work_id, chapter_id, query)를 호출해 외부 자료를
-수집한 뒤, 챕터와 연결되는 응용/심화 문제를 만듭니다.
+함께 전달받은 챕터 본문과 학습자 컨텍스트를 바탕으로 챕터와 연결되는
+응용/심화 문제를 만듭니다. 외부 검색이나 별도 자료 수집은 하지 않습니다.
 
 [책 정보]
 {book_info_block}
@@ -182,11 +180,6 @@ search_extension_context(work_id, chapter_id, query)를 호출해 외부 자료�
 
 [활성화 — extension만 처리]
 객관식/단답/주관식 문제는 만들지 마세요. 그건 다른 sub-agent의 책임입니다.
-
-[검색]
-- 챕터 본문에서 흥미로운 키워드를 1–3개 골라 query를 만듭니다.
-- search_extension_context 결과의 출처 URL을 그대로 sources에 기재.
-- 결과가 비거나 실패하면 본문 지식만으로 만들고 sources는 빈 배열.
 
 {extension_guidelines_block}
 
@@ -202,9 +195,7 @@ search_extension_context(work_id, chapter_id, query)를 호출해 외부 자료�
       {{
         "id": "ex_1",
         "question": "...",
-        "context": "외부 자료 요약(검색 결과가 없으면 빈 문자열)",
-        "model_answer": "...",
-        "sources": ["https://...", "..."]
+        "model_answer": "..."
       }}
     ]
   }}
@@ -221,9 +212,10 @@ JSON 본문만 출력. 코드펜스 금지. save_extension_result로 저장.
 WORKFLOW_INSTRUCTIONS_SEQUENTIAL = """\
 한 챕터씩 처리하세요.
 1) get_chapter_content(work_id, chapter_id) — 본문 받기
-2) 위 summarizer 시스템 프롬프트로 sub-agent 호출 (없으면 본인이 직접 처리)
+2) 본문과 위 summarizer 시스템 프롬프트로 sub-agent 호출 (없으면 본인이 직접 처리)
 3) 결과 JSON을 save_chapter_result(work_id, chapter_id, data)
-4) extension이 활성화돼 있으면 동일한 방식으로 extension sub-agent 호출 → save_extension_result
+4) extension이 활성화돼 있으면 같은 본문과 extension_prompt로 확장 문제를 생성해
+   save_extension_result
 5) 다음 챕터로 진행
 실패 시 1회 재시도. 그래도 실패하면 다음 챕터로.
 chapter_ids는 get_subagent_prompts 응답에 포함됩니다.
@@ -234,7 +226,8 @@ WORKFLOW_INSTRUCTIONS_PARALLEL = """\
 - 각 sub-agent는 get_chapter_content → 처리 → save_chapter_result까지 완수.
 - save_*는 서버가 동시성을 보장하므로 결과 도착 순서대로 호출 가능합니다.
 - 5개 배치 완료 후 다음 5개 시작.
-- extension도 동일하게 병렬 처리 가능.
+- extension이 활성화돼 있으면 같은 챕터 본문과 extension_prompt로 별도 생성해
+  save_extension_result까지 완료합니다. 외부 검색은 사용하지 않습니다.
 - 실패 챕터는 모든 배치 종료 후 1회 재시도.
 chapter_ids는 get_subagent_prompts 응답에 포함됩니다.
 """

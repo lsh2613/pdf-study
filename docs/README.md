@@ -2,7 +2,7 @@
 
 - architecture.md: 서버 구성과 데이터 흐름
 - business-rules.md: PDF 학습 자료 생성 규칙
-- security.md: 로컬 PDF와 외부 검색의 보호 기준
+- security.md: 로컬 PDF와 네트워크 경계의 보호 기준
 - standards.md: 변경 시 지켜야 하는 강제 규칙
 - engineering-notes.md: 놓치기 쉬운 동작과 확인 절차
 - operations.md: 설치·실행·검증 절차

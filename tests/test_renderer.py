@@ -11,6 +11,16 @@ from pdf_study.renderer.html_renderer import (
 )
 
 
+def _scan(wid):
+    options = server.workspace.load_state(wid)["question_options"]
+    return server.scan_pdf(
+        wid,
+        enable_short_answer=True if options.get("short_answer") is None else None,
+        enable_reflection=True if options.get("reflection") is None else None,
+        enable_extension=True if options.get("extension") is None else None,
+    )
+
+
 @pytest.fixture(autouse=True)
 def stub_scan_toc_ocr(monkeypatch):
     """scan_pdf 목차 OCR 테스트가 실제 PaddleOCR 모델을 로드하지 않게 한다."""
@@ -46,7 +56,7 @@ def _build_multi(ko_with_toc, tmp_path, *, opts=None):
     opts = opts or {}
     r = server.init_work(str(ko_with_toc), str(tmp_path / "out"), **opts)
     wid = r["data"]["work_id"]
-    s = server.scan_pdf(wid)
+    s = _scan(wid)
     chs = s["data"]["recommendations"]["suggested_chapters"]
     server.set_chapters(wid, chs, execution_mode="sequential", extraction_mode="text",
                         book_info={"title": "테스트용 한국어 책", "author": "T"})
@@ -58,8 +68,7 @@ def _build_multi(ko_with_toc, tmp_path, *, opts=None):
                 "chapter_id": cid,
                 "questions": {"extension": [
                     {"id": f"{cid}_ex", "question": "?",
-                     "context": "ctx", "model_answer": "ans",
-                     "sources": ["https://e.com/"]}
+                     "model_answer": "ans"}
                 ]},
             })
     fin = server.finalize_study(wid, "html")
@@ -71,7 +80,7 @@ def _build_single(ko_short, tmp_path, *, opts=None):
     opts = opts or {}
     r = server.init_work(str(ko_short), str(tmp_path / "out"), **opts)
     wid = r["data"]["work_id"]
-    server.scan_pdf(wid)
+    _scan(wid)
     server.set_chapters(wid, [
         {"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}
     ], execution_mode="sequential", extraction_mode="text")
@@ -80,8 +89,7 @@ def _build_single(ko_short, tmp_path, *, opts=None):
         server.save_extension_result(wid, "ch1", {
             "chapter_id": "ch1",
             "questions": {"extension": [
-                {"id": "ch1_ex", "question": "?", "context": "ctx",
-                 "model_answer": "ans", "sources": ["https://e.com/"]}
+                {"id": "ch1_ex", "question": "?", "model_answer": "ans"}
             ]},
         })
     fin = server.finalize_study(wid, "html")
@@ -185,13 +193,12 @@ def test_model_answer_reveal_button_toggles_open_and_closed(ko_with_toc, tmp_pat
     assert 'class="reveal" aria-expanded="false"' in html
 
 
-def test_extension_context_is_labeled_as_reference_context(ko_with_toc, tmp_path):
-    """확장형 context는 정답이 아니라 참고 맥락임을 HTML에 표시한다."""
+def test_extension_question_uses_same_answer_ui_without_reference_block(ko_with_toc, tmp_path):
     _, out, _ = _build_multi(ko_with_toc, tmp_path)
     html = (out / "ch1.html").read_text(encoding="utf-8")
-    assert '<div class="ext-context">' in html
-    assert '<strong>참고 맥락</strong>' in html
-    assert "문제 풀이에 참고할 외부 자료 요약입니다" in html
+    assert 'id="ex"' in html
+    assert "ch1_ex" in html
+    assert '<button type="button" class="reveal"' in html
 
 
 # ---------------------------- 단일 챕터 ----------------------------

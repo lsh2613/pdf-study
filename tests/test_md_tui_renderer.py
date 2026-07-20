@@ -10,6 +10,16 @@ import json
 from pdf_study import server
 
 
+def _scan(wid):
+    options = server.workspace.load_state(wid)["question_options"]
+    return server.scan_pdf(
+        wid,
+        enable_short_answer=True if options.get("short_answer") is None else None,
+        enable_reflection=True if options.get("reflection") is None else None,
+        enable_extension=True if options.get("extension") is None else None,
+    )
+
+
 def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):
     questions = {
         "multiple_choice": [
@@ -34,7 +44,7 @@ def _build_multi(ko_with_toc, tmp_path, *, opts=None):
     opts = opts or {}
     r = server.init_work(str(ko_with_toc), str(tmp_path / "out"), **opts)
     wid = r["data"]["work_id"]
-    s = server.scan_pdf(wid)
+    s = _scan(wid)
     chs = s["data"]["recommendations"]["suggested_chapters"]
     server.set_chapters(wid, chs, execution_mode="sequential", extraction_mode="text",
                         book_info={"title": "테스트 책", "author": "T"})
@@ -46,8 +56,7 @@ def _build_multi(ko_with_toc, tmp_path, *, opts=None):
                 "chapter_id": cid,
                 "questions": {"extension": [
                     {"id": f"{cid}_ex", "question": "Q?",
-                     "context": "ctx", "model_answer": "정답",
-                     "sources": ["https://e.com/"]}
+                     "model_answer": "정답"}
                 ]},
             })
     fin = server.finalize_study(wid, "md_tui")
@@ -91,7 +100,9 @@ def test_quiz_json_merges_extension_and_questions(ko_with_toc, tmp_path):
     assert q["multiple_choice"][0]["answer_index"] == 1
     assert q["short_answer"][0]["model_answer"] == "정답"
     assert q["reflection"]
-    assert q["extension"][0]["sources"] == ["https://e.com/"]
+    assert q["extension"][0] == {
+        "id": "ch1_ex", "question": "Q?", "model_answer": "정답",
+    }
 
 
 def test_disabled_types_omitted_from_quiz(ko_with_toc, tmp_path):

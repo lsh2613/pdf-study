@@ -221,8 +221,6 @@ def _ask_mc(q: dict) -> dict:
 
 def _ask_text(q: dict, qtype: str) -> dict:
     console.print(f"[bold]{q.get('question', '')}[/bold]")
-    if qtype == "extension" and q.get("context"):
-        console.print(Panel(q["context"], title="참고 자료", border_style="yellow"))
     console.print("[dim](답변 입력 후 빈 줄로 제출 — 건너뛰려면 그냥 빈 줄)[/dim]")
     lines: list[str] = []
     while True:
@@ -237,8 +235,6 @@ def _ask_text(q: dict, qtype: str) -> dict:
     model = q.get("model_answer") or ""
     if model:
         console.print(Panel(model, title="모범답안", border_style="green"))
-    for url in q.get("sources") or []:
-        console.print(f"  출처: {url}")
     return {"text": text, "viewed_answer": bool(model)}
 
 

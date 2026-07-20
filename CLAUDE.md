@@ -9,7 +9,7 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
 ├── docs/
 │   ├── architecture.md -> 서버 구성과 데이터 흐름
 │   ├── business-rules.md -> PDF 학습 자료 생성 규칙
-│   ├── security.md -> 로컬 PDF와 외부 검색의 보호 기준
+│   ├── security.md -> 로컬 PDF와 네트워크 경계의 보호 기준
 │   ├── standards.md -> 변경 시 지켜야 하는 강제 규칙
 │   ├── engineering-notes.md -> 놓치기 쉬운 동작과 확인 절차
 │   ├── operations.md -> 설치·실행·검증 절차
@@ -25,7 +25,7 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
 │       │   ├── 0005-extension-search.md -> 확장 문제 검색 처리
 │       │   └── 0006-project-local-venv.md -> 프로젝트 로컬 실행 환경
 │       └── findings.md -> 아직 해결하지 않은 문제
-├── server.py / analysis.py / workspace.py / prompts.py / exa_client.py -> MCP 도구, 흐름 결정, 상태 저장, 프롬프트, 외부 검색
+├── server.py / analysis.py / workspace.py / prompts.py -> MCP 도구, 흐름 결정, 상태 저장, 프롬프트
 ├── pdf/AGENTS.md -> PDF 열기·목차·페이지 렌더링 기준
 ├── renderer/AGENTS.md -> HTML·Markdown/TUI 출력 기준
 ├── templates/AGENTS.md -> 생성물에 복사되는 런처와 정적 자산 기준
@@ -35,9 +35,11 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
 ## 반드시 지킬 일
 
 - PDF 학습 요청은 일반 요약으로 처리하지 않는다. 기본 흐름은 `init_work → scan_pdf → set_chapters → get_subagent_prompts → save_* → list_pending_chapters → finalize_study`다. 내장 목차가 없거나 목차 재분석이 필요하면 `scan_pdf` 뒤에 `prepare_ocr → scan_toc_with_ocr`를 거쳐 챕터를 구성한 다음 `set_chapters`로 간다.
+- `init_work`가 단답형·주관식·확장형 문제 선택을 요구하면 응답의 항목과 설명을 그대로 사용자에게 보여주고, 선택적 학습자 정보도 함께 안내한다. 사용자의 명시적 선택을 `scan_pdf`에 전달하기 전에는 PDF 스캔으로 넘어가지 않는다. 객관식만 기존 호환을 위해 기본 활성이다.
 - 챕터 경계는 PDF 북마크 또는 목차 페이지 이미지로만 정한다. PDF 텍스트를 긁어 목차를 추정하는 코드를 추가하면 안 된다. `scan_pdf`는 목차 후보 이미지를 렌더할 뿐 OCR 모델을 준비하거나 실행하지 않는다.
 - 텍스트 레이어가 없거나 깨진 PDF는 text 모드로 밀어붙이면 안 된다. OCR 흐름은 `set_chapters`에서 PaddleOCR CPU로 본문을 선계산해 `chapters_raw/chN.json`의 `text`와 `char_count`로 저장하는 방향이다. `body_text`는 raw 본문을 덮어쓰는 경로로 쓰지 않는다.
 - 사용자가 골라야 하는 선택지는 서버 응답의 항목과 설명을 바꾸지 않는다. 추천·기본값을 임의로 붙이거나 선택지를 합치면 안 된다.
+- 확장 문제는 외부 검색 없이 챕터 본문과 학습자 정보만으로 만든다. 검색 도구나 HTTP 검색 클라이언트를 다시 추가하려면 별도의 보안·계약 결정을 먼저 기록해야 한다.
 - `.work/state.json`은 잠금이 걸린 `workspace.py` 헬퍼로만 바꾼다. 직접 read-modify-write를 넣으면 병렬 처리에서 상태가 깨진다.
 
 ## 작업 전 확인

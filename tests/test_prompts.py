@@ -107,11 +107,12 @@ def test_basic_question_guidelines_ground_questions_in_chapter_body():
     assert "본문 근거 제한보다" in prompt
 
 
-def test_extension_guidelines_require_applied_context_and_model_answer():
+def test_extension_guidelines_use_chapter_and_user_context_without_search():
     prompt = prompts.build_prompts(_state())["extension_prompt"]
     assert "[확장 문제 작성 기준]" in prompt
     assert "단순 회상이나 정의 암기 문제가 아니라" in prompt
     assert "현실 맥락" in prompt
     assert "model_answer는 반드시 포함" in prompt
-    assert "PDF 본문 전체나 긴 원문" in prompt
-    assert 'context는 빈 문자열("")' in prompt
+    assert "외부 검색이나 별도 자료 수집은 하지 않습니다" in prompt
+    assert "함께 전달받은 챕터 본문" in prompt
+    assert '"sources"' not in prompt

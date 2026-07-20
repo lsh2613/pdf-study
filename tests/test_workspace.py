@@ -48,6 +48,36 @@ def test_all_question_types_disabled_rejected(tmp_path, fake_pdf):
         )
 
 
+def test_confirm_question_setup_is_atomic_and_does_not_change_confirmed_values(
+    tmp_path, fake_pdf
+):
+    wid = workspace.create_workspace(
+        fake_pdf,
+        tmp_path / "out",
+        options={"multiple_choice": True},
+    )
+
+    state = workspace.confirm_question_setup(
+        wid,
+        enable_short_answer=True,
+        enable_reflection=False,
+        enable_extension=True,
+        user_context="  입문자  ",
+    )
+
+    assert state["question_options"] == {
+        "multiple_choice": True,
+        "short_answer": True,
+        "reflection": False,
+        "extension": True,
+    }
+    assert state["user_context"] == "입문자"
+
+    with pytest.raises(ValueError, match="already confirmed"):
+        workspace.confirm_question_setup(wid, enable_extension=False)
+    assert workspace.load_state(wid) == state
+
+
 def test_invalid_execution_mode_rejected(tmp_path, fake_pdf):
     with pytest.raises(ValueError, match="execution_mode"):
         workspace.create_workspace(

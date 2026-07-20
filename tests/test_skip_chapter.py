@@ -21,6 +21,15 @@ def _setup(tmp_path, pdf):
     return r["data"]["work_id"], tmp_path / "out"
 
 
+def _scan(wid):
+    return server.scan_pdf(
+        wid,
+        enable_short_answer=True,
+        enable_reflection=True,
+        enable_extension=True,
+    )
+
+
 def _sc(wid, chapters):
     """set_chapters 호출 — 모드는 본문 처리용 기본값으로 고정."""
     return server.set_chapters(wid, chapters,
@@ -29,7 +38,7 @@ def _sc(wid, chapters):
 
 def test_skip_marks_status_skipped(tmp_path, ko_with_toc):
     wid, _ = _setup(tmp_path, ko_with_toc)
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [
         {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
@@ -44,7 +53,7 @@ def test_skip_marks_status_skipped(tmp_path, ko_with_toc):
 
 def test_skip_excluded_from_pending(tmp_path, ko_with_toc):
     wid, _ = _setup(tmp_path, ko_with_toc)
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [
         {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
@@ -57,7 +66,7 @@ def test_skip_excluded_from_pending(tmp_path, ko_with_toc):
 
 def test_skip_excluded_from_subagent_chapter_ids(tmp_path, ko_with_toc):
     wid, _ = _setup(tmp_path, ko_with_toc)
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [
         {"chapter_id": "ch1", "title": "본문 1", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "본문 2", "page_range": [13, 20]},
@@ -71,7 +80,7 @@ def test_skip_excluded_from_subagent_chapter_ids(tmp_path, ko_with_toc):
 
 def test_skip_skips_raw_extraction(tmp_path, ko_with_toc):
     wid, out = _setup(tmp_path, ko_with_toc)
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [
         {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
@@ -84,7 +93,7 @@ def test_skip_skips_raw_extraction(tmp_path, ko_with_toc):
 
 def test_skip_chapter_not_rendered(tmp_path, ko_with_toc):
     wid, out = _setup(tmp_path, ko_with_toc)
-    server.scan_pdf(wid)
+    _scan(wid)
     _sc(wid, [
         {"chapter_id": "ch1", "title": "본문 1", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "본문 2", "page_range": [13, 20]},
@@ -123,7 +132,7 @@ def test_skip_chapter_not_rendered(tmp_path, ko_with_toc):
 def test_set_chapters_impl_marks_skipped_in_result(tmp_path, ko_with_toc):
     """analysis.set_chapters_impl 응답에 skipped 챕터가 표시되는지."""
     wid, _ = _setup(tmp_path, ko_with_toc)
-    server.scan_pdf(wid)
+    _scan(wid)
     result = analysis.set_chapters_impl(wid, [
         {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
         {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
