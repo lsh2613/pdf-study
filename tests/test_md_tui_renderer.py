@@ -6,9 +6,21 @@ TUI 엔진(study_tui.py)은 대화형이라 직접 실행하지 않고,
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from pdf_study import server
 from pdf_study.renderer.md_tui_renderer import _book_md, _summary_md
+
+
+def test_renderer_design_comment_references_current_docs():
+    source = (Path(__file__).parents[1] / "renderer" / "md_tui_renderer.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "docs/contracts.md" in source
+    assert "docs/architecture.md" in source
+    assert "docs/05-data-schemas.md" not in source
+    assert "docs/07-study-ui.md" not in source
 
 
 def _scan(wid):
