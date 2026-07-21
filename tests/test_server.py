@@ -877,6 +877,8 @@ def test_get_subagent_prompts_validates_only_pending_raw(tmp_path, ko_short):
     response = server.get_subagent_prompts(wid)
     assert response["ok"] is False
     assert [item["chapter_id"] for item in response["data"]["invalid_chapters"]] == ["ch2"]
+    assert "pending 챕터" in response["error"]
+    assert "각 non-skip 챕터" not in response["error"]
 
 
 @pytest.mark.parametrize(

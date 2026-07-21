@@ -988,7 +988,7 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
         failed_chapters = _failed_chapters_from_invalid(invalid)
         return _err(
             "sub-agent 입력 raw 본문이 준비되지 않았거나 손상됐습니다. "
-            "각 non-skip 챕터는 chapters_raw/{chapter_id}.json에 비어 있지 않은 "
+            "각 pending 챕터(처리 대상)는 chapters_raw/{chapter_id}.json에 비어 있지 않은 "
             "text와 정확한 char_count가 있어야 합니다. OCR 실패 챕터는 먼저 "
             "set_chapters/OCR 단계를 복구한 뒤 다시 호출하세요.",
             data={
