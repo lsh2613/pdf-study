@@ -15,5 +15,9 @@ tests/fixtures/.fixture-manifest.json
 # MCP 클라이언트별 로컬 설정 (venv/Python 절대 경로 등 사용자 환경 의존)
 .gemini/
 .mcp.json
+.claude.json
+.codex/mcp.json
+.agents/mcp_config.json
+*.pdf-study.bak
 result/
 .dryforge/

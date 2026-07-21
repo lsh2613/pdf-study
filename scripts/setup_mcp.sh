@@ -61,65 +61,12 @@ PY
 }
 
 apply_config() {
-  "$VENV_PY" - "$VENV_PY" "$PADDLEOCR_CACHE_DIR" "$SCOPE" "$PWD" "$@" <<'PY'
-from __future__ import annotations
-import json
-import sys
-import os
-
-command = sys.argv[1]
-cache_dir = sys.argv[2]
-scope = sys.argv[3]
-project_dir = sys.argv[4]
-targets = sys.argv[5:]
-
-if scope == "global":
-    CONFIG_PATHS = {
-        "claude": os.path.expanduser("~/.claude.json"),
-        "codex": os.path.expanduser("~/.codex/config/mcp.json"),
-        "antigravity-cli": os.path.expanduser("~/.gemini/antigravity-cli/mcp_config.json")
-    }
-else:
-    CONFIG_PATHS = {
-        "claude": os.path.join(project_dir, ".claude.json"),
-        "codex": os.path.join(project_dir, ".codex/mcp.json"),
-        "antigravity-cli": os.path.join(project_dir, ".agents/mcp_config.json")
-    }
-
-for target in targets:
-    path = CONFIG_PATHS.get(target)
-    if not path:
-        continue
-    
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    
-    data = {}
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            data = {}
-            
-    key = "globalMcpServers" if target == "claude" and scope == "global" else "mcpServers"
-    if key not in data:
-        data[key] = {}
-        
-    data[key]["pdf-study"] = {
-        "command": command,
-        "args": ["-m", "pdf_study"],
-        "env": {
-            "PDF_STUDY_PADDLEOCR_CACHE": cache_dir,
-        },
-    }
-    
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        print(f"✅ Successfully updated {target} MCP config at: {path}")
-    except Exception as e:
-        print(f"❌ Failed to update {target} config: {e}", file=sys.stderr)
-PY
+  "$VENV_PY" "$SCRIPT_DIR/apply_mcp_config.py" \
+    --command "$VENV_PY" \
+    --cache-dir "$PADDLEOCR_CACHE_DIR" \
+    --scope "$SCOPE" \
+    --project-dir "$REPO_DIR" \
+    "$@"
 }
 
 check_env() {

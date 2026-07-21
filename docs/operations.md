@@ -12,7 +12,9 @@
 ./scripts/setup_mcp.sh
 ```
 
-이 명령은 저장소 안에 `.venv`를 만들고, 패키지를 editable로 설치하고, `mcp`, `fitz`, `PIL`, `rich`, `markdown_it`, `paddle`, `paddleocr`, `pdf_study` import를 확인한다. 검증이 끝나면 Claude Code, Codex CLI, Antigravity CLI 설정을 자동 적용한다. 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다.
+이 명령은 저장소 안에 `.venv`를 만들고, 패키지를 editable로 설치하고, `mcp`, `fitz`, `PIL`, `rich`, `markdown_it`, `paddle`, `paddleocr`, `pdf_study` import를 확인한다. 검증이 끝나면 Claude Code, Codex CLI, Antigravity CLI 설정을 저장소 루트 기준으로 자동 적용한다. 저장소 밖에서 스크립트를 호출해도 로컬 설정은 저장소에 기록된다. 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다.
+
+기존 MCP 설정이 손상된 JSON이거나 예상한 객체 구조가 아니면 기존 파일을 덮어쓰지 않고 설치를 중단한다. 기존 설정을 변경할 때는 같은 위치의 `.pdf-study.bak` 백업을 만든 뒤 원자적으로 교체한다.
 
 기본 설치는 MCP 실행에 필요한 런타임 의존성만 설치한다. 테스트까지 실행할 개발 환경이 필요하면 다음 명령을 사용한다.
 
