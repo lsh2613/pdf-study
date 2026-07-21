@@ -1068,12 +1068,21 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
             f"처리할 pending 챕터가 없습니다. finalize_study(work_id=\"{work_id}\")를 "
             "호출하세요."
         ))
+    pending_actions: list[str] = []
+    if summary_pending:
+        pending_actions.append(
+            f"summary_pending_chapter_ids({summary_pending})는 summarizer_prompt로 "
+            "생성해 save_chapter_result로 저장하세요"
+        )
+    if extension_pending:
+        pending_actions.append(
+            f"extension_pending_chapter_ids({extension_pending})는 extension_prompt로 "
+            "생성해 save_extension_result로 저장하세요"
+        )
     return _ok(data, next_action=(
         f"workflow_instructions를 따라 chapter_ids({data['chapter_ids']})를 순회하세요. "
-        f"summary_pending_chapter_ids({summary_pending})는 summarizer_prompt로 생성해 "
-        "save_chapter_result로 저장하고, "
-        f"extension_pending_chapter_ids({extension_pending})는 extension_prompt로 생성해 "
-        "save_extension_result로 저장하세요. 각 챕터는 두 목록의 포함 여부에 따른 "
+        + ". ".join(pending_actions)
+        + ". 각 챕터는 두 목록의 포함 여부에 따른 "
         "결과별 action만 수행합니다. chapter_id는 반드시 위 목록의 값(ch1·ch2…)을 쓰고, "
         "페이지 범위 문자열은 "
         "쓰지 마세요. mode가 'ocr'이어도 set_chapters에서 선계산된 text를 읽습니다."
