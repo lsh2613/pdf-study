@@ -11,6 +11,7 @@
 - 확장 문제는 외부 검색 없이 같은 챕터 본문과 학습자 정보만으로 생성한다. 서버에는 외부 검색 도구나 검색용 HTTP 클라이언트가 없다.
 - 잘못된 작업 ID, 등록되지 않은 챕터, 건너뛰기 챕터, 상태 저장 실패는 요약·퀴즈·확장 JSON 파일을 새로 남기지 않으며, 기존 파일이 있으면 실패 전 내용으로 되돌린다.
 - 병렬 챕터 저장을 고려해 작업 상태 갱신은 잠금과 원자적 파일 교체를 사용한다.
+- `set_chapters`는 입력과 책 정보 준비를 무부작용으로 검증한 뒤 모드·챕터·처리 phase를 한 번에 확정하며, 같은 작업의 호출을 직렬화하고 본문 준비 성공과 실패를 `chapter_processing`에 종결 상태로 남긴다.
 - HTML 사이트와 Markdown+TUI 출력이 같은 저장 결과에서 생성된다.
 - 기존 출력 작업은 `init_work`가 이어가기·교체·새 폴더 선택을 요구하며 자동 덮어쓰지 않는다. 렌더 결과는 `.pdf-study-manifest.json`의 관리 경로만 staging 세대로 교체하고, 같은 형식·학습 fingerprint에서만 진도를 유지한다.
 - 서버 재시작 후 `resume_work`로 기존 `.work` 상태를 다시 등록할 수 있다.
@@ -19,7 +20,7 @@
 ## 검증 상태
 
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, 선택지 요구, 최종 렌더링, 진도 저장 서버, 설치 스크립트를 다룬다.
-- 최근 확인: 현재 checkout에서 `.venv/bin/python -m pytest -q`가 236개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
+- 최근 확인: 현재 checkout에서 `.venv/bin/python -m pytest -q`가 241개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
 
 ## 남은 일
 

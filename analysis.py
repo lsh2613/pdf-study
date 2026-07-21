@@ -622,78 +622,14 @@ def _ocr_chapter_pages(
     return result
 
 
-def set_chapters_impl(
+def _process_chapters(
     work_id: str,
-    chapters: list[dict[str, Any]],
-    execution_mode: str,
+    normalized: list[dict[str, Any]],
+    pdf_path: str,
     extraction_mode: str,
-    book_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """챕터 구조 확정 + 처리 모드 확정 → 챕터별 텍스트 추출 + 저장.
-
-    Args:
-        chapters: [{"chapter_id", "title", "pdf_pages"=[start,end]}, ...]
-                  (1-based inclusive)
-        execution_mode: "sequential" | "parallel". 챕터 디스패치 방식.
-        extraction_mode: "text" | "ocr". 본문 추출 방식(목차 단계와 무관).
-                  text=라이브러리 추출 / ocr=PaddleOCR CPU 선계산.
-        book_info: 메인 LLM이 보강한 책 정보. None이면 PDF 메타만 사용.
-    Returns:
-        {"chapter_count", "total_chars", "chapters": [...]}
-
-    extraction_mode == "ocr"이면 set_chapters 시점에 페이지 이미지를 렌더하고
-    PaddleOCR CPU로 본문 텍스트를 선계산해 raw에 저장한다.
-    (그림 추출은 하지 않는다 — 요약은 텍스트/마크다운만 다룬다.)
-    """
-    if not chapters:
-        raise ValueError("chapters must not be empty")
-    if execution_mode not in workspace.VALID_EXECUTION_MODES:
-        raise ValueError(
-            f"execution_mode must be one of {workspace.VALID_EXECUTION_MODES}, "
-            f"got {execution_mode!r}"
-        )
-    if extraction_mode not in workspace.VALID_EXTRACTION_MODES:
-        raise ValueError(
-            f"extraction_mode must be one of {workspace.VALID_EXTRACTION_MODES}, "
-            f"got {extraction_mode!r}"
-        )
-
-    state = workspace.load_state(work_id)
-    pdf_path = state["pdf_path"]
-    # 처리 모드를 여기서 확정해 state에 기록 (init_work이 아니라 챕터 확정 시점).
-    workspace.update_state(
-        work_id, execution_mode=execution_mode, extraction_mode=extraction_mode,
-    )
+    """확정된 챕터 설정에 따라 raw 본문을 추출하고 결과 요약을 반환한다."""
     ocr_mode = extraction_mode == "ocr"
-    page_count = state.get("page_count")
-    if page_count is None:
-        raise RuntimeError(
-            "page_count not in state. call scan_pdf before set_chapters."
-        )
-
-    # 검증 + 정규화
-    normalized = [_validate_chapter_def(ch, page_count) for ch in chapters]
-    ids = [ch["chapter_id"] for ch in normalized]
-    if len(set(ids)) != len(ids):
-        raise ValueError(f"duplicate chapter_ids: {ids}")
-
-    # state.chapters 채우기 (status=pending)
-    workspace.set_chapters_in_state(work_id, normalized)
-
-    # book_info 저장: 없으면 PDF 메타로 fallback
-    if book_info is None:
-        info = reader.get_pdf_info(pdf_path)
-        meta = info["book_metadata"]
-        book_info = {
-            "title": meta.get("title") or "Untitled",
-            "author": meta.get("author") or "",
-            "subject": meta.get("subject") or "",
-        }
-    workspace.save_book_info(work_id, book_info)
-
-    # 챕터별 추출
-    workspace.update_phase(work_id, "chapter_processing", "in_progress")
-
     summaries: list[dict[str, Any]] = []
     total_chars = 0
 
@@ -867,6 +803,104 @@ def set_chapters_impl(
     if ocr_mode:
         result["failed_chapters"] = list(failed_chapters.values())
     return result
+
+
+def _set_chapters_impl_serialized(
+    work_id: str,
+    chapters: list[dict[str, Any]],
+    execution_mode: str,
+    extraction_mode: str,
+    book_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """챕터와 처리 모드를 검증·확정한 뒤 챕터별 raw 본문을 준비한다.
+
+    입력과 fallback 메타 준비는 상태 변경 없이 끝낸다. 검증된 setup은
+    workspace의 한 잠금 구간에서 확정하고, 이후 본문 처리 결과는 별도 phase로
+    completed 또는 failed 상태를 남긴다.
+    """
+    if not chapters:
+        raise ValueError("chapters must not be empty")
+    if execution_mode not in workspace.VALID_EXECUTION_MODES:
+        raise ValueError(
+            f"execution_mode must be one of {workspace.VALID_EXECUTION_MODES}, "
+            f"got {execution_mode!r}"
+        )
+    if extraction_mode not in workspace.VALID_EXTRACTION_MODES:
+        raise ValueError(
+            f"extraction_mode must be one of {workspace.VALID_EXTRACTION_MODES}, "
+            f"got {extraction_mode!r}"
+        )
+
+    state = workspace.load_state(work_id)
+    pdf_path = state["pdf_path"]
+    page_count = state.get("page_count")
+    if page_count is None:
+        raise RuntimeError(
+            "page_count not in state. call scan_pdf before set_chapters."
+        )
+
+    normalized = [_validate_chapter_def(ch, page_count) for ch in chapters]
+    ids = [ch["chapter_id"] for ch in normalized]
+    if len(set(ids)) != len(ids):
+        raise ValueError(f"duplicate chapter_ids: {ids}")
+
+    if book_info is None:
+        info = reader.get_pdf_info(pdf_path)
+        meta = info["book_metadata"]
+        book_info = {
+            "title": meta.get("title") or "Untitled",
+            "author": meta.get("author") or "",
+            "subject": meta.get("subject") or "",
+        }
+
+    workspace.commit_chapter_setup(
+        work_id,
+        normalized,
+        execution_mode=execution_mode,
+        extraction_mode=extraction_mode,
+        book_info=book_info,
+    )
+
+    try:
+        result = _process_chapters(
+            work_id,
+            normalized,
+            pdf_path,
+            extraction_mode,
+        )
+    except Exception:
+        workspace.update_phase(work_id, "chapter_processing", "failed")
+        raise
+
+    processing_failed = any(
+        chapter.get("error")
+        for chapter in result["chapters"]
+        if not chapter.get("skipped")
+    )
+    workspace.update_phase(
+        work_id,
+        "chapter_processing",
+        "failed" if processing_failed else "completed",
+    )
+    return result
+
+
+def set_chapters_impl(
+    work_id: str,
+    chapters: list[dict[str, Any]],
+    execution_mode: str,
+    extraction_mode: str,
+    book_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """같은 작업의 챕터 확정과 본문 준비를 직렬화해 실행한다."""
+    with workspace.chapter_setup_session(work_id):
+        return _set_chapters_impl_serialized(
+            work_id,
+            chapters,
+            execution_mode,
+            extraction_mode,
+            book_info,
+        )
 
 
 # ---------------------------------------------------------------------------

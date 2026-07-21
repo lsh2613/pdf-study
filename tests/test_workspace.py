@@ -5,6 +5,7 @@ import json
 import random
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -190,6 +191,107 @@ def test_set_chapters_preserves_canonical_page_metadata(tmp_path, fake_pdf):
     assert chapter["pdf_pages"] == [19, 23]
     assert chapter["source_pages"] == [1, 5]
     assert "page_range" not in chapter
+
+
+def test_commit_chapter_setup_saves_complete_transition_once(
+    tmp_path, fake_pdf, monkeypatch
+):
+    wid = workspace.create_workspace(
+        fake_pdf, tmp_path / "out_atomic_setup", options={"multiple_choice": True},
+    )
+    original_save_state = workspace.save_state
+    saved_states = []
+
+    def record_save(work_id, state):
+        saved_states.append(json.loads(json.dumps(state)))
+        original_save_state(work_id, state)
+
+    monkeypatch.setattr(workspace, "save_state", record_save)
+
+    committed = workspace.commit_chapter_setup(
+        wid,
+        [{"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 1]}],
+        execution_mode="parallel",
+        extraction_mode="text",
+        book_info={"title": "원문"},
+    )
+
+    assert len(saved_states) == 1
+    assert saved_states[0] == committed
+    assert committed["execution_mode"] == "parallel"
+    assert committed["extraction_mode"] == "text"
+    assert set(committed["chapters"]) == {"ch1"}
+    assert committed["phases"]["chapter_setup"] == "completed"
+    assert committed["phases"]["chapter_processing"] == "in_progress"
+    assert committed["current_phase"] == "chapter_processing"
+    assert workspace.load_book_info(wid) == {"title": "원문"}
+
+
+def test_commit_chapter_setup_restores_book_info_when_state_save_fails(
+    tmp_path, fake_pdf, monkeypatch
+):
+    wid = workspace.create_workspace(
+        fake_pdf, tmp_path / "out_atomic_rollback", options={"multiple_choice": True},
+    )
+    workspace.save_book_info(wid, {"title": "기존 원문"})
+    before_state = workspace.load_state(wid)
+    book_path = workspace.book_info_path(wid)
+    before_book_info = book_path.read_bytes()
+
+    def fail_save_state(work_id, state):
+        raise RuntimeError("state write failed")
+
+    monkeypatch.setattr(workspace, "save_state", fail_save_state)
+
+    with pytest.raises(RuntimeError, match="state write failed"):
+        workspace.commit_chapter_setup(
+            wid,
+            [{"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 1]}],
+            execution_mode="sequential",
+            extraction_mode="ocr",
+            book_info={"title": "새 원문"},
+        )
+
+    assert workspace.load_state(wid) == before_state
+    assert book_path.read_bytes() == before_book_info
+
+
+def test_commit_chapter_setup_surfaces_book_info_rollback_failure(
+    tmp_path, fake_pdf, monkeypatch
+):
+    wid = workspace.create_workspace(
+        fake_pdf, tmp_path / "out_atomic_rollback_error",
+        options={"multiple_choice": True},
+    )
+    workspace.save_book_info(wid, {"title": "기존 원문"})
+    book_path = workspace.book_info_path(wid)
+    original_replace = workspace.os.replace
+    book_replaces = 0
+
+    def fail_rollback_replace(src, dst):
+        nonlocal book_replaces
+        if Path(dst) == book_path:
+            book_replaces += 1
+            if book_replaces == 2:
+                raise OSError("rollback replace failed")
+        original_replace(src, dst)
+
+    def fail_save_state(work_id, state):
+        raise RuntimeError("state write failed")
+
+    monkeypatch.setattr(workspace.os, "replace", fail_rollback_replace)
+    monkeypatch.setattr(workspace, "save_state", fail_save_state)
+
+    with pytest.raises(RuntimeError, match="book_info rollback failed") as exc_info:
+        workspace.commit_chapter_setup(
+            wid,
+            [{"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 1]}],
+            execution_mode="sequential",
+            extraction_mode="text",
+            book_info={"title": "새 원문"},
+        )
+
+    assert isinstance(exc_info.value.__cause__, OSError)
 
 
 def test_legacy_state_and_raw_page_keys_are_normalized_on_read(tmp_path, fake_pdf):

@@ -20,7 +20,7 @@ pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, �
 
 `scan_pdf`는 PDF 메타데이터, 텍스트 레이어 품질, 페이지 오프셋, 내장 목차를 확인한다. 내장 목차가 있으면 PDF 파일 범위 `pdf_pages`와 원문 표시 번호 `source_pages`가 담긴 챕터 후보를 반환한다. 내장 목차가 없거나 재분석이 필요하면 목차 페이지를 JPEG로 렌더하되 OCR 모델을 준비하거나 실행하지 않는다. 클라이언트는 `prepare_ocr` 후 `scan_toc_with_ocr`로 목차 OCR 텍스트를 얻고, 그 텍스트와 이미지를 확인해 챕터를 구성한다.
 
-클라이언트가 챕터와 처리 방식을 확정하면 `set_chapters`가 상태 파일에 챕터를 등록한다. `pdf_pages`는 본문 추출 경계로 쓰고 `source_pages`는 상태·raw·응답에 보존하는 표시 메타로만 쓴다. text 모드에서는 이 시점에 본문 텍스트를 추출해 `chapters_raw`에 저장한다. OCR 모드에서는 이 시점에 본문 페이지 이미지를 렌더링하고 PaddleOCR CPU로 읽어 `chapters_raw`에 `text`와 `char_count`를 저장한다.
+클라이언트가 챕터와 처리 방식을 확정하면 `set_chapters`가 스캔 여부와 입력 전체를 먼저 검증한다. 실패하면 기존 작업을 바꾸지 않으며, 성공하면 모드·챕터와 처리 시작 phase를 하나의 잠금 구간에서 상태 파일에 등록한다. 같은 작업의 다른 `set_chapters` 호출은 앞선 호출의 본문 준비와 phase 종결 뒤에 시작한다. `pdf_pages`는 본문 추출 경계로 쓰고 `source_pages`는 상태·raw·응답에 보존하는 표시 메타로만 쓴다. text 모드에서는 이 시점에 본문 텍스트를 추출해 `chapters_raw`에 저장한다. OCR 모드에서는 이 시점에 본문 페이지 이미지를 렌더링하고 PaddleOCR CPU로 읽어 `chapters_raw`에 `text`와 `char_count`를 저장한다. 본문 준비가 끝나면 `chapter_processing`은 `completed`, 하나라도 실패하면 재시도 가능한 챕터별 오류와 함께 `failed`가 된다.
 
 `get_subagent_prompts`는 처리 모드와 학습자 정보에 맞는 한국어 프롬프트를 돌려준다. 각 챕터 처리자는 `get_chapter_content`로 입력을 받고, 요약·핵심 포인트·활성 문제 유형을 한국어로 만든 뒤 `save_chapter_result`로 저장한다. 확장 문제가 켜져 있으면 같은 챕터 본문과 학습자 정보를 받은 확장 프롬프트가 외부 검색 없이 응용 문제를 만들고 `save_extension_result`가 저장한다.
 

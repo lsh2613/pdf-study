@@ -192,8 +192,89 @@ def test_set_chapters_extracts_text(make_workspace, ko_with_toc):
     # 모드가 set_chapters 시점에 state에 기록된다
     assert state["execution_mode"] == "sequential"
     assert state["extraction_mode"] == "text"
+    assert state["phases"]["chapter_setup"] == "completed"
+    assert state["phases"]["chapter_processing"] == "completed"
     for cid in [c["chapter_id"] for c in res["chapters"]]:
         assert state["chapters"][cid]["char_count"] > 0
+
+
+def test_set_chapters_marks_processing_failed_on_unexpected_error(
+    make_workspace, ko_short, monkeypatch
+):
+    wid, _ = make_workspace(ko_short)
+    analysis.scan_pdf_impl(wid)
+
+    def fail_processing(*args, **kwargs):
+        raise RuntimeError("unexpected extraction failure")
+
+    monkeypatch.setattr(analysis, "_process_chapters", fail_processing)
+
+    with pytest.raises(RuntimeError, match="unexpected extraction failure"):
+        analysis.set_chapters_impl(
+            wid,
+            [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}],
+            "sequential",
+            "text",
+            book_info={"title": "테스트 원문"},
+        )
+
+    state = workspace.load_state(wid)
+    assert state["phases"]["chapter_setup"] == "completed"
+    assert state["phases"]["chapter_processing"] == "failed"
+    assert set(state["chapters"]) == {"ch1"}
+
+
+def test_same_work_set_chapters_calls_do_not_overlap_setup_processing(
+    make_workspace, ko_short, monkeypatch
+):
+    wid, _ = make_workspace(ko_short)
+    analysis.scan_pdf_impl(wid)
+    first_started = threading.Event()
+    release_first = threading.Event()
+
+    def controlled_processing(work_id, normalized, pdf_path, extraction_mode):
+        chapter = normalized[0]
+        if chapter["title"] == "첫 설정":
+            first_started.set()
+            assert release_first.wait(timeout=5)
+        return {
+            "chapter_count": 1,
+            "total_chars": 0,
+            "chapters": [{
+                "chapter_id": chapter["chapter_id"],
+                "title": chapter["title"],
+                "pdf_pages": chapter["pdf_pages"],
+                "char_count": 0,
+                "error": None,
+            }],
+        }
+
+    monkeypatch.setattr(analysis, "_process_chapters", controlled_processing)
+    first = [{"chapter_id": "ch1", "title": "첫 설정", "pdf_pages": [1, 6]}]
+    second = [{"chapter_id": "ch1", "title": "둘째 설정", "pdf_pages": [7, 12]}]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        first_future = pool.submit(
+            analysis.set_chapters_impl, wid, first, "sequential", "text",
+        )
+        assert first_started.wait(timeout=5)
+        second_future = pool.submit(
+            analysis.set_chapters_impl, wid, second, "parallel", "text",
+        )
+        time.sleep(0.05)
+
+        state_during_first = workspace.load_state(wid)
+        assert state_during_first["chapters"]["ch1"]["title"] == "첫 설정"
+        assert not second_future.done()
+
+        release_first.set()
+        first_future.result(timeout=5)
+        second_future.result(timeout=5)
+
+    final_state = workspace.load_state(wid)
+    assert final_state["chapters"]["ch1"]["title"] == "둘째 설정"
+    assert final_state["execution_mode"] == "parallel"
+    assert final_state["phases"]["chapter_processing"] == "completed"
 
 
 def test_ocr_mode_set_chapters_precomputes_raw_text(
@@ -571,25 +652,45 @@ def test_get_chapter_content_rejects_unregistered_id_with_hint(
 def test_set_chapters_rejects_out_of_range(make_workspace, ko_short):
     wid, _ = make_workspace(ko_short)
     analysis.scan_pdf_impl(wid)
+    analysis.set_chapters_impl(wid, [
+        {"chapter_id": "ch1", "title": "기존", "pdf_pages": [1, 12]}
+    ], "sequential", "text")
+    workspace.update_chapter_status(wid, "ch1", summary_status="completed")
+    before = workspace.load_state(wid)
+    book_path = workspace.book_info_path(wid)
+    before_book_info = book_path.read_bytes()
     with pytest.raises(ValueError, match="invalid for"):
         analysis.set_chapters_impl(wid, [
             {"chapter_id": "ch1", "title": "t", "pdf_pages": [1, 999]}
-        ], "sequential", "text")
+        ], "parallel", "text", book_info={"title": "잘못된 재시도"})
+    assert workspace.load_state(wid) == before
+    assert book_path.read_bytes() == before_book_info
 
 
 def test_set_chapters_rejects_duplicate_ids(make_workspace, ko_short):
     wid, _ = make_workspace(ko_short)
     analysis.scan_pdf_impl(wid)
+    analysis.set_chapters_impl(wid, [
+        {"chapter_id": "ch1", "title": "기존", "pdf_pages": [1, 12]}
+    ], "sequential", "text", book_info={"title": "기존 원문"})
+    workspace.update_chapter_status(wid, "ch1", summary_status="completed")
+    before = workspace.load_state(wid)
+    book_path = workspace.book_info_path(wid)
+    before_book_info = book_path.read_bytes()
     with pytest.raises(ValueError, match="duplicate"):
         analysis.set_chapters_impl(wid, [
             {"chapter_id": "ch1", "title": "a", "pdf_pages": [1, 5]},
             {"chapter_id": "ch1", "title": "b", "pdf_pages": [6, 10]},
-        ], "sequential", "text")
+        ], "parallel", "text", book_info={"title": "잘못된 재시도"})
+    assert workspace.load_state(wid) == before
+    assert book_path.read_bytes() == before_book_info
 
 
 def test_set_chapters_requires_scan_first(make_workspace, ko_short):
     wid, _ = make_workspace(ko_short)
+    before = workspace.load_state(wid)
     with pytest.raises(RuntimeError, match="scan_pdf"):
         analysis.set_chapters_impl(wid, [
             {"chapter_id": "ch1", "title": "t", "pdf_pages": [1, 5]}
         ], "sequential", "text")
+    assert workspace.load_state(wid) == before

@@ -560,7 +560,10 @@ def test_set_chapters_ocr_failure_returns_failed_chapters(
     assert failed[0]["chapter_id"] == "ch1"
     assert failed[0]["failed_pages"] == [2]
     assert "OCR boom" in failed[0]["error"]
-    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "failed"
+    state = workspace.load_state(wid)
+    assert state["chapters"]["ch1"]["summary_status"] == "failed"
+    assert state["phases"]["chapter_setup"] == "completed"
+    assert state["phases"]["chapter_processing"] == "failed"
 
 
 def test_set_chapters_ocr_requires_prepare_when_cache_missing(

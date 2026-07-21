@@ -23,6 +23,7 @@ import os
 import shutil
 import tempfile
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,10 @@ OUTPUT_MANIFEST_NAME = ".pdf-study-manifest.json"
 # work_id 별 in-memory lock (state.json read-modify-write 직렬화)
 _locks: dict[str, threading.Lock] = {}
 _locks_meta = threading.Lock()
+
+# 같은 work_id의 set_chapters setup+본문 준비 전체를 직렬화한다.
+_chapter_setup_locks: dict[str, threading.Lock] = {}
+_chapter_setup_locks_meta = threading.Lock()
 
 # work_id → work_dir 매핑 (단일 프로세스 내에서만 유효)
 _registry: dict[str, Path] = {}
@@ -51,6 +56,18 @@ def _get_lock(work_id: str) -> threading.Lock:
             lock = threading.Lock()
             _locks[work_id] = lock
         return lock
+
+
+@contextmanager
+def chapter_setup_session(work_id: str):
+    """같은 작업의 setup commit과 본문 준비가 서로 겹치지 않게 한다."""
+    with _chapter_setup_locks_meta:
+        lock = _chapter_setup_locks.get(work_id)
+        if lock is None:
+            lock = threading.Lock()
+            _chapter_setup_locks[work_id] = lock
+    with lock:
+        yield
 
 
 def _atomic_write_json(path: Path, data: dict | list) -> None:
@@ -295,6 +312,8 @@ def replace_workspace(output_dir: str | Path) -> None:
             _registry.pop(old_work_id, None)
         with _locks_meta:
             _locks.pop(old_work_id, None)
+        with _chapter_setup_locks_meta:
+            _chapter_setup_locks.pop(old_work_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -564,6 +583,34 @@ def update_chapter_status(work_id: str, chapter_id: str, **updates: Any) -> None
         save_state(work_id, state)
 
 
+def _build_chapter_state(
+    chapters: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """검증·정규화된 챕터 정의를 초기 state 항목으로 변환한다."""
+    new_chapters: dict[str, dict[str, Any]] = {}
+    for raw_chapter in chapters:
+        ch = canonicalize_chapter_page_metadata(raw_chapter)
+        cid = ch["chapter_id"]
+        skip = bool(ch.get("skip", False))
+        status = "skipped" if skip else "pending"
+        new_chapters[cid] = {
+            "title": ch["title"],
+            "pdf_pages": list(ch["pdf_pages"]),
+            "char_count": ch.get("char_count", 0),
+            "skip": skip,
+            "summary_status": status,
+            "extension_status": status,
+            "error": None,
+            "retry_count": 0,
+        }
+        if "source_pages" in ch:
+            source_pages = ch["source_pages"]
+            new_chapters[cid]["source_pages"] = (
+                list(source_pages) if source_pages is not None else None
+            )
+    return new_chapters
+
+
 def set_chapters_in_state(work_id: str, chapters: list[dict[str, Any]]) -> None:
     """set_chapters 도구가 결정한 챕터 구조를 state.chapters에 반영.
 
@@ -574,30 +621,46 @@ def set_chapters_in_state(work_id: str, chapters: list[dict[str, Any]]) -> None:
     """
     with _get_lock(work_id):
         state = load_state(work_id)
-        new_chapters: dict[str, dict[str, Any]] = {}
-        for raw_chapter in chapters:
-            ch = canonicalize_chapter_page_metadata(raw_chapter)
-            cid = ch["chapter_id"]
-            skip = bool(ch.get("skip", False))
-            status = "skipped" if skip else "pending"
-            new_chapters[cid] = {
-                "title": ch["title"],
-                "pdf_pages": list(ch["pdf_pages"]),
-                "char_count": ch.get("char_count", 0),
-                "skip": skip,
-                "summary_status": status,
-                "extension_status": status,
-                "error": None,
-                "retry_count": 0,
-            }
-            if "source_pages" in ch:
-                source_pages = ch["source_pages"]
-                new_chapters[cid]["source_pages"] = (
-                    list(source_pages) if source_pages is not None else None
-                )
-        state["chapters"] = new_chapters
+        state["chapters"] = _build_chapter_state(chapters)
         state["phases"]["chapter_setup"] = "completed"
         save_state(work_id, state)
+
+
+def commit_chapter_setup(
+    work_id: str,
+    chapters: list[dict[str, Any]],
+    *,
+    execution_mode: str,
+    extraction_mode: str,
+    book_info: dict[str, Any],
+) -> dict[str, Any]:
+    """검증이 끝난 챕터 설정과 처리 시작 상태를 한 잠금 구간에서 확정한다.
+
+    book_info는 state보다 먼저 atomic write하고, state 저장이 실패하면 호출 전
+    바이트로 복원한다. 따라서 실패한 setup commit이 메타 파일만 바꾸지 않는다.
+    """
+    with _get_lock(work_id):
+        state = load_state(work_id)
+        info_path = book_info_path(work_id)
+        snapshot = _snapshot_files([info_path])
+        try:
+            _atomic_write_json(info_path, book_info)
+            state["execution_mode"] = execution_mode
+            state["extraction_mode"] = extraction_mode
+            state["chapters"] = _build_chapter_state(chapters)
+            state["phases"]["chapter_setup"] = "completed"
+            state["phases"]["chapter_processing"] = "in_progress"
+            state["current_phase"] = "chapter_processing"
+            save_state(work_id, state)
+        except Exception:
+            try:
+                _restore_files(snapshot, raise_on_error=True)
+            except Exception as rollback_error:
+                raise RuntimeError(
+                    "chapter setup failed and book_info rollback failed"
+                ) from rollback_error
+            raise
+        return state
 
 
 # ---------------------------------------------------------------------------
@@ -663,7 +726,11 @@ def _snapshot_files(paths: list[Path]) -> dict[Path, bytes | None]:
     return {path: path.read_bytes() if path.exists() else None for path in paths}
 
 
-def _restore_files(snapshot: dict[Path, bytes | None]) -> None:
+def _restore_files(
+    snapshot: dict[Path, bytes | None],
+    *,
+    raise_on_error: bool = False,
+) -> None:
     for path, content in snapshot.items():
         try:
             if content is None:
@@ -690,6 +757,8 @@ def _restore_files(snapshot: dict[Path, bytes | None]) -> None:
                         tmp_path.unlink()
                     raise
         except OSError:
+            if raise_on_error:
+                raise
             logger.warning("failed to restore result file after state save error: %s", path)
 
 
