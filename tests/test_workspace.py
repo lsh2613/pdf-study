@@ -39,6 +39,61 @@ def test_create_workspace_initial_state(tmp_path, fake_pdf):
     assert (tmp_path / "out" / ".work" / "state.json").exists()
 
 
+def test_inspect_output_dir_reports_existing_managed_work(tmp_path, fake_pdf):
+    out = tmp_path / "out"
+    wid = workspace.create_workspace(
+        fake_pdf,
+        out,
+        options={"multiple_choice": True},
+        work_id="existing-work",
+    )
+
+    collision = workspace.inspect_output_dir(out)
+
+    assert collision == {
+        "kind": "managed_work",
+        "output_dir": str(out.resolve()),
+        "work_id": wid,
+        "pdf_path": str(fake_pdf.resolve()),
+        "current_phase": "init",
+        "can_resume": True,
+    }
+
+
+def test_replace_workspace_removes_only_work_dir(tmp_path, fake_pdf):
+    out = tmp_path / "out"
+    workspace.create_workspace(
+        fake_pdf,
+        out,
+        options={"multiple_choice": True},
+        work_id="old-work",
+    )
+    stale = out / ".work" / "chapters" / "summaries" / "ch1.json"
+    stale.write_text('{"summary": "old"}', encoding="utf-8")
+    rendered = out / "ch1.html"
+    rendered.write_text("old rendered study", encoding="utf-8")
+    unrelated = out / "notes.txt"
+    unrelated.write_text("keep me", encoding="utf-8")
+
+    workspace.replace_workspace(out)
+
+    assert not (out / ".work").exists()
+    assert rendered.read_text(encoding="utf-8") == "old rendered study"
+    assert unrelated.read_text(encoding="utf-8") == "keep me"
+
+
+def test_inspect_output_dir_recognizes_legacy_render_without_work_dir(tmp_path):
+    out = tmp_path / "legacy"
+    (out / "assets").mkdir(parents=True)
+    (out / "study_html.py").write_text("# launcher", encoding="utf-8")
+    (out / "index.html").write_text("<html></html>", encoding="utf-8")
+
+    collision = workspace.inspect_output_dir(out)
+
+    assert collision["kind"] == "managed_output"
+    assert collision["can_resume"] is False
+
+
 def test_all_question_types_disabled_rejected(tmp_path, fake_pdf):
     with pytest.raises(ValueError, match="at least one question type"):
         workspace.create_workspace(

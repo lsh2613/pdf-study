@@ -240,6 +240,91 @@ def test_init_work_explicit_output_dir_used_as_is(tmp_path, ko_short):
     assert (target / ".work" / "state.json").exists()
 
 
+def test_init_work_existing_output_returns_choices_without_mutation(tmp_path, ko_short):
+    out = tmp_path / "out"
+    first = server.init_work(str(ko_short), str(out))
+    assert first["ok"], first
+    state_path = out / ".work" / "state.json"
+    before = state_path.read_bytes()
+
+    repeated = server.init_work(str(ko_short), str(out))
+
+    _check_envelope(repeated)
+    assert repeated["ok"] is False
+    assert repeated["data"]["existing_work"]["work_id"] == first["data"]["work_id"]
+    assert [choice["value"] for choice in repeated["data"]["choices"]] == [
+        "resume", "replace", "new_output_dir",
+    ]
+    assert all(choice["label"] and choice["desc"] for choice in repeated["data"]["choices"])
+    assert "항목과 설명을 바꾸지 말고" in repeated["next_action"]
+    assert state_path.read_bytes() == before
+
+
+def test_init_work_replace_existing_clears_old_work_only(
+    tmp_path, ko_short, monkeypatch
+):
+    ids = iter(["old-work", "new-work"])
+    monkeypatch.setattr(server.workspace, "make_work_id", lambda: next(ids))
+    out = tmp_path / "out"
+    first = server.init_work(str(ko_short), str(out))
+    assert first["ok"], first
+    stale = out / ".work" / "chapters" / "summaries" / "ch1.json"
+    stale.write_text('{"summary": "old"}', encoding="utf-8")
+    rendered = out / "ch1.html"
+    rendered.write_text("old rendered study", encoding="utf-8")
+    unrelated = out / "notes.txt"
+    unrelated.write_text("keep me", encoding="utf-8")
+
+    replaced = server.init_work(
+        str(ko_short),
+        str(out),
+        replace_existing=True,
+    )
+
+    assert replaced["ok"], replaced
+    assert replaced["data"]["work_id"] == "new-work"
+    assert not stale.exists()
+    assert rendered.read_text(encoding="utf-8") == "old rendered study"
+    assert unrelated.read_text(encoding="utf-8") == "keep me"
+    assert workspace.load_state("new-work")["current_phase"] == "init"
+
+
+def test_init_work_replace_existing_validates_before_removing_old_work(
+    tmp_path, ko_short
+):
+    out = tmp_path / "out"
+    first = server.init_work(str(ko_short), str(out))
+    assert first["ok"], first
+    state_path = out / ".work" / "state.json"
+    before = state_path.read_bytes()
+
+    rejected = server.init_work(
+        str(tmp_path / "missing.pdf"),
+        str(out),
+        replace_existing=True,
+    )
+
+    assert rejected["ok"] is False
+    assert "PDF not found" in rejected["error"]
+    assert state_path.read_bytes() == before
+
+
+def test_init_work_rendered_output_without_state_omits_resume_choice(
+    tmp_path, ko_short
+):
+    out = tmp_path / "legacy"
+    (out / "assets").mkdir(parents=True)
+    (out / "study_html.py").write_text("# launcher", encoding="utf-8")
+    (out / "index.html").write_text("<html></html>", encoding="utf-8")
+
+    collision = server.init_work(str(ko_short), str(out))
+
+    assert collision["ok"] is False
+    assert [choice["value"] for choice in collision["data"]["choices"]] == [
+        "replace", "new_output_dir",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # set_chapters — 처리 모드(순차/병렬 · text/ocr)를 여기서 받는다
 # ---------------------------------------------------------------------------

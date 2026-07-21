@@ -14,11 +14,14 @@
 
 `study_tui.py`는 rich가 없어도 평문 모드로 실행되어야 한다. rich 설치 실패를 학습 자료 실행 실패로 승격하면 안 된다.
 
+템플릿은 기존 출력 폴더나 다른 형식의 파일을 직접 정리하지 않는다. 렌더 세대 교체와 진도 재사용 판단은 `renderer/output_manager.py`의 manifest·fingerprint 경계가 담당한다.
+
 ## 지켜야 할 동작
 
 - 브라우저 진도 저장은 `progress/` 아래 JSON만 대상으로 한다.
 - progress 이름은 안전한 챕터 ID나 global만 허용한다. 경로 구분자나 상위 경로 이동을 받으면 안 된다.
 - HTML 자바스크립트는 완료 토글, 답안 복원, 객관식 채점 상태를 같은 progress 구조로 저장해야 한다.
+- 기존 progress가 새 결과에 복사되었다고 가정하지 않는다. 출력 형식과 학습 fingerprint가 맞지 않으면 output manager가 빈 진도로 시작한다.
 - 챕터별 TUI launcher는 루트 엔진을 호출하는 얇은 파일이어야 한다. 챕터마다 엔진 복사본을 따로 유지하면 수정 누락이 생긴다.
 
 ## 테스트 기준

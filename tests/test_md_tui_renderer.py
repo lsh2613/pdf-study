@@ -125,6 +125,20 @@ def test_chapter_launcher_calls_engine(ko_with_toc, tmp_path):
     assert "run_chapter(_here)" in shim
 
 
+def test_progress_fingerprint_preserves_same_md_tui_generation(ko_with_toc, tmp_path):
+    out, _ = _build_multi(ko_with_toc, tmp_path)
+    state = json.loads((out / ".work" / "state.json").read_text(encoding="utf-8"))
+    wid = state["work_id"]
+    progress = out / "ch1" / "progress.json"
+    progress.write_text('{"completed":true}', encoding="utf-8")
+
+    rerendered = server.finalize_study(wid, "md_tui")
+
+    assert rerendered["ok"], rerendered
+    assert progress.read_text(encoding="utf-8") == '{"completed":true}'
+    assert (out / ".pdf-study-manifest.json").exists()
+
+
 # --- rich 미설치 평문 폴백 셰임 --------------------------------------------
 
 def _load_study_tui():

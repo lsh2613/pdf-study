@@ -5,6 +5,7 @@ import pytest
 
 from pdf_study import server
 from pdf_study.renderer.html_renderer import (
+    HtmlRenderer,
     _FallbackMd,
     _summary_section,
     _unescape_if_double_escaped,
@@ -199,6 +200,204 @@ def test_extension_question_uses_same_answer_ui_without_reference_block(ko_with_
     assert 'id="ex"' in html
     assert "ch1_ex" in html
     assert '<button type="button" class="reveal"' in html
+
+
+def test_force_ignores_stale_results_for_pending_chapter(ko_short, tmp_path):
+    out = tmp_path / "out"
+    init = server.init_work(
+        str(ko_short),
+        str(out),
+        enable_short_answer=False,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    wid = init["data"]["work_id"]
+    _scan(wid)
+    set_result = server.set_chapters(
+        wid,
+        [{"chapter_id": "ch1", "title": "새 챕터", "page_range": [1, 12]}],
+        execution_mode="sequential",
+        extraction_mode="text",
+    )
+    assert set_result["ok"], set_result
+    (server.workspace.summaries_dir(wid) / "ch1.json").write_text(
+        '{"chapter_id":"ch1","title":"예전 제목",'
+        '"summary":"STALE_SUMMARY","key_points":["old"]}',
+        encoding="utf-8",
+    )
+    (server.workspace.quiz_dir(wid) / "ch1.json").write_text(
+        '{"questions":{"multiple_choice":[{"id":"old",'
+        '"question":"STALE_QUESTION","options":["A","B"],'
+        '"answer_index":0,"explanation":"old"}]}}',
+        encoding="utf-8",
+    )
+
+    rendered = server.finalize_study(wid, "html", force=True)
+
+    assert rendered["ok"], rendered
+    html = (out / "main.html").read_text(encoding="utf-8")
+    assert "새 챕터" in html
+    assert "STALE_SUMMARY" not in html
+    assert "STALE_QUESTION" not in html
+
+
+def test_managed_output_removes_pages_for_removed_chapters(ko_with_toc, tmp_path):
+    wid, out, _ = _build_multi(ko_with_toc, tmp_path)
+    assert (out / "ch2.html").exists()
+    server.workspace.set_chapters_in_state(wid, [
+        {"chapter_id": "ch1", "title": "남은 챕터", "page_range": [5, 12]},
+    ])
+    saved = server.save_chapter_result(wid, "ch1", _fake_summary("ch1"))
+    assert saved["ok"], saved
+    extension = server.save_extension_result(wid, "ch1", {
+        "chapter_id": "ch1",
+        "questions": {"extension": [
+            {"id": "ch1_ex", "question": "?", "model_answer": "ans"},
+        ]},
+    })
+    assert extension["ok"], extension
+
+    rerendered = server.finalize_study(wid, "html")
+
+    assert rerendered["ok"], rerendered
+    assert (out / "main.html").exists()
+    assert not (out / "index.html").exists()
+    assert not (out / "ch1.html").exists()
+    assert not (out / "ch2.html").exists()
+    assert (out / ".pdf-study-manifest.json").exists()
+
+
+def test_managed_output_switches_format_without_touching_unrelated_file(
+    ko_with_toc, tmp_path
+):
+    wid, out, _ = _build_multi(ko_with_toc, tmp_path)
+    unrelated = out / "notes.txt"
+    unrelated.write_text("keep me", encoding="utf-8")
+
+    switched = server.finalize_study(wid, "md_tui")
+
+    assert switched["ok"], switched
+    assert (out / "book.md").exists()
+    assert (out / "ch1" / "summary.md").exists()
+    assert not (out / "index.html").exists()
+    assert not (out / "ch1.html").exists()
+    assert not (out / "assets").exists()
+    assert not (out / "study_html.py").exists()
+    assert unrelated.read_text(encoding="utf-8") == "keep me"
+
+
+def test_progress_fingerprint_preserves_same_html_generation(ko_with_toc, tmp_path):
+    wid, out, _ = _build_multi(ko_with_toc, tmp_path)
+    progress = out / "progress" / "ch1.json"
+    progress.write_text('{"completed":true}', encoding="utf-8")
+
+    rerendered = server.finalize_study(wid, "html")
+
+    assert rerendered["ok"], rerendered
+    assert progress.read_text(encoding="utf-8") == '{"completed":true}'
+    manifest = (out / ".pdf-study-manifest.json").read_text(encoding="utf-8")
+    assert '"study_fingerprint"' in manifest
+
+
+def test_progress_fingerprint_resets_after_content_change(ko_with_toc, tmp_path):
+    wid, out, _ = _build_multi(ko_with_toc, tmp_path)
+    progress = out / "progress" / "ch1.json"
+    progress.write_text('{"completed":true}', encoding="utf-8")
+    changed = _fake_summary("ch1")
+    changed["summary"] = "새로 생성한 요약"
+    saved = server.save_chapter_result(wid, "ch1", changed)
+    assert saved["ok"], saved
+
+    rerendered = server.finalize_study(wid, "html")
+
+    assert rerendered["ok"], rerendered
+    assert not progress.exists()
+
+
+def test_render_rollback_keeps_previous_generation(
+    ko_with_toc, tmp_path, monkeypatch
+):
+    wid, out, _ = _build_multi(ko_with_toc, tmp_path)
+    index_before = (out / "index.html").read_bytes()
+    manifest_path = out / ".pdf-study-manifest.json"
+    manifest_before = manifest_path.read_bytes()
+
+    def fail_render(self, work_id, output_dir):
+        (output_dir / "partial.html").write_text("partial", encoding="utf-8")
+        raise RuntimeError("render failed")
+
+    monkeypatch.setattr(HtmlRenderer, "render", fail_render)
+
+    failed = server.finalize_study(wid, "html")
+
+    assert failed["ok"] is False
+    assert (out / "index.html").read_bytes() == index_before
+    assert manifest_path.read_bytes() == manifest_before
+    assert not (out / "partial.html").exists()
+
+
+def test_managed_output_refuses_to_overwrite_unmanaged_name(ko_short, tmp_path):
+    out = tmp_path / "out"
+    init = server.init_work(
+        str(ko_short),
+        str(out),
+        enable_short_answer=False,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    wid = init["data"]["work_id"]
+    _scan(wid)
+    set_result = server.set_chapters(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}],
+        execution_mode="sequential",
+        extraction_mode="text",
+    )
+    assert set_result["ok"], set_result
+    saved = server.save_chapter_result(wid, "ch1", _fake_summary("ch1"))
+    assert saved["ok"], saved
+    user_readme = out / "README.md"
+    user_readme.write_text("user-owned", encoding="utf-8")
+
+    rendered = server.finalize_study(wid, "html")
+
+    assert rendered["ok"] is False
+    assert "unmanaged paths" in rendered["error"]
+    assert user_readme.read_text(encoding="utf-8") == "user-owned"
+    assert not (out / ".pdf-study-manifest.json").exists()
+
+
+def test_managed_output_refuses_to_overwrite_unmanaged_broken_symlink(
+    ko_short, tmp_path
+):
+    out = tmp_path / "out"
+    init = server.init_work(
+        str(ko_short),
+        str(out),
+        enable_short_answer=False,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    wid = init["data"]["work_id"]
+    _scan(wid)
+    set_result = server.set_chapters(
+        wid,
+        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}],
+        execution_mode="sequential",
+        extraction_mode="text",
+    )
+    assert set_result["ok"], set_result
+    saved = server.save_chapter_result(wid, "ch1", _fake_summary("ch1"))
+    assert saved["ok"], saved
+    user_readme = out / "README.md"
+    user_readme.symlink_to(out / "missing-user-readme")
+
+    rendered = server.finalize_study(wid, "html")
+
+    assert rendered["ok"] is False
+    assert "unmanaged paths" in rendered["error"]
+    assert user_readme.is_symlink()
+    assert not (out / ".pdf-study-manifest.json").exists()
 
 
 # ---------------------------- 단일 챕터 ----------------------------

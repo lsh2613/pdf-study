@@ -23,7 +23,9 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
 │       │   ├── 0003-text-or-ocr.md -> 본문 추출 방식
 │       │   ├── 0004-neutral-render-data.md -> 렌더러 공통 데이터
 │       │   ├── 0005-extension-search.md -> 확장 문제 검색 처리
-│       │   └── 0006-project-local-venv.md -> 프로젝트 로컬 실행 환경
+│       │   ├── 0006-project-local-venv.md -> 프로젝트 로컬 실행 환경
+│       │   ├── 0007-extension-without-search.md -> 검색 없는 확장 문제
+│       │   └── 0008-managed-output-replacement.md -> 출력 폴더 충돌과 교체
 │       └── findings.md -> 아직 해결하지 않은 문제
 ├── server.py / analysis.py / workspace.py / prompts.py -> MCP 도구, 흐름 결정, 상태 저장, 프롬프트
 ├── pdf/AGENTS.md -> PDF 열기·목차·페이지 렌더링 기준
@@ -36,6 +38,7 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
 
 - PDF 학습 요청은 일반 요약으로 처리하지 않는다. 기본 흐름은 `init_work → scan_pdf → set_chapters → get_subagent_prompts → save_* → list_pending_chapters → finalize_study`다. 내장 목차가 없거나 목차 재분석이 필요하면 `scan_pdf` 뒤에 `prepare_ocr → scan_toc_with_ocr`를 거쳐 챕터를 구성한 다음 `set_chapters`로 간다.
 - `init_work`가 단답형·주관식·확장형 문제 선택을 요구하면 응답의 항목과 설명을 그대로 사용자에게 보여주고, 선택적 학습자 정보도 함께 안내한다. 사용자의 명시적 선택을 `scan_pdf`에 전달하기 전에는 PDF 스캔으로 넘어가지 않는다. 객관식만 기존 호환을 위해 기본 활성이다.
+- `init_work`가 기존 출력 작업을 발견하면 `resume`, `replace`, `new_output_dir` 선택지를 그대로 보여준다. `replace`는 사용자의 명시적 선택을 받은 뒤에만 `replace_existing=true`로 전달한다. 렌더 결과 정리는 `.pdf-study-manifest.json`에 기록된 관리 경로에 한정하며 다른 사용자 파일을 삭제하거나 덮어쓰면 안 된다.
 - 챕터 경계는 PDF 북마크 또는 목차 페이지 이미지로만 정한다. PDF 텍스트를 긁어 목차를 추정하는 코드를 추가하면 안 된다. `scan_pdf`는 목차 후보 이미지를 렌더할 뿐 OCR 모델을 준비하거나 실행하지 않는다.
 - 텍스트 레이어가 없거나 깨진 PDF는 text 모드로 밀어붙이면 안 된다. OCR 흐름은 `set_chapters`에서 PaddleOCR CPU로 본문을 선계산해 `chapters_raw/chN.json`의 `text`와 `char_count`로 저장하는 방향이다. `body_text`는 raw 본문을 덮어쓰는 경로로 쓰지 않는다.
 - 사용자가 골라야 하는 선택지는 서버 응답의 항목과 설명을 바꾸지 않는다. 추천·기본값을 임의로 붙이거나 선택지를 합치면 안 된다.

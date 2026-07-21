@@ -81,6 +81,8 @@ scan_toc_with_ocr(work_id)
 
 ## 결과물 실행
 
+같은 출력 폴더에 기존 작업이나 완료 결과가 있으면 `init_work`는 자동 덮어쓰지 않는다. 응답의 `resume`, `replace`, `new_output_dir` 선택지를 그대로 보여주고 사용자의 답에 따라 `resume_work`, `init_work(..., replace_existing=true)`, 또는 다른 `output_dir`의 `init_work`를 호출한다. `replace`는 기존 `.work`를 새 작업으로 바꾸지만, 이전 렌더 결과는 새 렌더가 성공할 때까지 유지한다.
+
 HTML 결과물은 결과 폴더에서 다음 명령으로 연다.
 
 ```bash
@@ -96,6 +98,8 @@ python3 study_tui.py
 ```
 
 `rich`가 없으면 TUI 런처가 설치를 시도하고, 설치할 수 없으면 평문 모드로 동작한다.
+
+결과 폴더의 `.pdf-study-manifest.json`은 현재 형식과 서버가 생성한 경로를 기록한다. 같은 작업을 다시 렌더하면 manifest 경로만 새 세대로 교체되며, 형식과 학습 fingerprint가 같을 때만 기존 진도가 유지된다.
 
 ## 로컬 산출물
 

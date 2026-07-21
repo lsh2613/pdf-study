@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import tempfile
 import threading
 from datetime import datetime
@@ -27,6 +28,8 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+OUTPUT_MANIFEST_NAME = ".pdf-study-manifest.json"
 
 # work_id 별 in-memory lock (state.json read-modify-write 직렬화)
 _locks: dict[str, threading.Lock] = {}
@@ -156,6 +159,115 @@ def outline_path(work_id: str) -> Path:
     return raw_data_dir(work_id) / "outline.json"
 
 
+def legacy_output_formats(output_dir: str | Path) -> set[str]:
+    """manifest 도입 전 생성물의 형식을 보수적으로 식별한다."""
+    out = Path(output_dir).resolve()
+    if not out.is_dir():
+        return set()
+    formats: set[str] = set()
+    html_entry = (out / "index.html").is_file() or (out / "main.html").is_file()
+    if html_entry and (out / "study_html.py").is_file() and (out / "assets").is_dir():
+        formats.add("html")
+    md_chapter = any(
+        path.is_dir()
+        and (path / "summary.md").is_file()
+        and (path / "quiz.json").is_file()
+        and (path / "study_tui.py").is_file()
+        for path in out.iterdir()
+    )
+    if (out / "book.md").is_file() and (out / "study_tui.py").is_file() and md_chapter:
+        formats.add("md_tui")
+    return formats
+
+
+def inspect_output_dir(output_dir: str | Path) -> dict[str, Any]:
+    """출력 폴더가 새 작업에 사용 가능한지 읽기 전용으로 확인한다."""
+    out = Path(output_dir).resolve()
+    state_file = out / ".work" / "state.json"
+    manifest_file = out / OUTPUT_MANIFEST_NAME
+
+    if state_file.exists():
+        try:
+            state = _read_json(state_file)
+        except (OSError, ValueError, TypeError):
+            return {
+                "kind": "damaged_managed_work",
+                "output_dir": str(out),
+                "work_id": None,
+                "pdf_path": None,
+                "current_phase": None,
+                "can_resume": False,
+            }
+        return {
+            "kind": "managed_work",
+            "output_dir": str(out),
+            "work_id": state.get("work_id"),
+            "pdf_path": state.get("pdf_path"),
+            "current_phase": state.get("current_phase"),
+            "can_resume": bool(state.get("work_id")),
+        }
+
+    if manifest_file.exists() or legacy_output_formats(out):
+        return {
+            "kind": "managed_output",
+            "output_dir": str(out),
+            "work_id": None,
+            "pdf_path": None,
+            "current_phase": "rendered",
+            "can_resume": False,
+        }
+
+    if out.exists() and any(out.iterdir()):
+        return {
+            "kind": "unmanaged_content",
+            "output_dir": str(out),
+            "work_id": None,
+            "pdf_path": None,
+            "current_phase": None,
+            "can_resume": False,
+        }
+
+    return {
+        "kind": "available",
+        "output_dir": str(out),
+        "work_id": None,
+        "pdf_path": None,
+        "current_phase": None,
+        "can_resume": False,
+    }
+
+
+def replace_workspace(output_dir: str | Path) -> None:
+    """명시적 교체 요청에 따라 기존 `.work`만 제거한다.
+
+    이전 렌더 결과와 manifest는 새 렌더가 성공할 때까지 보존한다.
+    """
+    out = Path(output_dir).resolve()
+    work_dir = out / ".work"
+    if work_dir.parent != out or work_dir.name != ".work":
+        raise ValueError(f"unsafe work directory: {work_dir}")
+    if not work_dir.exists():
+        return
+
+    state_file = work_dir / "state.json"
+    old_work_id: str | None = None
+    if state_file.exists():
+        try:
+            old_work_id = _read_json(state_file).get("work_id")
+        except (OSError, ValueError, TypeError):
+            old_work_id = None
+
+    lock = _get_lock(old_work_id) if old_work_id else threading.Lock()
+    with lock:
+        shutil.rmtree(work_dir)
+
+    if old_work_id:
+        with _registry_meta:
+            _registry.pop(old_work_id, None)
+        with _locks_meta:
+            _locks.pop(old_work_id, None)
+
+
 # ---------------------------------------------------------------------------
 # 워크스페이스 생성
 # ---------------------------------------------------------------------------
@@ -190,6 +302,30 @@ def _validate_options(
     return normalized
 
 
+def validate_workspace_inputs(
+    pdf_path: str | os.PathLike,
+    options: dict[str, bool | None],
+    user_context: str = "",
+    execution_mode: str | None = None,
+    extraction_mode: str | None = None,
+) -> dict[str, bool | None]:
+    """워크스페이스 생성 입력을 파일 변경 없이 검증한다."""
+    pdf = Path(pdf_path)
+    if not pdf.exists():
+        raise ValueError(f"PDF not found: {pdf_path}")
+    if execution_mode is not None and execution_mode not in VALID_EXECUTION_MODES:
+        raise ValueError(
+            f"execution_mode must be one of {VALID_EXECUTION_MODES}, got {execution_mode!r}"
+        )
+    if extraction_mode is not None and extraction_mode not in VALID_EXTRACTION_MODES:
+        raise ValueError(
+            f"extraction_mode must be one of {VALID_EXTRACTION_MODES}, got {extraction_mode!r}"
+        )
+    if not isinstance(user_context, str):
+        raise ValueError("user_context must be a string")
+    return _validate_options(options)
+
+
 def create_workspace(
     pdf_path: str | os.PathLike,
     output_dir: str | os.PathLike,
@@ -212,21 +348,13 @@ def create_workspace(
         ValueError: pdf_path 미존재, 주어진 모드가 잘못됨, 모든 문제 비활성.
     """
     pdf = Path(pdf_path)
-    if not pdf.exists():
-        raise ValueError(f"PDF not found: {pdf_path}")
-
-    if execution_mode is not None and execution_mode not in VALID_EXECUTION_MODES:
-        raise ValueError(
-            f"execution_mode must be one of {VALID_EXECUTION_MODES}, got {execution_mode!r}"
-        )
-    if extraction_mode is not None and extraction_mode not in VALID_EXTRACTION_MODES:
-        raise ValueError(
-            f"extraction_mode must be one of {VALID_EXTRACTION_MODES}, got {extraction_mode!r}"
-        )
-    if not isinstance(user_context, str):
-        raise ValueError("user_context must be a string")
-
-    question_options = _validate_options(options)
+    question_options = validate_workspace_inputs(
+        pdf,
+        options,
+        user_context,
+        execution_mode,
+        extraction_mode,
+    )
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)

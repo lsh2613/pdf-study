@@ -246,9 +246,23 @@ def _load_all(work_id: str) -> dict[str, Any]:
         ext_path = ext_dir / f"{cid}.json"
         raw_path = raw_dir / f"{cid}.json"
 
-        summary_data = json.loads(sum_path.read_text(encoding="utf-8")) if sum_path.exists() else None
-        quiz_data = json.loads(quiz_path.read_text(encoding="utf-8")) if quiz_path.exists() else None
-        ext_data = json.loads(ext_path.read_text(encoding="utf-8")) if ext_path.exists() else None
+        summary_completed = meta.get("summary_status") == "completed"
+        extension_completed = meta.get("extension_status") == "completed"
+        summary_data = (
+            json.loads(sum_path.read_text(encoding="utf-8"))
+            if summary_completed and sum_path.exists()
+            else None
+        )
+        quiz_data = (
+            json.loads(quiz_path.read_text(encoding="utf-8"))
+            if summary_completed and quiz_path.exists()
+            else None
+        )
+        ext_data = (
+            json.loads(ext_path.read_text(encoding="utf-8"))
+            if extension_completed and ext_path.exists()
+            else None
+        )
         raw_data = json.loads(raw_path.read_text(encoding="utf-8")) if raw_path.exists() else None
 
         # summaries(요약) + quiz(문제)는 분리 저장되지만 다운스트림은 한 dict로 본다.

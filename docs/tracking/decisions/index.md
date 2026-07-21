@@ -7,3 +7,4 @@
 - `0005-extension-search.md` - 확장 문제 검색 실패 정책. 0007 결정으로 대체됐다.
 - `0006-project-local-venv.md` - MCP 실행은 저장소 안 `.venv`를 기준으로 한다.
 - `0007-extension-without-search.md` - 확장 문제는 외부 검색 없이 본문과 학습자 정보로 만든다.
+- `0008-managed-output-replacement.md` - 기존 출력은 명시적으로 선택하고 manifest 관리 경로만 교체한다.

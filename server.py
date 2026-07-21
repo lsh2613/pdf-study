@@ -16,6 +16,7 @@ from mcp.server.fastmcp import FastMCP
 
 from . import analysis, prompts, workspace
 from .renderer import RENDERERS
+from .renderer.output_manager import install_rendered_output
 
 logger = logging.getLogger(__name__)
 
@@ -381,6 +382,7 @@ def init_work(
     enable_reflection: bool | None = None,
     enable_extension: bool | None = None,
     user_context: str = "",
+    replace_existing: bool = False,
 ) -> dict[str, Any]:
     """워크스페이스를 생성하고 work_id를 발급합니다.
 
@@ -418,25 +420,85 @@ def init_work(
     - user_context: 학습 목적, 배경지식, 관심 분야, 현재 수준 같은 학습자 정보.
       비어 있으면 응답에서 선택적으로 입력하도록 안내합니다. 이 정보는 요약과 문제의
       난이도·표현·예시·관점을 조정하는 데 사용됩니다.
+    - replace_existing: 같은 output_dir의 기존 pdf-study 작업을 교체하기로 사용자가
+      명시적으로 선택했을 때만 True. 기존 작업이 있으면 기본 호출은 상태를 바꾸지
+      않고 resume/replace/새 출력 폴더 선택지를 반환합니다.
 
     처리 모드(순차/병렬 · text/ocr)는 이 단계에서 받지 않습니다 — 목차를 분석해
     챕터를 확정한 뒤 **set_chapters에서** 사용자에게 물어 정합니다.
     다음 단계: scan_pdf(work_id)
     """
-    work_id = workspace.make_work_id()
     resolved_dir = (output_dir or "").strip()
     if not resolved_dir:
         resolved_dir = str(Path.cwd() / "result" / _pdf_name_slug(pdf_path))
 
+    if not isinstance(replace_existing, bool):
+        return _err(
+            "replace_existing은 사용자가 기존 작업 교체를 명시적으로 선택했는지 "
+            "나타내는 boolean이어야 합니다.",
+            data={"invalid": ["replace_existing"]},
+        )
+
+    options = {
+        "multiple_choice": enable_multiple_choice,
+        "short_answer": enable_short_answer,
+        "reflection": enable_reflection,
+        "extension": enable_extension,
+    }
+    workspace.validate_workspace_inputs(pdf_path, options, user_context)
+
+    existing = workspace.inspect_output_dir(resolved_dir)
+    if existing["kind"] != "available":
+        if replace_existing and existing["kind"] in {
+            "managed_work", "damaged_managed_work", "managed_output",
+        }:
+            workspace.replace_workspace(resolved_dir)
+        else:
+            choices = [
+                {
+                    "value": "resume",
+                    "label": "기존 작업 이어가기",
+                    "desc": "기존 .work/state.json을 등록해 남은 챕터부터 계속합니다.",
+                },
+                {
+                    "value": "replace",
+                    "label": "기존 작업 교체",
+                    "desc": (
+                        "기존 중간 작업을 제거하고 같은 출력 폴더에서 새로 시작합니다. "
+                        "이전 렌더 결과는 새 렌더가 성공할 때까지 유지됩니다."
+                    ),
+                },
+                {
+                    "value": "new_output_dir",
+                    "label": "새 출력 폴더 사용",
+                    "desc": "기존 작업을 보존하고 다른 output_dir에서 새로 시작합니다.",
+                },
+            ]
+            if not existing["can_resume"]:
+                choices = choices[1:]
+            if existing["kind"] == "unmanaged_content":
+                choices = [choice for choice in choices if choice["value"] == "new_output_dir"]
+            return _err(
+                "출력 폴더가 비어 있지 않아 기존 파일을 자동으로 덮어쓰지 않았습니다.",
+                data={
+                    "output_dir": existing["output_dir"],
+                    "existing_work": existing,
+                    "choices": choices,
+                },
+                next_action=(
+                    "data.choices의 항목과 설명을 바꾸지 말고 사용자에게 보여주세요. "
+                    "resume이면 resume_work(output_dir=...), replace이면 "
+                    "init_work(..., replace_existing=True), new_output_dir이면 사용자가 "
+                    "정한 다른 output_dir로 init_work를 호출하세요."
+                ),
+            )
+
+    work_id = workspace.make_work_id()
+
     workspace.create_workspace(
         pdf_path=pdf_path,
         output_dir=resolved_dir,
-        options={
-            "multiple_choice": enable_multiple_choice,
-            "short_answer": enable_short_answer,
-            "reflection": enable_reflection,
-            "extension": enable_extension,
-        },
+        options=options,
         user_context=user_context,
         work_id=work_id,
     )
@@ -1182,7 +1244,11 @@ def finalize_study(
     output_dir = Path(state["output_dir"])
 
     renderer = renderer_cls()
-    renderer.render(work_id, output_dir)  # NotImplementedError 시 _safe가 잡음
+    install_rendered_output(
+        work_id,
+        output_format,
+        lambda staging_dir: renderer.render(work_id, staging_dir),
+    )
 
     workspace.update_phase(work_id, "rendering", "completed")
 

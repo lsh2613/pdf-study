@@ -56,6 +56,16 @@
 
 대응: 저장 헬퍼는 작업별 잠금 안에서 상태를 먼저 읽어 대상 챕터가 존재하고 skip이 아닌지 확인한 뒤 파일을 쓴다. 파일을 쓴 뒤 `state.json` 저장이 실패하면 새 파일은 삭제하고 기존 파일은 실패 전 바이트로 복원한다. 관련 변경 후에는 unknown chapter, skipped chapter, state save failure 케이스에서 결과 파일이 남지 않는지 확인한다.
 
+## 출력 폴더 충돌과 렌더 세대
+
+증상: 같은 `output_dir`에서 작업을 다시 시작하거나 출력 형식·챕터 수를 바꾸면 이전 raw, 요약, 문제, HTML/TUI 파일과 진도가 새 자료에 섞인다.
+
+원인: `state.json`과 현재 필요한 파일만 덮어쓰고, 이전 세대에서 생성했지만 이번 세대에는 없는 파일의 소유권과 제거 범위를 기록하지 않으면 안전하게 정리할 수 없다. 파일 존재만 보고 렌더 데이터를 읽으면 `force=true`가 pending 챕터의 예전 JSON을 정상 결과로 오해할 수도 있다.
+
+대응: `init_work`는 기존 관리 작업을 발견하면 상태를 바꾸기 전에 `resume`, `replace`, `new_output_dir` 선택을 요구한다. 명시적 replace도 새 입력을 먼저 검증하고 `.work`만 제거하며 이전 렌더 결과는 다음 렌더 성공까지 둔다. 렌더는 staging에서 끝까지 만든 뒤 `.pdf-study-manifest.json`의 관리 경로만 rollback 가능한 순서로 교체한다. manifest 밖의 파일은 제거하거나 덮어쓰지 않는다. 중립 데이터 로더는 현재 상태가 `completed`인 결과 파일만 읽는다.
+
+진도는 manifest의 `output_format`과 `study_fingerprint`가 모두 현재 값과 같을 때만 복사한다. fingerprint는 PDF 식별 정보, 책 정보, 문제 옵션, non-skip 챕터 메타와 완료된 요약·문제 payload를 포함한다. 이 경계를 바꾼 뒤에는 챕터 감소, 형식 전환, 내용 변경, 렌더 예외, 사용자 파일 충돌을 함께 테스트한다.
+
 ## HTML 마크다운 폴백
 
 증상: `markdown-it-py`가 없는 환경에서 요약의 `##`, `**bold**`, 표 문법이 그대로 화면에 보인다.

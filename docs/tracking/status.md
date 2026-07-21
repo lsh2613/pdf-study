@@ -12,13 +12,14 @@
 - 잘못된 작업 ID, 등록되지 않은 챕터, 건너뛰기 챕터, 상태 저장 실패는 요약·퀴즈·확장 JSON 파일을 새로 남기지 않으며, 기존 파일이 있으면 실패 전 내용으로 되돌린다.
 - 병렬 챕터 저장을 고려해 작업 상태 갱신은 잠금과 원자적 파일 교체를 사용한다.
 - HTML 사이트와 Markdown+TUI 출력이 같은 저장 결과에서 생성된다.
+- 기존 출력 작업은 `init_work`가 이어가기·교체·새 폴더 선택을 요구하며 자동 덮어쓰지 않는다. 렌더 결과는 `.pdf-study-manifest.json`의 관리 경로만 staging 세대로 교체하고, 같은 형식·학습 fingerprint에서만 진도를 유지한다.
 - 서버 재시작 후 `resume_work`로 기존 `.work` 상태를 다시 등록할 수 있다.
 - 프로젝트 로컬 `.venv` 설치 스크립트와 클라이언트 설정 자동 적용, 환경 확인 명령이 있다.
 
 ## 검증 상태
 
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, 선택지 요구, 최종 렌더링, 진도 저장 서버, 설치 스크립트를 다룬다.
-- 최근 확인: 새 fixture를 생성한 임시 복사본에서 `PYTHONPATH=.. python3 -m pytest -q`가 211개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
+- 최근 확인: 현재 checkout에서 `.venv/bin/python -m pytest -q`가 227개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
 
 ## 남은 일
 

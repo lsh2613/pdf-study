@@ -17,7 +17,15 @@
 
 ## 도구 흐름
 
-`init_work(pdf_path, output_dir, enable_multiple_choice, enable_short_answer, enable_reflection, enable_extension, user_context)`는 작업 폴더를 만든다. 객관식은 기존 호환을 위해 기본 활성이다. 단답형·주관식·확장형은 기본값이 없으며, 사용자가 이미 명시하지 않은 값은 `null`로 저장한다. 입력 PDF가 없거나 모든 문제 유형을 명시적으로 끄면 실패한다. 성공 응답은 `work_id`, `.work` 경로, 실제 출력 경로, 현재 `question_options`, `question_setup`을 담는다.
+`init_work(pdf_path, output_dir, enable_multiple_choice, enable_short_answer, enable_reflection, enable_extension, user_context, replace_existing)`는 작업 폴더를 만든다. 객관식은 기존 호환을 위해 기본 활성이다. 단답형·주관식·확장형은 기본값이 없으며, 사용자가 이미 명시하지 않은 값은 `null`로 저장한다. 입력 PDF가 없거나 모든 문제 유형을 명시적으로 끄면 실패한다. 성공 응답은 `work_id`, `.work` 경로, 실제 출력 경로, 현재 `question_options`, `question_setup`을 담는다.
+
+같은 `output_dir`에 기존 pdf-study 작업이 있으면 `init_work`는 상태나 파일을 바꾸지 않고 `ok=false`와 `data.existing_work`, `data.choices`를 반환한다. 재개 가능한 `.work/state.json`이 있으면 선택지는 다음 세 항목이다. 항목과 설명은 클라이언트가 바꾸거나 합치거나 추천을 붙이지 않고 그대로 보여줘야 한다.
+
+- `resume` / `기존 작업 이어가기`: `resume_work(output_dir=...)`로 기존 상태를 등록한다.
+- `replace` / `기존 작업 교체`: 같은 인자로 `init_work(..., replace_existing=true)`를 다시 호출한다.
+- `new_output_dir` / `새 출력 폴더 사용`: 사용자가 정한 다른 `output_dir`로 `init_work`를 호출한다.
+
+`.work`가 없는 완료 결과나 손상된 작업은 재개할 수 없으므로 `replace`, `new_output_dir`만 반환한다. pdf-study 관리 흔적이 없는 비어 있지 않은 폴더는 사용자 파일을 보호하기 위해 `new_output_dir`만 반환한다. `replace_existing=true`는 새 입력의 PDF 경로·문제 유형·학습자 정보 검증이 모두 끝난 뒤 기존 `.work`만 제거한다. 이전 렌더 결과와 manifest는 새 렌더가 성공할 때까지 유지한다.
 
 `question_setup.questions`는 미정인 문제 유형마다 `field`, `question`, `choices`를 담는다. 각 선택지는 `value`, `label`, `desc`를 가지며 클라이언트는 이를 바꾸거나 합치거나 추천을 붙이지 않고 그대로 보여줘야 한다. `question_setup.user_context_request`는 선택 입력인 학습 목적, 배경지식, 관심 분야, 현재 수준을 안내한다. 이미 학습자 정보가 있으면 이 값은 `null`이다. 클라이언트는 선택과 학습자 응답을 받은 뒤 `scan_pdf`에 전달한다.
 
@@ -45,7 +53,9 @@
 
 `list_pending_chapters(work_id)`는 완료되지 않은 요약과 확장 챕터 ID를 반환한다. save 도구의 검증을 통과해 completed가 된 챕터와 skip 챕터만 남은 작업에서 제외된다.
 
-`finalize_study(work_id, output_format, keep_work_dir, force)`는 최종 결과물을 만든다. `output_format`은 `html` 또는 `md_tui`만 허용한다. 값이 없으면 실패 응답의 `data.choices`를 사용자에게 그대로 보여줘야 한다. 남은 챕터가 있으면 `force=true`가 아닌 한 실패하며, 처리되지 않은 챕터를 조용히 제외하고 결과물을 만들면 안 된다.
+`finalize_study(work_id, output_format, keep_work_dir, force)`는 최종 결과물을 만든다. `output_format`은 `html` 또는 `md_tui`만 허용한다. 값이 없으면 실패 응답의 `data.choices`를 사용자에게 그대로 보여줘야 한다. 남은 챕터가 있으면 `force=true`가 아닌 한 실패하며, 처리되지 않은 챕터를 조용히 제외하고 결과물을 만들면 안 된다. `force=true`에서도 현재 상태가 `completed`가 아닌 챕터의 예전 요약·문제 JSON은 읽지 않는다.
+
+렌더러는 임시 staging 폴더에 완전한 새 세대를 만든 뒤 이전 manifest의 관리 경로만 교체한다. 렌더 또는 설치가 실패하면 이전 결과와 manifest를 복원하고 partial 파일을 최종 폴더에 남기지 않는다. manifest가 관리하지 않는 기존 경로와 새 렌더 경로가 충돌하면 사용자 파일을 덮어쓰지 않고 실패한다.
 
 출력 형식 선택 실패 응답의 선택지는 `value`, `label`, `desc`를 담는다. 클라이언트는 `html`과 `md_tui` 외의 값을 만들어 제시하면 안 된다.
 
@@ -56,3 +66,5 @@ HTML 출력은 다중 챕터일 때 `index.html`과 `chN.html`, 단일 챕터일
 Markdown+TUI 출력은 `book.md`, 루트 `study_tui.py`, 챕터별 `summary.md`, `quiz.json`, 챕터별 launcher를 만든다. 진도는 각 챕터 폴더의 `progress.json`에 저장된다.
 
 두 출력 형식은 같은 저장 결과를 읽는다. 같은 `work_id`에서 출력 형식만 바꾸어 다시 `finalize_study`를 호출하면 같은 내용의 다른 표시 형식을 만들 수 있다.
+
+최종 폴더의 `.pdf-study-manifest.json`은 현재 렌더 형식, 학습 fingerprint, 서버가 관리하는 top-level 경로를 기록한다. 재렌더할 때 이전 형식의 파일과 사라진 챕터 파일은 manifest 범위 안에서 제거된다. 진도는 출력 형식과 학습 fingerprint가 모두 같을 때만 새 세대로 복사된다. 형식, 챕터, 문제 옵션, 요약 또는 문제 내용이 바뀌면 이전 진도를 재사용하지 않는다.
