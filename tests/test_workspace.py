@@ -483,13 +483,13 @@ def test_pending_chapters_from_state_splits_result_types():
         "question_options": {"extension": True},
         "chapters": {
             "ch10": {"summary_status": "pending", "extension_status": "completed"},
-            "ch2": {"summary_status": "completed", "extension_status": "failed"},
-            "ch1": {"summary_status": "completed", "extension_status": "completed"},
-            "appendix": {"skip": True, "summary_status": "skipped", "extension_status": "skipped"},
+            "ch2": {"summary_status": "pending", "extension_status": "failed"},
+            "ch1": {"summary_status": "pending", "extension_status": "completed"},
+            "appendix": {"skip": True, "summary_status": "pending", "extension_status": "pending"},
         },
     }
     assert workspace.pending_chapters_from_state(state) == {
-        "summary_pending": ["ch10"],
+        "summary_pending": ["ch1", "ch2", "ch10"],
         "extension_pending": ["ch2"],
     }
 
