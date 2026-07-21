@@ -6,9 +6,9 @@ from pdf_study import analysis
 
 def _outline_chs():
     return [
-        {"chapter_id": "ch1", "title": "1장", "page_range": [5, 19]},
-        {"chapter_id": "ch2", "title": "2장", "page_range": [20, 39]},
-        {"chapter_id": "ch3", "title": "3장", "page_range": [40, 80]},
+        {"chapter_id": "ch1", "title": "1장", "pdf_pages": [5, 19]},
+        {"chapter_id": "ch2", "title": "2장", "pdf_pages": [20, 39]},
+        {"chapter_id": "ch3", "title": "3장", "pdf_pages": [40, 80]},
     ]
 
 
@@ -47,28 +47,28 @@ def test_no_outline_does_not_reject_low_quality():
     assert r["primary_mode"] == "analyze_toc_from_images"
 
 
-def test_outline_offset_annotates_printed_range():
-    # 물리 5/20/40, offset 18 → front matter는 클램프, 본문은 책 페이지로 변환
+def test_outline_offset_annotates_source_pages():
+    # PDF 5/20/40, offset 18 → front matter는 클램프, 본문은 원문 페이지로 변환
     r = analysis._build_recommendations(
         page_count=80, outline_chapters=_outline_chs(),
         page_offset=18, offset_confidence="high",
     )
     chs = r["suggested_chapters"]
-    # ch1 물리[5,19] → 책[-13,1] → 끝≥1이라 시작만 1로 클램프
-    assert chs[0]["printed_range"] == [1, 1]
-    assert chs[1]["printed_range"] == [2, 21]
+    # ch1 PDF[5,19] → 원문[-13,1] → 끝≥1이라 시작만 1로 클램프
+    assert chs[0]["source_pages"] == [1, 1]
+    assert chs[1]["source_pages"] == [2, 21]
     assert r["page_offset"] == 18
     assert r["offset_confidence"] == "high"
-    assert r["physical_range"] == [1, 80]
-    assert r["printed_range_available"] == [1, 62]   # 80 - 18
+    assert r["pdf_pages_available"] == [1, 80]
+    assert r["source_pages_available"] == [1, 62]   # 80 - 18
 
 
-def test_no_offset_marks_printed_range_none():
+def test_no_offset_marks_source_pages_none():
     r = analysis._build_recommendations(page_count=80, outline_chapters=_outline_chs())
     assert r["page_offset"] is None
     assert r["offset_confidence"] == "none"
-    assert all(c["printed_range"] is None for c in r["suggested_chapters"])
-    assert r["printed_range_available"] is None
+    assert all(c["source_pages"] is None for c in r["suggested_chapters"])
+    assert r["source_pages_available"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -84,9 +84,9 @@ def test_outline_to_chapters_top_level_only_and_ranges():
     ]
     chs = analysis._outline_to_chapters(outline, page_count=28)
     assert [c["title"] for c in chs] == ["1장", "2장", "3장"]
-    assert chs[0]["page_range"] == [5, 12]
-    assert chs[1]["page_range"] == [13, 20]
-    assert chs[2]["page_range"] == [21, 28]   # 마지막 끝 = page_count
+    assert chs[0]["pdf_pages"] == [5, 12]
+    assert chs[1]["pdf_pages"] == [13, 20]
+    assert chs[2]["pdf_pages"] == [21, 28]   # 마지막 끝 = page_count
 
 
 def test_outline_to_chapters_drops_beyond_excerpt():
@@ -97,7 +97,34 @@ def test_outline_to_chapters_drops_beyond_excerpt():
     ]
     chs = analysis._outline_to_chapters(outline, page_count=28)
     assert [c["title"] for c in chs] == ["1장", "2장"]
-    assert chs[-1]["page_range"] == [13, 28]
+    assert chs[-1]["pdf_pages"] == [13, 28]
+
+
+def test_validate_chapter_normalizes_legacy_page_keys():
+    chapter = analysis._validate_chapter_def({
+        "chapter_id": "ch1",
+        "title": "본문",
+        "page_range": [19, 23],
+        "printed_range": [1, 5],
+    }, page_count=23)
+
+    assert chapter["pdf_pages"] == [19, 23]
+    assert chapter["source_pages"] == [1, 5]
+    assert "page_range" not in chapter
+    assert "printed_range" not in chapter
+
+
+def test_validate_chapter_preserves_explicit_unknown_source_pages():
+    chapter = analysis._validate_chapter_def({
+        "chapter_id": "ch1",
+        "title": "서문",
+        "pdf_pages": [1, 3],
+        "source_pages": None,
+    }, page_count=3)
+
+    assert chapter["pdf_pages"] == [1, 3]
+    assert "source_pages" in chapter
+    assert chapter["source_pages"] is None
 
 
 def test_outline_to_chapters_empty():

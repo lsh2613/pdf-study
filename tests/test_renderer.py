@@ -7,6 +7,7 @@ from pdf_study import server
 from pdf_study.renderer.html_renderer import (
     HtmlRenderer,
     _FallbackMd,
+    _chapter_body,
     _summary_section,
     _unescape_if_double_escaped,
 )
@@ -83,7 +84,7 @@ def _build_single(ko_short, tmp_path, *, opts=None):
     wid = r["data"]["work_id"]
     _scan(wid)
     server.set_chapters(wid, [
-        {"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}
+        {"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}
     ], execution_mode="sequential", extraction_mode="text")
     server.save_chapter_result(wid, "ch1", _fake_summary("ch1"))
     if server.get_subagent_prompts(wid)["data"]["enabled_types"]["extension"]:
@@ -96,6 +97,36 @@ def _build_single(ko_short, tmp_path, *, opts=None):
     fin = server.finalize_study(wid, "html")
     assert fin["ok"], fin
     return wid, tmp_path / "out"
+
+
+def test_chapter_body_labels_pdf_and_source_pages():
+    chapter = {
+        "chapter_id": "ch1",
+        "meta": {
+            "title": "본문",
+            "pdf_pages": [19, 23],
+            "source_pages": [1, 5],
+        },
+        "summary": {"summary": "요약", "questions": {}},
+    }
+
+    body = _chapter_body(chapter, {}, page_offset=18)
+
+    assert "PDF p.19–23 · 원문 p.1–5" in body
+
+
+def test_chapter_body_distinguishes_unknown_and_absent_source_pages():
+    chapter = {
+        "chapter_id": "ch1",
+        "meta": {"title": "서문", "pdf_pages": [1, 3], "source_pages": None},
+        "summary": {"summary": "요약", "questions": {}},
+    }
+
+    unknown = _chapter_body(chapter, {}, page_offset=None)
+    absent = _chapter_body(chapter, {}, page_offset=18)
+
+    assert "PDF p.1–3 · 원문 페이지 미상" in unknown
+    assert "PDF p.1–3 · 원문 페이지 없음" in absent
 
 
 # ---------------------------- 멀티 챕터 ----------------------------
@@ -129,6 +160,8 @@ def test_index_page_has_no_sidebar(ko_with_toc, tmp_path):
     # 챕터 카드에 체크 자리 + status 텍스트
     assert 'class="chapter-check"' in idx
     assert 'class="status-text"' in idx
+    assert "PDF p." in idx
+    assert "원문" in idx
     # 진행률 바 흔적 없음
     assert "progress-bar" not in idx
     assert "progress-text" not in idx
@@ -215,7 +248,7 @@ def test_force_ignores_stale_results_for_pending_chapter(ko_short, tmp_path):
     _scan(wid)
     set_result = server.set_chapters(
         wid,
-        [{"chapter_id": "ch1", "title": "새 챕터", "page_range": [1, 12]}],
+        [{"chapter_id": "ch1", "title": "새 챕터", "pdf_pages": [1, 12]}],
         execution_mode="sequential",
         extraction_mode="text",
     )
@@ -245,7 +278,7 @@ def test_managed_output_removes_pages_for_removed_chapters(ko_with_toc, tmp_path
     wid, out, _ = _build_multi(ko_with_toc, tmp_path)
     assert (out / "ch2.html").exists()
     server.workspace.set_chapters_in_state(wid, [
-        {"chapter_id": "ch1", "title": "남은 챕터", "page_range": [5, 12]},
+        {"chapter_id": "ch1", "title": "남은 챕터", "pdf_pages": [5, 12]},
     ])
     saved = server.save_chapter_result(wid, "ch1", _fake_summary("ch1"))
     assert saved["ok"], saved
@@ -349,7 +382,7 @@ def test_managed_output_refuses_to_overwrite_unmanaged_name(ko_short, tmp_path):
     _scan(wid)
     set_result = server.set_chapters(
         wid,
-        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}],
+        [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}],
         execution_mode="sequential",
         extraction_mode="text",
     )
@@ -382,7 +415,7 @@ def test_managed_output_refuses_to_overwrite_unmanaged_broken_symlink(
     _scan(wid)
     set_result = server.set_chapters(
         wid,
-        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 12]}],
+        [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}],
         execution_mode="sequential",
         extraction_mode="text",
     )

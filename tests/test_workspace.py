@@ -165,8 +165,8 @@ def test_set_chapters_resets_status_and_phase(tmp_path, fake_pdf):
         fake_pdf, tmp_path / "out", options={"multiple_choice": True},
     )
     workspace.set_chapters_in_state(wid, [
-        {"chapter_id": "ch1", "title": "A", "page_range": [1, 5]},
-        {"chapter_id": "ch2", "title": "B", "page_range": [6, 10]},
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 5]},
+        {"chapter_id": "ch2", "title": "B", "pdf_pages": [6, 10]},
     ])
     state = workspace.load_state(wid)
     assert set(state["chapters"]) == {"ch1", "ch2"}
@@ -175,12 +175,62 @@ def test_set_chapters_resets_status_and_phase(tmp_path, fake_pdf):
     assert state["phases"]["chapter_setup"] == "completed"
 
 
+def test_set_chapters_preserves_canonical_page_metadata(tmp_path, fake_pdf):
+    wid = workspace.create_workspace(
+        fake_pdf, tmp_path / "out_pages", options={"multiple_choice": True},
+    )
+    workspace.set_chapters_in_state(wid, [{
+        "chapter_id": "ch1",
+        "title": "본문",
+        "pdf_pages": [19, 23],
+        "source_pages": [1, 5],
+    }])
+
+    chapter = workspace.load_state(wid)["chapters"]["ch1"]
+    assert chapter["pdf_pages"] == [19, 23]
+    assert chapter["source_pages"] == [1, 5]
+    assert "page_range" not in chapter
+
+
+def test_legacy_state_and_raw_page_keys_are_normalized_on_read(tmp_path, fake_pdf):
+    wid = workspace.create_workspace(
+        fake_pdf, tmp_path / "out_legacy_pages", options={"multiple_choice": True},
+    )
+    workspace.set_chapters_in_state(wid, [{
+        "chapter_id": "ch1",
+        "title": "본문",
+        "pdf_pages": [19, 23],
+        "source_pages": [1, 5],
+    }])
+    state = workspace.load_state(wid)
+    state_chapter = state["chapters"]["ch1"]
+    state_chapter["page_range"] = state_chapter.pop("pdf_pages")
+    state_chapter["printed_range"] = state_chapter.pop("source_pages")
+    workspace.save_state(wid, state)
+    workspace._atomic_write_json(workspace.chapters_raw_dir(wid) / "ch1.json", {
+        "chapter_id": "ch1",
+        "title": "본문",
+        "page_range": [19, 23],
+        "printed_range": [1, 5],
+        "text": "본문",
+        "char_count": 2,
+    })
+
+    loaded_state = workspace.load_state(wid)["chapters"]["ch1"]
+    loaded_raw = workspace.get_chapter_raw(wid, "ch1")
+    for chapter in (loaded_state, loaded_raw):
+        assert chapter["pdf_pages"] == [19, 23]
+        assert chapter["source_pages"] == [1, 5]
+        assert "page_range" not in chapter
+        assert "printed_range" not in chapter
+
+
 def test_save_chapter_result_marks_completed(tmp_path, fake_pdf):
     wid = workspace.create_workspace(
         fake_pdf, tmp_path / "out", options={"multiple_choice": True},
     )
     workspace.set_chapters_in_state(wid, [
-        {"chapter_id": "ch1", "title": "A", "page_range": [1, 5]},
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 5]},
     ])
     workspace.save_chapter_result(wid, "ch1", {"chapter_id": "ch1", "summary": "x"})
     state = workspace.load_state(wid)
@@ -192,7 +242,7 @@ def test_save_chapter_result_rejects_unknown_chapter_without_files(tmp_path, fak
         fake_pdf, tmp_path / "out", options={"multiple_choice": True},
     )
     workspace.set_chapters_in_state(wid, [
-        {"chapter_id": "ch1", "title": "A", "page_range": [1, 5]},
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 5]},
     ])
 
     with pytest.raises(KeyError):
@@ -208,7 +258,7 @@ def test_save_results_reject_skip_chapter_without_files_or_status_change(tmp_pat
         fake_pdf, tmp_path / "out", options={"multiple_choice": True},
     )
     workspace.set_chapters_in_state(wid, [
-        {"chapter_id": "ch1", "title": "Index", "page_range": [1, 1], "skip": True},
+        {"chapter_id": "ch1", "title": "Index", "pdf_pages": [1, 1], "skip": True},
     ])
 
     with pytest.raises(ValueError, match="skipped"):
@@ -229,7 +279,7 @@ def test_save_extension_result_rejects_unknown_chapter_without_files(tmp_path, f
         fake_pdf, tmp_path / "out", options={"multiple_choice": True},
     )
     workspace.set_chapters_in_state(wid, [
-        {"chapter_id": "ch1", "title": "A", "page_range": [1, 5]},
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 5]},
     ])
 
     with pytest.raises(KeyError):
@@ -246,7 +296,7 @@ def test_save_chapter_result_restores_files_when_state_save_fails(
         fake_pdf, tmp_path / "out", options={"multiple_choice": True},
     )
     workspace.set_chapters_in_state(wid, [
-        {"chapter_id": "ch1", "title": "A", "page_range": [1, 5]},
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 5]},
     ])
     summary_path = workspace.summaries_dir(wid) / "ch1.json"
     quiz_path = workspace.quiz_dir(wid) / "ch1.json"
@@ -275,7 +325,7 @@ def test_save_extension_result_restores_previous_file_when_state_save_fails(
         fake_pdf, tmp_path / "out", options={"multiple_choice": True},
     )
     workspace.set_chapters_in_state(wid, [
-        {"chapter_id": "ch1", "title": "A", "page_range": [1, 5]},
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 5]},
     ])
     path = workspace.extension_quiz_dir(wid) / "ch1.json"
     path.write_text('{"keep": true}', encoding="utf-8")
@@ -301,7 +351,7 @@ def test_mark_chapter_failed_increments_retry(tmp_path, fake_pdf):
         fake_pdf, tmp_path / "out", options={"multiple_choice": True},
     )
     workspace.set_chapters_in_state(wid, [
-        {"chapter_id": "ch1", "title": "A", "page_range": [1, 5]},
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 5]},
     ])
     workspace.mark_chapter_failed(wid, "ch1", kind="summary", error="oops")
     workspace.mark_chapter_failed(wid, "ch1", kind="summary", error="oops again")
@@ -316,8 +366,8 @@ def test_list_pending_chapters(tmp_path, fake_pdf):
         fake_pdf, tmp_path / "out", options={"multiple_choice": True, "extension": True},
     )
     workspace.set_chapters_in_state(wid, [
-        {"chapter_id": "ch1", "title": "A", "page_range": [1, 5]},
-        {"chapter_id": "ch2", "title": "B", "page_range": [6, 10]},
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 5]},
+        {"chapter_id": "ch2", "title": "B", "pdf_pages": [6, 10]},
     ])
     workspace.save_chapter_result(wid, "ch1", {"chapter_id": "ch1"})
     pending = workspace.list_pending_chapters_impl(wid)
@@ -335,7 +385,7 @@ def test_concurrent_writes_keep_state_intact(tmp_path, fake_pdf):
         fake_pdf, tmp_path / "out", options={"multiple_choice": True},
     )
     chs = [
-        {"chapter_id": f"ch{i}", "title": f"t{i}", "page_range": [i, i + 1]}
+        {"chapter_id": f"ch{i}", "title": f"t{i}", "pdf_pages": [i, i + 1]}
         for i in range(1, 11)
     ]
     workspace.set_chapters_in_state(wid, chs)

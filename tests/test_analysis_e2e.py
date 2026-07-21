@@ -64,7 +64,7 @@ def test_scan_pdf_with_toc_routes_to_from_outline_without_language_detection(mak
     for needed in ("제1장 트랜잭션", "제2장 인덱싱", "제3장 분산 시스템"):
         assert any(needed in t for t in titles), titles
     # 북마크 물리 페이지(5/13/21)가 그대로 반영
-    assert [c["page_range"][0] for c in chs] == [5, 13, 21]
+    assert [c["pdf_pages"][0] for c in chs] == [5, 13, 21]
     # 텍스트는 노출하지 않는다
     assert "scanned_text" not in out
     assert workspace.load_state(wid)["phases"]["scanning"] == "completed"
@@ -212,7 +212,7 @@ def test_ocr_mode_set_chapters_precomputes_raw_text(
     monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
     res = analysis.set_chapters_impl(
         wid,
-        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 3]}],
+        [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 3]}],
         "sequential", "ocr",
         book_info={"title": "테스트용 한국어 책"},
     )
@@ -237,14 +237,14 @@ def test_ocr_mode_set_chapters_precomputes_raw_text(
 def test_ocr_mode_reuses_existing_raw_text(
     make_workspace, ko_with_toc, monkeypatch
 ):
-    """현재 page_range와 맞는 OCR raw가 있으면 렌더/OCR을 다시 하지 않는다."""
+    """현재 pdf_pages와 맞는 OCR raw가 있으면 렌더/OCR을 다시 하지 않는다."""
     wid, _ = make_workspace(ko_with_toc)
     analysis.scan_pdf_impl(wid)
     cached_text = "캐시된 OCR 본문"
     workspace.save_chapter_raw(wid, "ch1", {
         "chapter_id": "ch1",
         "title": "이전 제목",
-        "page_range": [1, 2],
+        "pdf_pages": [1, 2],
         "text": cached_text,
         "char_count": len(cached_text),
         "extraction_mode": "ocr",
@@ -260,7 +260,7 @@ def test_ocr_mode_reuses_existing_raw_text(
     monkeypatch.setattr(analysis.ocr, "get_ocr_worker", fail_worker)
     res = analysis.set_chapters_impl(
         wid,
-        [{"chapter_id": "ch1", "title": "새 제목", "page_range": [1, 2]}],
+        [{"chapter_id": "ch1", "title": "새 제목", "pdf_pages": [1, 2]}],
         "parallel", "ocr",
     )
 
@@ -278,7 +278,7 @@ def test_ocr_mode_does_not_reuse_text_mode_raw(
     """OCR 모드는 이전 text 모드 raw가 있어도 새 OCR raw로 교체한다."""
     wid, _ = make_workspace(ko_with_toc)
     analysis.scan_pdf_impl(wid)
-    chapter = {"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}
+    chapter = {"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 1]}
     analysis.set_chapters_impl(wid, [chapter], "sequential", "text")
     text_raw = workspace.get_chapter_raw(wid, "ch1")
     assert text_raw["extraction_mode"] == "text"
@@ -308,7 +308,7 @@ def test_ocr_mode_does_not_promote_legacy_raw_after_failed_retry(
     workspace.save_chapter_raw(wid, "ch1", {
         "chapter_id": "ch1",
         "title": "전체",
-        "page_range": [1, 1],
+        "pdf_pages": [1, 1],
         "text": legacy_text,
         "char_count": len(legacy_text),
     })
@@ -323,7 +323,7 @@ def test_ocr_mode_does_not_promote_legacy_raw_after_failed_retry(
     monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
     res = analysis.set_chapters_impl(
         wid,
-        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
+        [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 1]}],
         "parallel", "ocr",
     )
 
@@ -345,7 +345,7 @@ def test_ocr_body_text_does_not_overwrite_raw(make_workspace, ko_with_toc):
     from unittest.mock import patch
     with patch("pdf_study.analysis.ocr.get_ocr_worker", return_value=MockWorker()):
         analysis.set_chapters_impl(
-            wid, [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 1]}],
+            wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 1]}],
             "sequential", "ocr",
         )
     raw0 = workspace.get_chapter_raw(wid, "ch1")
@@ -385,7 +385,7 @@ def test_ocr_page_exception_marks_chapter_failed_without_partial_raw(
     monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
     res = analysis.set_chapters_impl(
         wid,
-        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
+        [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 2]}],
         "sequential", "ocr",
     )
     assert res["chapters"][0]["error"]
@@ -414,7 +414,7 @@ def test_ocr_empty_chapter_marks_failed_without_raw(
     monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
     res = analysis.set_chapters_impl(
         wid,
-        [{"chapter_id": "ch1", "title": "전체", "page_range": [1, 2]}],
+        [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 2]}],
         "sequential", "ocr",
     )
     assert "empty text" in res["chapters"][0]["error"]
@@ -444,8 +444,8 @@ def test_ocr_skips_skip_chapters(make_workspace, ko_with_toc, monkeypatch):
     analysis.set_chapters_impl(
         wid,
         [
-            {"chapter_id": "ch1", "title": "표지", "page_range": [1, 1], "skip": True},
-            {"chapter_id": "ch2", "title": "본문", "page_range": [2, 2]},
+            {"chapter_id": "ch1", "title": "표지", "pdf_pages": [1, 1], "skip": True},
+            {"chapter_id": "ch2", "title": "본문", "pdf_pages": [2, 2]},
         ],
         "sequential", "ocr",
     )
@@ -481,8 +481,8 @@ def test_ocr_chapter_parallelism_honors_worker_limit(
     analysis.set_chapters_impl(
         wid,
         [
-            {"chapter_id": "ch1", "title": "A", "page_range": [1, 1]},
-            {"chapter_id": "ch2", "title": "B", "page_range": [2, 2]},
+            {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 1]},
+            {"chapter_id": "ch2", "title": "B", "pdf_pages": [2, 2]},
         ],
         "parallel", "ocr",
     )
@@ -515,8 +515,8 @@ def test_ocr_chapter_parallelism_limit_is_global_across_calls(
     monkeypatch.setattr(analysis.ocr, "get_ocr_worker", lambda: MockWorker())
     monkeypatch.setattr(analysis.ocr, "calculate_ocr_worker_limit", lambda: 1)
     chapters = [
-        {"chapter_id": "ch1", "title": "A", "page_range": [1, 1]},
-        {"chapter_id": "ch2", "title": "B", "page_range": [2, 2]},
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 1]},
+        {"chapter_id": "ch2", "title": "B", "pdf_pages": [2, 2]},
     ]
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
@@ -558,7 +558,7 @@ def test_get_chapter_content_rejects_unregistered_id_with_hint(
     wid, _ = make_workspace(ko_short)
     analysis.scan_pdf_impl(wid)
     analysis.set_chapters_impl(wid, [
-        {"chapter_id": "ch1", "title": "A", "page_range": [1, 12]},
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 12]},
     ], "sequential", "text")
     with pytest.raises(FileNotFoundError) as ei:
         analysis.get_chapter_content_impl(wid, "p11-p18")
@@ -573,7 +573,7 @@ def test_set_chapters_rejects_out_of_range(make_workspace, ko_short):
     analysis.scan_pdf_impl(wid)
     with pytest.raises(ValueError, match="invalid for"):
         analysis.set_chapters_impl(wid, [
-            {"chapter_id": "ch1", "title": "t", "page_range": [1, 999]}
+            {"chapter_id": "ch1", "title": "t", "pdf_pages": [1, 999]}
         ], "sequential", "text")
 
 
@@ -582,8 +582,8 @@ def test_set_chapters_rejects_duplicate_ids(make_workspace, ko_short):
     analysis.scan_pdf_impl(wid)
     with pytest.raises(ValueError, match="duplicate"):
         analysis.set_chapters_impl(wid, [
-            {"chapter_id": "ch1", "title": "a", "page_range": [1, 5]},
-            {"chapter_id": "ch1", "title": "b", "page_range": [6, 10]},
+            {"chapter_id": "ch1", "title": "a", "pdf_pages": [1, 5]},
+            {"chapter_id": "ch1", "title": "b", "pdf_pages": [6, 10]},
         ], "sequential", "text")
 
 
@@ -591,5 +591,5 @@ def test_set_chapters_requires_scan_first(make_workspace, ko_short):
     wid, _ = make_workspace(ko_short)
     with pytest.raises(RuntimeError, match="scan_pdf"):
         analysis.set_chapters_impl(wid, [
-            {"chapter_id": "ch1", "title": "t", "page_range": [1, 5]}
+            {"chapter_id": "ch1", "title": "t", "pdf_pages": [1, 5]}
         ], "sequential", "text")

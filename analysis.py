@@ -40,22 +40,24 @@ CHOICE_POLICY = (
 # ---------------------------------------------------------------------------
 
 
-def _annotate_printed_ranges(
+def _annotate_source_pages(
     chapters: list[dict[str, Any]],
     offset: int | None,
 ) -> list[dict[str, Any]]:
-    """각 챕터(물리 page_range)에 인쇄(책) 페이지 printed_range를 덧붙인다.
+    """각 챕터의 PDF 범위에 원문 페이지 source_pages를 덧붙인다.
 
-    책 페이지 = 물리 − offset. offset 미측정이면 None.
-    전 구간이 front matter(책 번호 < 1)면 None, 일부만이면 1로 클램프.
+    원문 페이지 = PDF 페이지 − offset. offset 미측정이면 None.
+    전 구간이 front matter(원문 번호 < 1)면 None, 일부만이면 1로 클램프.
     """
-    for ch in chapters:
+    for index, chapter in enumerate(chapters):
+        ch = workspace.canonicalize_chapter_page_metadata(chapter)
+        chapters[index] = ch
         if offset is None:
-            ch["printed_range"] = None
+            ch["source_pages"] = None
             continue
-        s, e = ch["page_range"]
+        s, e = ch["pdf_pages"]
         ps, pe = s - offset, e - offset
-        ch["printed_range"] = None if pe < 1 else [max(1, ps), pe]
+        ch["source_pages"] = None if pe < 1 else [max(1, ps), pe]
     return chapters
 
 
@@ -66,11 +68,11 @@ def _with_offset_meta(
     page_count: int,
     source: str = "vision",
 ) -> dict[str, Any]:
-    """비거부 recommendation에 offset 메타 + printed_range + 선택지 안내 주입.
+    """비거부 recommendation에 offset 메타 + source_pages + 선택지 안내 주입.
 
-    physical_range(이 PDF의 물리 페이지 범위)와 printed_range_available(이 파일에
-    실제 존재하는 책 페이지 범위 = [1, page_count - offset])을 함께 실어, LLM이
-    '발췌본인데 목차엔 전체 책 챕터가 다 적힌' 경우 범위 밖 챕터를 제외하도록 한다.
+    pdf_pages_available(이 PDF의 페이지 범위)와 source_pages_available(이 파일에
+    실제 존재하는 원문 페이지 범위 = [1, page_count - offset])을 함께 실어, LLM이
+    '발췌본인데 목차엔 전체 원문의 챕터가 다 적힌' 경우 범위 밖 챕터를 제외하도록 한다.
 
     source:
       - "outline": 내장 목차(북마크)로 챕터를 구성함. 사용자에게 보여 확인받고,
@@ -78,39 +80,39 @@ def _with_offset_meta(
       - "vision":  legacy 이름. 내장 목차가 없어 toc_page_images와 서버 OCR
         텍스트를 바탕으로 챕터를 구성해야 함. 텍스트/스크립트 추정 금지 + 3택.
     """
-    _annotate_printed_ranges(reco["suggested_chapters"], page_offset)
+    _annotate_source_pages(reco["suggested_chapters"], page_offset)
     if reco.get("chunk_fallback"):
-        _annotate_printed_ranges(reco["chunk_fallback"], page_offset)
+        _annotate_source_pages(reco["chunk_fallback"], page_offset)
     reco["page_offset"] = page_offset
     reco["offset_confidence"] = offset_confidence
     off_known = page_offset is not None
-    reco["physical_range"] = [1, page_count]
-    # 이 파일에 실제 존재하는 책(인쇄) 페이지 범위. offset 미측정이면 null.
-    reco["printed_range_available"] = (
+    reco["pdf_pages_available"] = [1, page_count]
+    # 이 파일에 실제 존재하는 원문 페이지 범위. offset 미측정이면 null.
+    reco["source_pages_available"] = (
         [1, page_count - page_offset] if off_known else None
     )
 
     # 발췌본(부분 PDF) 경고 — 목차에 더 많은 챕터가 적혀 있어도
-    # 이 파일의 물리 페이지를 벗어나는 챕터는 제외해야 한다.
+    # 이 파일의 PDF 페이지를 벗어나는 챕터는 제외해야 한다.
     excerpt_note = (
         "⚠️ 이 PDF는 더 큰 책의 **일부(발췌본)**일 수 있습니다"
-        + (f" — 실제 담긴 책 페이지는 약 p.1–{page_count - page_offset}뿐입니다. "
-           "목차에 그 뒤 챕터가 더 적혀 있어도, 시작 책페이지가 이 범위를 넘으면 "
+        + (f" — 실제 담긴 원문 페이지는 약 p.1–{page_count - page_offset}뿐입니다. "
+           "목차에 그 뒤 챕터가 더 적혀 있어도, 시작 원문 페이지가 이 범위를 넘으면 "
            "이 파일엔 없는 것이니 **그 챕터는 제외**하세요. 포함되는 마지막 챕터의 "
-           f"끝 page_range는 PDF 마지막 페이지({page_count})로 둡니다. "
+           f"끝 pdf_pages는 PDF 마지막 페이지({page_count})로 둡니다. "
            if off_known else
-           ". 목차의 챕터 중 이 PDF의 물리 페이지를 벗어나는 것은 제외하세요. ")
+           ". 목차의 챕터 중 이 PDF의 페이지를 벗어나는 것은 제외하세요. ")
     )
 
     two_number = (
-        "각 챕터를 사용자에게 보여줄 때 'PDF p.{start}-{end} (책 p.{printed})' "
+        "각 챕터를 사용자에게 보여줄 때 'PDF p.{start}-{end} (원문 p.{source})' "
         "형식으로 **두 번호 모두** 표기하세요"
-        + ("." if off_known else " (offset 미측정 → 책 페이지는 '미상'으로 표기).")
-        + " printed_range가 null이면 책 번호가 없는 front matter(표지·서문)입니다. "
+        + ("." if off_known else " (offset 미측정 → 원문 페이지는 '미상'으로 표기).")
+        + " source_pages가 null이면 원문 번호가 없는 front matter(표지·서문)입니다. "
     )
     manual_chunk = (
-        "직접 입력을 고르면 챕터 범위를 **PDF(물리) 페이지**로 받으세요"
-        + (f" (사용자가 책 페이지로 말하면 물리 = 책 + {page_offset} 로 변환). "
+        "직접 입력을 고르면 챕터 범위를 **PDF 페이지**로 받으세요"
+        + (f" (사용자가 원문 페이지로 말하면 PDF = 원문 + {page_offset} 로 변환). "
            if off_known else " (offset 미측정이라 PDF 페이지로 직접 받으세요). ")
         + "청크를 고르면 N페이지 균등 분할. "
     )
@@ -123,7 +125,7 @@ def _with_offset_meta(
             "proceed", "reanalyze_with_vision", "manual_pdf_pages", "chunks",
         ]
         reco["next_step_guidance"] = (
-            "[내장 목차] PDF 북마크(get_toc)에서 챕터를 구성했습니다 — 물리 페이지를 "
+            "[내장 목차] PDF 북마크(get_toc)에서 챕터를 구성했습니다 — PDF 페이지를 "
             "직접 가리켜 offset/OCR 없이 정확합니다. " + excerpt_note + two_number
             + choices_policy
             + "① 이대로 진행 → suggested_chapters를 그대로 set_chapters. "
@@ -139,9 +141,9 @@ def _with_offset_meta(
             "스크립트로 목차를 추정하지 마세요 — 스캔본·글꼴 깨진 PDF에서 잘못된 "
             "페이지가 나옵니다.** 먼저 prepare_ocr(work_id) 후 "
             "scan_toc_with_ocr(work_id)를 호출해 toc_page_images[].ocr_text를 얻고, "
-            "① 최상위 챕터 항목만(하위 절 '1.1' 무시) 골라 각 항목의 책 페이지번호를 "
-            "읽고, ② toc_page_images[].path 이미지의 꼬리말 인쇄번호와 물리 페이지를 "
-            "대조해 offset(물리 = 책 + offset)을 검증한 뒤 from_toc 챕터를 구성하세요"
+            "① 최상위 챕터 항목만(하위 절 '1.1' 무시) 골라 각 항목의 원문 페이지번호를 "
+            "읽고, ② toc_page_images[].path 이미지의 꼬리말 원문 번호와 PDF 페이지를 "
+            "대조해 offset(PDF = 원문 + offset)을 검증한 뒤 from_toc 챕터를 구성하세요"
             + (f" (서버 추정 offset {page_offset}은 참고만, 이미지로 검증). "
                if off_known else " (서버가 offset 미측정 → 이미지로 직접 추정). ")
             + "suggested_chapters는 비어 있습니다(서버는 목차 이미지를 제공하지만 "
@@ -164,20 +166,20 @@ def _build_recommendations(
 
     텍스트 레이어는 신뢰하지 않는다(스캔본·깨진 PDF에서 정렬이 깨져 잘못된
     목차가 나옴). 챕터 경계의 정당한 소스는 둘뿐:
-      - outline_chapters 있음 → from_outline (북마크 = 물리 페이지 직접 지정).
+      - outline_chapters 있음 → from_outline (북마크 = PDF 페이지 직접 지정).
         사용자 확인 후, 틀리면 force_vision=True로 목차 이미지 재스캔.
       - 없음 → analyze_toc_from_images (toc_page_images 이미지와 별도 OCR 결과 기반 구성).
 
-    page_offset: 물리 = 인쇄(책) + offset. None이면 미측정.
+    page_offset: PDF = 원문 + offset. None이면 미측정.
     비거부 응답에는 _with_offset_meta로 page_offset/offset_confidence,
-    각 챕터의 printed_range(책 페이지), user_choices, next_step_guidance가 붙는다.
+    각 챕터의 source_pages(원문 페이지), user_choices, next_step_guidance가 붙는다.
 
     Returns:
         {
             "rejected": False,
             "primary_mode": "from_outline" | "analyze_toc_from_images",
             "primary_reason": str,
-            "suggested_chapters": [{... "page_range":[s,e], "printed_range":[s,e]|None}],
+            "suggested_chapters": [{... "pdf_pages":[s,e], "source_pages":[s,e]|None}],
             "chunk_fallback": [...],         # 이미지 OCR 경로에서만
             "alternatives": [str, ...],
             "page_offset": int | None,
@@ -193,7 +195,7 @@ def _build_recommendations(
             "primary_mode": "from_outline",
             "primary_reason": (
                 f"PDF 내장 목차(북마크)에서 챕터 {len(outline_chapters)}개를 "
-                "구성했습니다. 물리 페이지를 직접 가리켜 정확하나, 발췌본·오류 대비 "
+                "구성했습니다. PDF 페이지를 직접 가리켜 정확하나, 발췌본·오류 대비 "
                 "사용자 확인을 받으세요(틀리면 force_vision=True로 목차 이미지 재스캔)."
             ),
             "suggested_chapters": outline_chapters,
@@ -334,13 +336,13 @@ def _outline_to_chapters(
     outline: list[dict[str, Any]],
     page_count: int,
 ) -> list[dict[str, Any]]:
-    """내장 목차(level,title,물리page) → set_chapters용 챕터(물리 page_range).
+    """내장 목차(level,title,PDF page) → set_chapters용 챕터(pdf_pages).
 
     최상위 레벨 항목만 챕터로 삼는다(하위 절은 제외). 각 챕터 끝은 다음
-    최상위 챕터 시작−1, 마지막은 page_count. 북마크 page는 이미 물리 페이지라
+    최상위 챕터 시작−1, 마지막은 page_count. 북마크 page는 이미 PDF 페이지라
     offset 보정이 필요 없다.
 
-    **발췌본 처리**: 물리 시작이 page_count를 넘는 항목은 이 파일에 없는
+    **발췌본 처리**: PDF 시작이 page_count를 넘는 항목은 이 파일에 없는
     챕터이므로 **드롭**한다. 살아남은 마지막 챕터의 끝은 page_count로 둔다.
     """
     if not outline:
@@ -361,7 +363,7 @@ def _outline_to_chapters(
         chapters.append({
             "chapter_id": f"ch{i + 1}",
             "title": e["title"],
-            "page_range": [start, end],
+            "pdf_pages": [start, end],
         })
     return chapters
 
@@ -374,7 +376,7 @@ def scan_pdf_impl(
     """PDF 스캔: 메타 + 챕터 경계 소스(내장 목차 또는 목차 후보 이미지) + offset.
 
     챕터 경계 소스는 두 가지뿐이다(텍스트 레이어는 신뢰하지 않는다):
-      (1) 내장 목차(doc.get_toc) → 물리 페이지를 직접 가리켜 정확·무비용.
+      (1) 내장 목차(doc.get_toc) → PDF 페이지를 직접 가리켜 정확·무비용.
       (2) 없으면 목차 페이지를 JPEG로 렌더(toc_page_images)한다. OCR은
           scan_toc_with_ocr에서 별도로 수행한다.
     force_vision=True는 외부 계약 호환용 legacy 이름이다. True면 (1)을 건너뛰고
@@ -404,7 +406,7 @@ def scan_pdf_impl(
             # → 불필요한 페이지 읽기(최대 page_count p 꼬리말 스캔)를 피한다.
             offset_info = {"offset": None, "confidence": "none"}
         else:
-            # 인쇄 페이지번호 ↔ PDF 물리 인덱스 오프셋 (꼬리말 번호 다수결)
+            # 원문 페이지번호 ↔ PDF 페이지 오프셋 (꼬리말 번호 다수결)
             offset_info = reader.detect_page_offset(doc)
 
         # (1) 내장 목차 우선. force_vision이면 건너뛴다.
@@ -479,27 +481,30 @@ def scan_pdf_impl(
 # ---------------------------------------------------------------------------
 
 def _validate_chapter_def(ch: dict[str, Any], page_count: int) -> dict[str, Any]:
-    if "chapter_id" not in ch or "title" not in ch or "page_range" not in ch:
+    canonical = workspace.canonicalize_chapter_page_metadata(ch)
+    if "chapter_id" not in canonical or "title" not in canonical or "pdf_pages" not in canonical:
         raise ValueError(
-            f"chapter must have chapter_id, title, page_range; got {ch!r}"
+            f"chapter must have chapter_id, title, pdf_pages; got {ch!r}"
         )
-    pr = ch["page_range"]
+    pr = canonical["pdf_pages"]
     if not (isinstance(pr, (list, tuple)) and len(pr) == 2):
-        raise ValueError(f"chapter {ch['chapter_id']}: page_range must be [start, end]")
+        raise ValueError(f"chapter {canonical['chapter_id']}: pdf_pages must be [start, end]")
     start, end = int(pr[0]), int(pr[1])
     if start < 1 or end > page_count or start > end:
         raise ValueError(
-            f"chapter {ch['chapter_id']}: page_range [{start}, {end}] "
+            f"chapter {canonical['chapter_id']}: pdf_pages [{start}, {end}] "
             f"invalid for {page_count}p document"
         )
-    out = {"chapter_id": str(ch["chapter_id"]), "title": str(ch["title"]),
-           "page_range": [start, end]}
-    # printed_range(책 페이지)는 표시용 메타 — 있으면 보존, 검증은 하지 않음
-    # (책 번호는 PDF 페이지와 체계가 달라 page_count로 검증할 수 없다).
-    pr_printed = ch.get("printed_range")
-    if isinstance(pr_printed, (list, tuple)) and len(pr_printed) == 2:
-        out["printed_range"] = [int(pr_printed[0]), int(pr_printed[1])]
-    if ch.get("skip"):
+    out = {"chapter_id": str(canonical["chapter_id"]), "title": str(canonical["title"]),
+           "pdf_pages": [start, end]}
+    # source_pages는 표시용 메타다. 명시적 null도 의미가 있으므로 보존한다.
+    source_pages = canonical.get("source_pages")
+    if "source_pages" in canonical:
+        if source_pages is None:
+            out["source_pages"] = None
+        elif isinstance(source_pages, (list, tuple)) and len(source_pages) == 2:
+            out["source_pages"] = [int(source_pages[0]), int(source_pages[1])]
+    if canonical.get("skip"):
         out["skip"] = True
     return out
 
@@ -558,22 +563,25 @@ def _cached_ocr_raw_for_chapter(
 
     text = raw.get("text")
     char_count = raw.get("char_count")
-    page_range = raw.get("page_range")
+    pdf_pages = raw.get("pdf_pages")
     if not isinstance(text, str) or not text.strip():
         return None
     if type(char_count) is not int or char_count != len(text):
         return None
-    if list(page_range or []) != list(ch_def["page_range"]):
+    if list(pdf_pages or []) != list(ch_def["pdf_pages"]):
         return None
 
-    return {
+    result = {
         "chapter_id": ch_def["chapter_id"],
         "title": ch_def["title"],
-        "page_range": ch_def["page_range"],
+        "pdf_pages": ch_def["pdf_pages"],
         "text": text,
         "char_count": char_count,
         "extraction_mode": "ocr",
     }
+    if "source_pages" in ch_def:
+        result["source_pages"] = ch_def["source_pages"]
+    return result
 
 
 def _ocr_chapter_pages(
@@ -601,14 +609,17 @@ def _ocr_chapter_pages(
     if not text.strip():
         raise ChapterOcrError(cid, f"chapter {cid} OCR produced empty text", [])
 
-    return {
+    result = {
         "chapter_id": cid,
         "title": ch_def["title"],
-        "page_range": ch_def["page_range"],
+        "pdf_pages": ch_def["pdf_pages"],
         "text": text,
         "char_count": len(text),
         "extraction_mode": "ocr",
     }
+    if "source_pages" in ch_def:
+        result["source_pages"] = ch_def["source_pages"]
+    return result
 
 
 def set_chapters_impl(
@@ -621,7 +632,7 @@ def set_chapters_impl(
     """챕터 구조 확정 + 처리 모드 확정 → 챕터별 텍스트 추출 + 저장.
 
     Args:
-        chapters: [{"chapter_id", "title", "page_range"=[start,end]}, ...]
+        chapters: [{"chapter_id", "title", "pdf_pages"=[start,end]}, ...]
                   (1-based inclusive)
         execution_mode: "sequential" | "parallel". 챕터 디스패치 방식.
         extraction_mode: "text" | "ocr". 본문 추출 방식(목차 단계와 무관).
@@ -707,7 +718,7 @@ def set_chapters_impl(
             try:
                 for ch_def in chapters_to_ocr:
                     cid = ch_def["chapter_id"]
-                    start, end = ch_def["page_range"]
+                    start, end = ch_def["pdf_pages"]
                     try:
                         page_images_by_chapter[cid] = reader.render_pages(
                             doc, int(start), int(end), workspace.pages_dir(work_id),
@@ -755,9 +766,11 @@ def set_chapters_impl(
             if ch_def.get("skip"):
                 summaries.append({
                     "chapter_id": cid, "title": ch_def["title"],
-                    "page_range": ch_def["page_range"],
+                    "pdf_pages": ch_def["pdf_pages"],
                     "char_count": 0,
                     "skipped": True, "error": None,
+                    **({"source_pages": ch_def["source_pages"]}
+                       if "source_pages" in ch_def else {}),
                 })
                 continue
 
@@ -770,9 +783,11 @@ def set_chapters_impl(
                 summaries.append({
                     "chapter_id": cid,
                     "title": ch_def["title"],
-                    "page_range": ch_def["page_range"],
+                    "pdf_pages": ch_def["pdf_pages"],
                     "char_count": char_count,
                     "error": None,
+                    **({"source_pages": ch_def["source_pages"]}
+                       if "source_pages" in ch_def else {}),
                 })
                 continue
 
@@ -780,8 +795,10 @@ def set_chapters_impl(
             error = errors.get(cid) or state_entry.get("error") or "OCR failed"
             summaries.append({
                 "chapter_id": cid, "title": ch_def["title"],
-                "page_range": ch_def["page_range"],
+                "pdf_pages": ch_def["pdf_pages"],
                 "char_count": 0, "error": error,
+                **({"source_pages": ch_def["source_pages"]}
+                   if "source_pages" in ch_def else {}),
             })
     else:
         doc = reader.open_pdf(pdf_path)
@@ -793,9 +810,11 @@ def set_chapters_impl(
                 if ch_def.get("skip"):
                     summaries.append({
                         "chapter_id": cid, "title": ch_def["title"],
-                        "page_range": ch_def["page_range"],
+                        "pdf_pages": ch_def["pdf_pages"],
                         "char_count": 0,
                         "skipped": True, "error": None,
+                        **({"source_pages": ch_def["source_pages"]}
+                           if "source_pages" in ch_def else {}),
                     })
                     continue
 
@@ -807,19 +826,23 @@ def set_chapters_impl(
                     workspace.mark_chapter_failed(work_id, cid, kind="summary", error=str(e))
                     summaries.append({
                         "chapter_id": cid, "title": ch_def["title"],
-                        "page_range": ch_def["page_range"],
+                        "pdf_pages": ch_def["pdf_pages"],
                         "char_count": 0, "error": str(e),
+                        **({"source_pages": ch_def["source_pages"]}
+                           if "source_pages" in ch_def else {}),
                     })
                     continue
 
                 raw_payload = {
                     "chapter_id": cid,
                     "title": ch_def["title"],
-                    "page_range": ch_def["page_range"],
+                    "pdf_pages": ch_def["pdf_pages"],
                     "char_count": char_count,
                     "text": extracted["text"],
                     "extraction_mode": "text",
                 }
+                if "source_pages" in ch_def:
+                    raw_payload["source_pages"] = ch_def["source_pages"]
                 workspace.save_chapter_raw(work_id, cid, raw_payload)
                 workspace.update_chapter_status(work_id, cid, char_count=char_count)
 
@@ -827,9 +850,11 @@ def set_chapters_impl(
                 summaries.append({
                     "chapter_id": cid,
                     "title": ch_def["title"],
-                    "page_range": ch_def["page_range"],
+                    "pdf_pages": ch_def["pdf_pages"],
                     "char_count": char_count,
                     "error": None,
+                    **({"source_pages": ch_def["source_pages"]}
+                       if "source_pages" in ch_def else {}),
                 })
         finally:
             doc.close()
@@ -925,7 +950,7 @@ def validate_chapter_raw_inputs(
             item = {
                 "chapter_id": chapter_id,
                 "title": chapter_state.get("title"),
-                "page_range": chapter_state.get("page_range"),
+                "pdf_pages": chapter_state.get("pdf_pages"),
                 "reasons": reasons,
             }
             if chapter_state.get("failed_pages") is not None:

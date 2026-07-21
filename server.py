@@ -629,10 +629,10 @@ def scan_pdf(
     현재 수준을 받으면 함께 전달합니다. 선택이 빠지면 PDF를 스캔하지 않습니다.
 
     **페이지 오프셋 + 선택지 흐름 (필수)**:
-    recommendations에 page_offset(물리 = 책 + offset), offset_confidence,
-    각 챕터의 page_range(PDF 물리)·printed_range(책 페이지), user_choices,
+    recommendations에 page_offset(PDF = 원문 + offset), offset_confidence,
+    각 챕터의 pdf_pages(PDF 페이지)·source_pages(원문 페이지), user_choices,
     next_step_guidance가 담깁니다. next_step_guidance를 그대로 따라 챕터를
-    **PDF·책 페이지 둘 다** 표기해 보여주고, MCP가 준 user_choices를 **그대로**
+    **PDF·원문 페이지 둘 다** 표기해 보여주고, MCP가 준 user_choices를 **그대로**
     제시해(임의로 항목을 만들거나 빼지 말 것) 선택을 받으세요.
     다음 단계: set_chapters(work_id, chapters, execution_mode, extraction_mode, book_info)
     """
@@ -766,9 +766,11 @@ def set_chapters(
 ) -> dict[str, Any]:
     """챕터 구조 + 처리 모드를 확정하고 챕터별 본문을 추출합니다.
 
-    - chapters: [{"chapter_id","title","page_range":[start,end]}, ...] (1-based)
-      page_range는 항상 **PDF 물리 페이지** 기준. printed_range(책 페이지)는
-      옵셔널 표시용 메타로, 주면 보존하되 검증하지 않습니다.
+    - chapters: [{"chapter_id","title","pdf_pages":[start,end]}, ...] (1-based)
+      pdf_pages는 항상 **PDF 페이지** 기준. source_pages(원문 페이지)는
+      옵셔널 표시용 메타로, 명시적 null까지 보존하되 범위를 검증하지 않습니다.
+      구형 page_range/printed_range 입력은 읽기 호환을 위해 받지만 새 응답과
+      저장 데이터에는 pdf_pages/source_pages만 사용합니다.
     - execution_mode("sequential"|"parallel") · extraction_mode("text"|"ocr"):
       **둘 다 기본값 없음 — 임의로 정하지 말고 반드시 사용자에게 물어 선택을
       받으세요.** 하나라도 미지정/오타면 거부되며 응답.data.choices에 아래 4조합과

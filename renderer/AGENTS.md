@@ -20,6 +20,7 @@ HTML과 Markdown+TUI는 같은 로더 관점을 공유해야 한다. 한쪽에�
 - 리터럴 `\n`으로 이중 이스케이프된 요약은 실제 줄바꿈이 전혀 없을 때만 복구한다. 정상 코드블록이나 실제 개행이 있는 요약은 건드리지 않는다.
 - Markdown+TUI 출력은 챕터별 `summary.md`와 `quiz.json`을 나눈다. summary 파일에 정답이나 모델 답안을 쓰면 안 된다.
 - 중립 데이터 로더는 현재 `summary_status` 또는 `extension_status`가 `completed`인 결과 파일만 읽는다. `force=true`도 pending·failed 챕터의 같은 ID 예전 JSON을 읽는 근거가 아니다.
+- 챕터 페이지는 공통 포맷터로 `pdf_pages`를 `PDF`, 선택적 `source_pages`를 `원문`으로 표시한다. HTML과 Markdown+TUI가 서로 다른 명칭이나 범위를 보여주면 안 된다.
 - progress는 이전 manifest의 출력 형식과 학습 fingerprint가 현재 세대와 모두 같을 때만 staging에 복사한다.
 
 ## 테스트 기준

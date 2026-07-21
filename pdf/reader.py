@@ -155,12 +155,12 @@ def get_pdf_info(pdf_path: str | Path) -> dict[str, Any]:
 def get_outline(doc: fitz.Document) -> list[dict[str, Any]]:
     """PDF 내장 목차(북마크) 추출.
 
-    doc.get_toc()는 [[level, title, page(1-based 물리)], ...]을 돌려준다.
-    북마크는 **물리 페이지를 직접** 가리키므로 offset 보정·OCR 없이 정확하다.
+    doc.get_toc()는 [[level, title, page(1-based PDF)], ...]을 돌려준다.
+    북마크는 **PDF 페이지를 직접** 가리키므로 offset 보정·OCR 없이 정확하다.
     내장 목차가 있으면 이게 챕터 경계의 1순위 소스(무비용).
 
     Returns:
-        [{"level": int, "title": str, "page": int}, ...]  (page는 1-based 물리)
+        [{"level": int, "title": str, "page": int}, ...]  (page는 1-based PDF)
         유효 항목이 없으면 빈 리스트.
     """
     try:
@@ -184,7 +184,7 @@ _TOC_KEYWORDS = ("목차", "차례", "contents", "table of contents")
 
 
 def locate_toc_pages(doc: fitz.Document, max_scan: int = 30) -> list[int] | None:
-    """인쇄된 목차 페이지의 **위치**(1-based)를 best-effort로 찾는다.
+    """문서에 표시된 목차 페이지의 PDF상 **위치**(1-based)를 best-effort로 찾는다.
 
     텍스트가 깨졌어도 '목차/Contents' 키워드는 대개 살아남으므로, 페이지 번호
     (숫자)가 아니라 '어느 페이지가 목차인가'만 찾는 용도다. 실제 챕터↔페이지
@@ -315,17 +315,17 @@ def extract_text_range(doc: fitz.Document, start_page: int, end_page: int) -> st
 
 
 # ---------------------------------------------------------------------------
-# 페이지 오프셋 측정 (인쇄 페이지번호 ↔ PDF 물리 인덱스)
+# 페이지 오프셋 측정 (원문 페이지번호 ↔ PDF 페이지)
 # ---------------------------------------------------------------------------
 
 _FOOTER_NUM_RE = re.compile(r"^(\d{1,4})$")  # 꼬리말의 숫자-only 줄
-_OFFSET_FOOTER_LINES = 3       # 페이지 끝 몇 줄까지 인쇄번호로 볼지
+_OFFSET_FOOTER_LINES = 3       # 페이지 끝 몇 줄까지 원문 번호로 볼지
 _OFFSET_MIN_SUPPORT = 3        # 최빈 offset 최소 지지 표 수
 _OFFSET_DOMINANCE = 2          # 최빈이 2등의 N배 이상이어야 high
 
 
-def _footer_printed_number(raw: str) -> int | None:
-    """raw 페이지 텍스트의 꼬리말에서 인쇄 페이지번호(숫자-only 줄)를 추출.
+def _footer_source_page(raw: str) -> int | None:
+    """raw 페이지 텍스트의 꼬리말에서 원문 페이지번호(숫자-only 줄)를 추출.
 
     raw(=get_text 원본)를 받아야 한다. extract_page_text는 _PAGE_NUM_LINE_RE로
     숫자-only 줄을 이미 제거하므로 여기 쓰면 안 된다.
@@ -343,18 +343,18 @@ def _footer_printed_number(raw: str) -> int | None:
 
 
 def detect_page_offset(doc: fitz.Document, sample_cap: int = 400) -> dict[str, Any]:
-    """인쇄 페이지번호 ↔ PDF 물리 인덱스의 오프셋을 추정.
+    """원문 페이지번호 ↔ PDF 페이지의 오프셋을 추정.
 
-    각 페이지 꼬리말의 인쇄번호를 읽어 candidate = (물리인덱스 − 인쇄번호)를
+    각 페이지 꼬리말의 원문 번호를 읽어 candidate = (PDF 페이지 − 원문 페이지)를
     모으고, 최빈값(mode)을 오프셋으로 본다. 빈 페이지·번호 없는 표지·도입부는
     자연히 후보에서 빠지고, 본문 노이즈(코드 줄번호 등)는 단발이라 최빈에 밀린다.
 
     오프셋은 음수일 수 있다(PDF가 앞 front matter를 일부 누락한 경우).
-    텍스트 레이어가 없거나 인쇄번호가 전혀 없으면 offset=None/none.
+    텍스트 레이어가 없거나 원문 번호가 전혀 없으면 offset=None/none.
 
     Returns:
         {
-            "offset": int | None,      # 물리 = 인쇄 + offset
+            "offset": int | None,      # PDF = 원문 + offset
             "confidence": "high" | "low" | "none",
         }
         (support/samples/runner_up는 confidence 판정에만 내부적으로 쓰고 반환하지 않는다.)
@@ -373,10 +373,10 @@ def detect_page_offset(doc: fitz.Document, sample_cap: int = 400) -> dict[str, A
     counts: dict[int, int] = {}
     for idx in indices:
         raw = doc.load_page(idx).get_text("text")
-        printed = _footer_printed_number(raw)
-        if printed is None:
+        source_page = _footer_source_page(raw)
+        if source_page is None:
             continue
-        cand = (idx + 1) - printed  # 물리(1-based) − 인쇄
+        cand = (idx + 1) - source_page  # PDF(1-based) − 원문
         counts[cand] = counts.get(cand, 0) + 1
 
     if not counts:

@@ -84,6 +84,35 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def canonicalize_chapter_page_metadata(data: dict[str, Any]) -> dict[str, Any]:
+    """챕터 페이지 메타를 새 키로 정규화한다.
+
+    기존 작업과 구형 클라이언트의 page_range/printed_range는 읽되, 반환값에는
+    pdf_pages/source_pages만 남긴다. source_pages의 명시적 null도 보존한다.
+    """
+    normalized = dict(data)
+    if "pdf_pages" not in normalized and "page_range" in normalized:
+        normalized["pdf_pages"] = normalized["page_range"]
+    if "source_pages" not in normalized and "printed_range" in normalized:
+        normalized["source_pages"] = normalized["printed_range"]
+    normalized.pop("page_range", None)
+    normalized.pop("printed_range", None)
+    return normalized
+
+
+def _canonicalize_state_page_metadata(state: dict[str, Any]) -> dict[str, Any]:
+    chapters = state.get("chapters")
+    if not isinstance(chapters, dict):
+        return state
+    state = dict(state)
+    state["chapters"] = {
+        chapter_id: canonicalize_chapter_page_metadata(chapter)
+        if isinstance(chapter, dict) else chapter
+        for chapter_id, chapter in chapters.items()
+    }
+    return state
+
+
 def make_work_id() -> str:
     """work_id 발급. 외부에서도 default output_dir 작명에 쓸 수 있게 공개."""
     return datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -409,7 +438,7 @@ def load_state(work_id: str) -> dict[str, Any]:
     호출자가 read-modify-write를 한다면 직접 _get_lock(work_id) 사용 권장.
     이 모듈의 update_* 헬퍼는 내부에서 lock을 잡으므로 그쪽을 우선 사용.
     """
-    return _read_json(state_path(work_id))
+    return _canonicalize_state_page_metadata(_read_json(state_path(work_id)))
 
 
 def save_state(work_id: str, state: dict[str, Any]) -> None:
@@ -436,7 +465,7 @@ def resume_workspace(output_dir: str | Path) -> dict[str, Any]:
     sp = work_dir / "state.json"
     if not sp.exists():
         raise FileNotFoundError(f"재개할 작업이 없습니다: {sp}")
-    state = _read_json(sp)
+    state = _canonicalize_state_page_metadata(_read_json(sp))
     work_id = state.get("work_id")
     if not work_id:
         raise ValueError(f"state.json에 work_id가 없습니다 (손상 가능): {sp}")
@@ -538,7 +567,7 @@ def update_chapter_status(work_id: str, chapter_id: str, **updates: Any) -> None
 def set_chapters_in_state(work_id: str, chapters: list[dict[str, Any]]) -> None:
     """set_chapters 도구가 결정한 챕터 구조를 state.chapters에 반영.
 
-    각 chapter는 최소 {chapter_id, title, page_range} 보유.
+    각 chapter는 최소 {chapter_id, title, pdf_pages} 보유.
     optional "skip": True → 색인/판권/찾아보기 같은 비본문 챕터.
     이 경우 summary/extension status가 "skipped"로 초기화되고
     raw 추출·sub-agent 디스패치·렌더링 모두에서 제외된다.
@@ -546,13 +575,14 @@ def set_chapters_in_state(work_id: str, chapters: list[dict[str, Any]]) -> None:
     with _get_lock(work_id):
         state = load_state(work_id)
         new_chapters: dict[str, dict[str, Any]] = {}
-        for ch in chapters:
+        for raw_chapter in chapters:
+            ch = canonicalize_chapter_page_metadata(raw_chapter)
             cid = ch["chapter_id"]
             skip = bool(ch.get("skip", False))
             status = "skipped" if skip else "pending"
             new_chapters[cid] = {
                 "title": ch["title"],
-                "page_range": list(ch["page_range"]),
+                "pdf_pages": list(ch["pdf_pages"]),
                 "char_count": ch.get("char_count", 0),
                 "skip": skip,
                 "summary_status": status,
@@ -560,6 +590,11 @@ def set_chapters_in_state(work_id: str, chapters: list[dict[str, Any]]) -> None:
                 "error": None,
                 "retry_count": 0,
             }
+            if "source_pages" in ch:
+                source_pages = ch["source_pages"]
+                new_chapters[cid]["source_pages"] = (
+                    list(source_pages) if source_pages is not None else None
+                )
         state["chapters"] = new_chapters
         state["phases"]["chapter_setup"] = "completed"
         save_state(work_id, state)
@@ -598,7 +633,7 @@ def load_outline(work_id: str) -> dict[str, Any] | None:
 def save_chapter_raw(work_id: str, chapter_id: str, data: dict[str, Any]) -> Path:
     """PDF 처리 결과(raw 본문 text + char_count)를 chapters_raw/에 저장."""
     out = chapters_raw_dir(work_id) / f"{chapter_id}.json"
-    _atomic_write_json(out, data)
+    _atomic_write_json(out, canonicalize_chapter_page_metadata(data))
     return out
 
 
@@ -607,7 +642,7 @@ def get_chapter_raw(work_id: str, chapter_id: str) -> dict[str, Any]:
     path = chapters_raw_dir(work_id) / f"{chapter_id}.json"
     if not path.exists():
         raise FileNotFoundError(f"chapter raw not found: {chapter_id}")
-    return _read_json(path)
+    return canonicalize_chapter_page_metadata(_read_json(path))
 
 
 # ---------------------------------------------------------------------------

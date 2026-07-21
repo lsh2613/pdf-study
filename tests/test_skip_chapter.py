@@ -40,8 +40,8 @@ def test_skip_marks_status_skipped(tmp_path, ko_with_toc):
     wid, _ = _setup(tmp_path, ko_with_toc)
     _scan(wid)
     _sc(wid, [
-        {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
-        {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
+        {"chapter_id": "ch1", "title": "본문", "pdf_pages": [5, 12]},
+        {"chapter_id": "ch2", "title": "찾아보기", "pdf_pages": [27, 28], "skip": True},
     ])
     state = workspace.load_state(wid)
     assert state["chapters"]["ch1"]["summary_status"] == "pending"
@@ -55,8 +55,8 @@ def test_skip_excluded_from_pending(tmp_path, ko_with_toc):
     wid, _ = _setup(tmp_path, ko_with_toc)
     _scan(wid)
     _sc(wid, [
-        {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
-        {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
+        {"chapter_id": "ch1", "title": "본문", "pdf_pages": [5, 12]},
+        {"chapter_id": "ch2", "title": "찾아보기", "pdf_pages": [27, 28], "skip": True},
     ])
     pending = server.list_pending_chapters(wid)
     assert "ch1" in pending["data"]["summary_pending"]
@@ -68,9 +68,9 @@ def test_skip_excluded_from_subagent_chapter_ids(tmp_path, ko_with_toc):
     wid, _ = _setup(tmp_path, ko_with_toc)
     _scan(wid)
     _sc(wid, [
-        {"chapter_id": "ch1", "title": "본문 1", "page_range": [5, 12]},
-        {"chapter_id": "ch2", "title": "본문 2", "page_range": [13, 20]},
-        {"chapter_id": "ch3", "title": "찾아보기", "page_range": [27, 28], "skip": True},
+        {"chapter_id": "ch1", "title": "본문 1", "pdf_pages": [5, 12]},
+        {"chapter_id": "ch2", "title": "본문 2", "pdf_pages": [13, 20]},
+        {"chapter_id": "ch3", "title": "찾아보기", "pdf_pages": [27, 28], "skip": True},
     ])
     r = server.get_subagent_prompts(wid)
     data = r["data"]
@@ -82,8 +82,8 @@ def test_skip_skips_raw_extraction(tmp_path, ko_with_toc):
     wid, out = _setup(tmp_path, ko_with_toc)
     _scan(wid)
     _sc(wid, [
-        {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
-        {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
+        {"chapter_id": "ch1", "title": "본문", "pdf_pages": [5, 12]},
+        {"chapter_id": "ch2", "title": "찾아보기", "pdf_pages": [27, 28], "skip": True},
     ])
     # ch1은 raw 파일 생김, ch2는 안 생김
     raw_dir = out / ".work/raw_data/chapters_raw"
@@ -95,9 +95,9 @@ def test_skip_chapter_not_rendered(tmp_path, ko_with_toc):
     wid, out = _setup(tmp_path, ko_with_toc)
     _scan(wid)
     _sc(wid, [
-        {"chapter_id": "ch1", "title": "본문 1", "page_range": [5, 12]},
-        {"chapter_id": "ch2", "title": "본문 2", "page_range": [13, 20]},
-        {"chapter_id": "ch3", "title": "찾아보기", "page_range": [27, 28], "skip": True},
+        {"chapter_id": "ch1", "title": "본문 1", "pdf_pages": [5, 12]},
+        {"chapter_id": "ch2", "title": "본문 2", "pdf_pages": [13, 20]},
+        {"chapter_id": "ch3", "title": "찾아보기", "pdf_pages": [27, 28], "skip": True},
     ])
     # 가짜 결과 저장 — ch1/ch2만
     for cid in ("ch1", "ch2"):
@@ -134,8 +134,8 @@ def test_set_chapters_impl_marks_skipped_in_result(tmp_path, ko_with_toc):
     wid, _ = _setup(tmp_path, ko_with_toc)
     _scan(wid)
     result = analysis.set_chapters_impl(wid, [
-        {"chapter_id": "ch1", "title": "본문", "page_range": [5, 12]},
-        {"chapter_id": "ch2", "title": "찾아보기", "page_range": [27, 28], "skip": True},
+        {"chapter_id": "ch1", "title": "본문", "pdf_pages": [5, 12]},
+        {"chapter_id": "ch2", "title": "찾아보기", "pdf_pages": [27, 28], "skip": True},
     ], "sequential", "text")
     by_id = {c["chapter_id"]: c for c in result["chapters"]}
     assert by_id["ch1"].get("skipped") is not True

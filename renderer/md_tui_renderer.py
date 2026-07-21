@@ -17,6 +17,7 @@ from typing import Any
 
 from .base import Renderer
 from .html_renderer import _load_all  # 동일한 state/book_info/chapters 로더 재사용
+from .page_labels import format_page_label
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,12 @@ def _chapter_title(chapter: dict[str, Any]) -> str:
     return summary.get("title") or chapter["meta"].get("title") or chapter["chapter_id"]
 
 
-def _book_md(book_info: dict[str, Any], chapters: list[dict[str, Any]]) -> str:
+def _book_md(
+    book_info: dict[str, Any],
+    chapters: list[dict[str, Any]],
+    *,
+    page_offset: int | None = None,
+) -> str:
     lines = [f"# {book_info.get('title') or 'Study'}", ""]
 
     meta_parts: list[str] = []
@@ -51,18 +57,22 @@ def _book_md(book_info: dict[str, Any], chapters: list[dict[str, Any]]) -> str:
     lines.append("## 챕터")
     for ch in chapters:
         cid = ch["chapter_id"]
-        pr = ch["meta"].get("page_range") or [0, 0]
-        lines.append(f"- [{_chapter_title(ch)}]({cid}/summary.md) — p.{pr[0]}–{pr[1]}")
+        page_label = format_page_label(ch["meta"], page_offset=page_offset)
+        lines.append(f"- [{_chapter_title(ch)}]({cid}/summary.md) — {page_label}")
     return "\n".join(lines) + "\n"
 
 
-def _summary_md(chapter: dict[str, Any]) -> str:
+def _summary_md(
+    chapter: dict[str, Any],
+    *,
+    page_offset: int | None = None,
+) -> str:
     summary = chapter.get("summary") or {}
     lines = [f"# {_chapter_title(chapter)}"]
 
-    pr = chapter["meta"].get("page_range") or summary.get("page_range")
-    if isinstance(pr, (list, tuple)) and len(pr) == 2:
-        lines.append(f"> p.{pr[0]}–{pr[1]}")
+    page_label = format_page_label(chapter["meta"], page_offset=page_offset)
+    if page_label:
+        lines.append(f"> {page_label}")
     lines.append("")
 
     # 요약은 이미 마크다운 — 그대로 둔다(rich가 렌더).
@@ -115,6 +125,7 @@ class MdTuiRenderer(Renderer):
             raise RuntimeError("no chapters to render. did set_chapters run?")
 
         opts = state.get("question_options") or {}
+        page_offset = state.get("page_offset")
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # 엔진 + launcher 템플릿 + README
@@ -129,13 +140,15 @@ class MdTuiRenderer(Renderer):
         launcher_text = launcher_src.read_text(encoding="utf-8")
 
         (output_dir / "book.md").write_text(
-            _book_md(book_info, chapters), encoding="utf-8"
+            _book_md(book_info, chapters, page_offset=page_offset), encoding="utf-8"
         )
 
         for ch in chapters:
             ch_dir = output_dir / ch["chapter_id"]
             ch_dir.mkdir(parents=True, exist_ok=True)
-            (ch_dir / "summary.md").write_text(_summary_md(ch), encoding="utf-8")
+            (ch_dir / "summary.md").write_text(
+                _summary_md(ch, page_offset=page_offset), encoding="utf-8"
+            )
             (ch_dir / "quiz.json").write_text(
                 json.dumps(_quiz_data(ch, opts), ensure_ascii=False, indent=2),
                 encoding="utf-8",

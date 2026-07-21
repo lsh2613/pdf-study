@@ -4,7 +4,7 @@
 
 - 로컬 MCP 서버가 `init_work`부터 `finalize_study`까지 PDF 학습 자료 생성 흐름을 제공한다.
 - `init_work`가 단답형·주관식·확장형 생성 여부와 선택적 학습자 정보를 요청하고, `scan_pdf`가 사용자의 명시적 선택을 확정한 뒤 스캔한다. 객관식만 기존 호환을 위해 기본 활성이다.
-- PDF 내장 목차가 있으면 물리 페이지 기준 챕터 후보를 만들고, 없으면 `scan_pdf`가 목차 페이지 이미지를 렌더한다. OCR 모델 준비는 `prepare_ocr`, 목차 이미지 OCR은 `scan_toc_with_ocr`가 담당한다.
+- PDF 내장 목차가 있으면 `pdf_pages` 기준 챕터 후보와 선택적 `source_pages` 원문 번호를 만들고, 없으면 `scan_pdf`가 목차 페이지 이미지를 렌더한다. OCR 모델 준비는 `prepare_ocr`, 목차 이미지 OCR은 `scan_toc_with_ocr`가 담당한다.
 - 텍스트 레이어 품질을 평가해 텍스트 없음과 모지바케를 구분하고, 신뢰할 수 없는 text 모드를 거부한다.
 - text 모드는 챕터 본문을 서버가 추출하고, OCR 모드는 `set_chapters` 시점에 PaddleOCR CPU로 본문을 선계산해 raw에 저장한다. raw `text`와 `char_count`가 누락되거나 불일치하면 sub-agent 프롬프트와 챕터 본문 반환을 거부한다.
 - 챕터별 요약, 기본 문제, 확장 문제를 분리 JSON으로 저장하고, 현재 프롬프트의 JSON 양식에 맞지 않는 결과는 완료 상태로 바꾸지 않는다.
@@ -19,7 +19,7 @@
 ## 검증 상태
 
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, 선택지 요구, 최종 렌더링, 진도 저장 서버, 설치 스크립트를 다룬다.
-- 최근 확인: 현재 checkout에서 `.venv/bin/python -m pytest -q`가 227개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
+- 최근 확인: 현재 checkout에서 `.venv/bin/python -m pytest -q`가 236개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
 
 ## 남은 일
 

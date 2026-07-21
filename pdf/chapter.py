@@ -21,8 +21,8 @@ def make_chunks(page_count: int, chunk_size: int = DEFAULT_CHUNK_SIZE) -> list[d
         chunk_size: 청크당 페이지 수
 
     Returns:
-        [{"chapter_id": "ch1", "title": "...", "page_range": [s, e]}, ...]
-        page_range는 1-based inclusive.
+        [{"chapter_id": "ch1", "title": "...", "pdf_pages": [s, e]}, ...]
+        pdf_pages는 1-based inclusive.
     """
     if page_count < 1:
         return []
@@ -37,7 +37,7 @@ def make_chunks(page_count: int, chunk_size: int = DEFAULT_CHUNK_SIZE) -> list[d
         chapters.append({
             "chapter_id": f"ch{idx}",
             "title": f"Part {idx} (p.{start}-{end})",
-            "page_range": [start, end],
+            "pdf_pages": [start, end],
         })
         idx += 1
         start = end + 1
@@ -49,30 +49,30 @@ def extract_chapter(doc: fitz.Document, chapter_def: dict[str, Any]) -> dict[str
 
     Args:
         doc: open된 fitz.Document
-        chapter_def: {"chapter_id", "title", "page_range": [s, e]} (1-based inclusive)
+        chapter_def: {"chapter_id", "title", "pdf_pages": [s, e]} (1-based inclusive)
 
     Returns:
         {
             "chapter_id": str,
             "title": str,
-            "page_range": [s, e],
+            "pdf_pages": [s, e],
             "text": str,
             "char_count": int,
         }
     """
     chapter_id = chapter_def["chapter_id"]
     title = chapter_def["title"]
-    page_range = chapter_def["page_range"]
-    if not (isinstance(page_range, (list, tuple)) and len(page_range) == 2):
-        raise ValueError(f"chapter {chapter_id}: page_range must be [start, end]")
+    pdf_pages = chapter_def["pdf_pages"]
+    if not (isinstance(pdf_pages, (list, tuple)) and len(pdf_pages) == 2):
+        raise ValueError(f"chapter {chapter_id}: pdf_pages must be [start, end]")
 
-    start, end = int(page_range[0]), int(page_range[1])
+    start, end = int(pdf_pages[0]), int(pdf_pages[1])
     text = reader.extract_text_range(doc, start, end)
 
     return {
         "chapter_id": chapter_id,
         "title": title,
-        "page_range": [start, end],
+        "pdf_pages": [start, end],
         "text": text,
         "char_count": len(text),
     }

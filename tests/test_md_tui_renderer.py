@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 
 from pdf_study import server
+from pdf_study.renderer.md_tui_renderer import _book_md, _summary_md
 
 
 def _scan(wid):
@@ -64,6 +65,32 @@ def _build_multi(ko_with_toc, tmp_path, *, opts=None):
     return tmp_path / "out", chs
 
 
+def test_markdown_labels_pdf_and_source_pages():
+    chapter = {
+        "chapter_id": "ch1",
+        "meta": {
+            "title": "본문",
+            "pdf_pages": [19, 23],
+            "source_pages": [1, 5],
+        },
+        "summary": {"summary": "요약", "key_points": []},
+    }
+
+    assert "PDF p.19–23 · 원문 p.1–5" in _book_md({}, [chapter], page_offset=18)
+    assert "PDF p.19–23 · 원문 p.1–5" in _summary_md(chapter, page_offset=18)
+
+
+def test_markdown_distinguishes_unknown_and_absent_source_pages():
+    chapter = {
+        "chapter_id": "ch1",
+        "meta": {"title": "서문", "pdf_pages": [1, 3], "source_pages": None},
+        "summary": {"summary": "요약", "key_points": []},
+    }
+
+    assert "원문 페이지 미상" in _summary_md(chapter, page_offset=None)
+    assert "원문 페이지 없음" in _summary_md(chapter, page_offset=18)
+
+
 def test_per_chapter_folders_and_files(ko_with_toc, tmp_path):
     out, chs = _build_multi(ko_with_toc, tmp_path)
     assert (out / "study_tui.py").exists()
@@ -88,6 +115,8 @@ def test_summary_md_has_key_points_not_questions(ko_with_toc, tmp_path):
     md = (out / "ch1" / "summary.md").read_text(encoding="utf-8")
     assert "핵심 포인트" in md
     assert "본문 요약 내용입니다." in md
+    assert "PDF p." in md
+    assert "원문" in md
     # 문제/정답은 summary.md가 아니라 quiz.json에만
     assert "answer_index" not in md
     assert "model_answer" not in md

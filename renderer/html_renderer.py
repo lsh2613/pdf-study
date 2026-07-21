@@ -21,6 +21,7 @@ from typing import Any
 from .. import workspace
 from ..prompts import _chapter_sort_key  # 내부 헬퍼 재사용
 from .base import Renderer
+from .page_labels import format_page_label
 
 logger = logging.getLogger(__name__)
 
@@ -447,6 +448,8 @@ def _extension_section(items: list[dict[str, Any]]) -> str:
 def _chapter_body(
     chapter: dict[str, Any],
     opts: dict[str, bool],
+    *,
+    page_offset: int | None = None,
 ) -> str:
     meta = chapter["meta"]
     summary = chapter.get("summary") or {}
@@ -454,10 +457,8 @@ def _chapter_body(
     questions = (summary.get("questions") or {})
 
     title = summary.get("title") or meta.get("title") or chapter["chapter_id"]
-    page_range = meta.get("page_range") or summary.get("page_range")
-    range_html = ""
-    if isinstance(page_range, (list, tuple)) and len(page_range) == 2:
-        range_html = f'<p class="page-range">p.{_esc(page_range[0])}–{_esc(page_range[1])}</p>'
+    page_label = format_page_label(meta, page_offset=page_offset)
+    range_html = f'<p class="page-range">{_esc(page_label)}</p>' if page_label else ""
 
     sections = [
         f'<h1>{_esc(title)}</h1>',
@@ -554,20 +555,25 @@ def _page_shell(
     )
 
 
-def _index_body(book_info: dict[str, Any], chapters: list[dict[str, Any]]) -> str:
+def _index_body(
+    book_info: dict[str, Any],
+    chapters: list[dict[str, Any]],
+    *,
+    page_offset: int | None = None,
+) -> str:
     header = _book_info_header(book_info)
     items: list[str] = []
     for ch in chapters:
         cid = ch["chapter_id"]
         meta = ch["meta"]
         title = (ch.get("summary") or {}).get("title") or meta.get("title") or cid
-        pr = meta.get("page_range") or [0, 0]
+        page_label = format_page_label(meta, page_offset=page_offset)
         items.append(
             f'<a class="chapter-link" href="{_esc(cid)}.html" data-chapter="{_esc(cid)}">'
             '<div class="row">'
             '<span class="chapter-check" aria-hidden="true"></span>'
             f'<span class="chapter-title">{_esc(title)}</span>'
-            f'<span class="chapter-range">p.{_esc(pr[0])}–{_esc(pr[1])}</span>'
+            f'<span class="chapter-range">{_esc(page_label)}</span>'
             "</div>"
             '<div class="status-text">아직 학습하지 않음</div>'
             '</a>'
@@ -590,6 +596,7 @@ class HtmlRenderer(Renderer):
             raise RuntimeError("no chapters to render. did set_chapters run?")
 
         opts = state.get("question_options") or {}
+        page_offset = state.get("page_offset")
         output_dir.mkdir(parents=True, exist_ok=True)
         _copy_assets(output_dir)
 
@@ -599,7 +606,7 @@ class HtmlRenderer(Renderer):
         if single:
             ch = chapters[0]
             body = _book_info_header(book_info) + (
-                '<article>' + _chapter_body(ch, opts) + '</article>'
+                '<article>' + _chapter_body(ch, opts, page_offset=page_offset) + '</article>'
             )
             html_text = _page_shell(
                 lang="ko",
@@ -615,7 +622,7 @@ class HtmlRenderer(Renderer):
                 idx.unlink()
         else:
             # index.html
-            idx_body = _index_body(book_info, chapters)
+            idx_body = _index_body(book_info, chapters, page_offset=page_offset)
             (output_dir / "index.html").write_text(
                 _page_shell(
                     lang="ko",
@@ -631,7 +638,7 @@ class HtmlRenderer(Renderer):
                 ch_title = (ch.get("summary") or {}).get("title") or ch["meta"].get("title") or cid
                 article_body = (
                     _chapter_nav_links(chapters, i, show_index_link=True)
-                    + '<article>' + _chapter_body(ch, opts) + '</article>'
+                    + '<article>' + _chapter_body(ch, opts, page_offset=page_offset) + '</article>'
                     + _chapter_nav_links(chapters, i, show_index_link=True)
                 )
                 (output_dir / f"{cid}.html").write_text(
