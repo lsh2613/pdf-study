@@ -965,13 +965,16 @@ def _raw_validation_reasons(
 def validate_chapter_raw_inputs(
     work_id: str,
     state: dict[str, Any] | None = None,
+    chapter_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """non-skip 챕터의 raw text/char_count 문제를 구조화해 반환한다."""
+    """선택된 non-skip 챕터의 raw text/char_count 문제를 구조화해 반환한다."""
     if state is None:
         state = workspace.load_state(work_id)
     extraction_mode = state.get("extraction_mode") or "text"
     invalid: list[dict[str, Any]] = []
     for chapter_id, chapter_state in state.get("chapters", {}).items():
+        if chapter_ids is not None and chapter_id not in chapter_ids:
+            continue
         if chapter_state.get("skip"):
             continue
         reasons = _raw_validation_reasons(

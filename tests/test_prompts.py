@@ -1,6 +1,8 @@
 """prompts.build_prompts 단위 테스트."""
 from __future__ import annotations
 
+import pytest
+
 from pdf_study import prompts
 
 
@@ -60,6 +62,17 @@ def test_workflow_instructions_branch_by_execution_mode():
     assert "최대 5개 챕터를 동시에" in par["workflow_instructions"]
 
 
+@pytest.mark.parametrize("execution_mode", ["sequential", "parallel"])
+def test_workflow_instructions_use_result_specific_pending_lists(execution_mode):
+    workflow = prompts.build_prompts(
+        _state(execution_mode=execution_mode)
+    )["workflow_instructions"]
+
+    assert "summary_pending_chapter_ids" in workflow
+    assert "extension_pending_chapter_ids" in workflow
+    assert "요청된 결과 유형만 저장" in workflow
+
+
 def test_text_mode_input_block_default():
     out = prompts.build_prompts(_state())
     assert out["extraction_mode"] == "text"
@@ -80,6 +93,20 @@ def test_ocr_mode_uses_precomputed_text_and_no_image_input():
 
 def test_chapter_ids_are_naturally_sorted():
     assert prompts.build_prompts(_state())["chapter_ids"] == ["ch1", "ch2", "ch10"]
+
+
+def test_prompt_chapter_ids_are_pending_union_by_result_type():
+    state = _state(chapters={
+        "ch1": {"summary_status": "completed", "extension_status": "pending"},
+        "ch2": {"summary_status": "pending", "extension_status": "completed"},
+        "ch3": {"summary_status": "completed", "extension_status": "completed"},
+    })
+
+    out = prompts.build_prompts(state)
+
+    assert out["summary_pending_chapter_ids"] == ["ch2"]
+    assert out["extension_pending_chapter_ids"] == ["ch1"]
+    assert out["chapter_ids"] == ["ch1", "ch2"]
 
 
 def test_summary_format_requires_markdown_subchapters_without_images():

@@ -977,7 +977,13 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
     또는 메인 LLM이 직접 처리 — 어느 쪽이든 같은 프롬프트를 사용.
     """
     state = workspace.load_state(work_id)
-    invalid = analysis.validate_chapter_raw_inputs(work_id, state)
+    pending = workspace.pending_chapters_from_state(state)
+    pending_ids = set(pending["summary_pending"]) | set(pending["extension_pending"])
+    invalid = analysis.validate_chapter_raw_inputs(
+        work_id,
+        state,
+        chapter_ids=pending_ids,
+    )
     if invalid:
         failed_chapters = _failed_chapters_from_invalid(invalid)
         return _err(
@@ -994,13 +1000,21 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
         )
     book_info = workspace.load_book_info(work_id)
     data = prompts.build_prompts(state, book_info)
-    ext_on = data["enabled_types"]["extension"]
+    summary_pending = data["summary_pending_chapter_ids"]
+    extension_pending = data["extension_pending_chapter_ids"]
+    if not summary_pending and not extension_pending:
+        return _ok(data, next_action=(
+            f"처리할 pending 챕터가 없습니다. finalize_study(work_id=\"{work_id}\")를 "
+            "호출하세요."
+        ))
     return _ok(data, next_action=(
-        f"workflow_instructions를 따라 chapter_ids({data['chapter_ids']})를 "
-        "순회하세요. 각 챕터: get_chapter_content(그 chapter_id) → summarizer_prompt로 "
-        "요약/문제 생성 → save_chapter_result"
-        + ("(+ extension 활성: 같은 본문과 extension_prompt로 생성→save_extension_result)" if ext_on else "")
-        + ". chapter_id는 반드시 위 목록의 값(ch1·ch2…)을 쓰고, 페이지 범위 문자열은 "
+        f"workflow_instructions를 따라 chapter_ids({data['chapter_ids']})를 순회하세요. "
+        f"summary_pending_chapter_ids({summary_pending})는 summarizer_prompt로 생성해 "
+        "save_chapter_result로 저장하고, "
+        f"extension_pending_chapter_ids({extension_pending})는 extension_prompt로 생성해 "
+        "save_extension_result로 저장하세요. 각 챕터는 두 목록의 포함 여부에 따른 "
+        "결과별 action만 수행합니다. chapter_id는 반드시 위 목록의 값(ch1·ch2…)을 쓰고, "
+        "페이지 범위 문자열은 "
         "쓰지 마세요. mode가 'ocr'이어도 set_chapters에서 선계산된 text를 읽습니다."
     ))
 

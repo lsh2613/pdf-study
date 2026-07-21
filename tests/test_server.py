@@ -853,6 +853,32 @@ def test_get_subagent_prompts_rejects_invalid_ocr_raw(
         assert r["data"]["failed_chapters"] == []
 
 
+def test_get_subagent_prompts_validates_only_pending_raw(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out_pending_raw"))["data"]["work_id"]
+    _scan(wid)
+    result = _sc(wid, [
+        {"chapter_id": "ch1", "title": "완료", "pdf_pages": [1, 6]},
+        {"chapter_id": "ch2", "title": "대기", "pdf_pages": [7, 12]},
+    ])
+    assert result["ok"], result
+    assert server.save_chapter_result(wid, "ch1", _result())["ok"] is True
+    assert server.save_extension_result(wid, "ch1", _ext())["ok"] is True
+
+    (workspace.chapters_raw_dir(wid) / "ch1.json").unlink()
+
+    response = server.get_subagent_prompts(wid)
+    assert response["ok"] is True
+    assert response["data"]["chapter_ids"] == ["ch2"]
+    assert response["data"]["summary_pending_chapter_ids"] == ["ch2"]
+    assert response["data"]["extension_pending_chapter_ids"] == ["ch2"]
+
+    (workspace.chapters_raw_dir(wid) / "ch2.json").unlink()
+
+    response = server.get_subagent_prompts(wid)
+    assert response["ok"] is False
+    assert [item["chapter_id"] for item in response["data"]["invalid_chapters"]] == ["ch2"]
+
+
 @pytest.mark.parametrize(
     ("case", "expected"),
     [

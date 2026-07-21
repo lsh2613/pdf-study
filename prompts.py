@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import workspace
+
 
 # ---------------------------------------------------------------------------
 # 챕터 글자 수 기준 동적 상한 (docs/04)
@@ -211,25 +213,32 @@ JSON 본문만 출력. 코드펜스 금지. save_extension_result로 저장.
 
 WORKFLOW_INSTRUCTIONS_SEQUENTIAL = """\
 한 챕터씩 처리하세요.
-1) get_chapter_content(work_id, chapter_id) — 본문 받기
-2) 본문과 위 summarizer 시스템 프롬프트로 sub-agent 호출 (없으면 본인이 직접 처리)
-3) 결과 JSON을 save_chapter_result(work_id, chapter_id, data)
-4) extension이 활성화돼 있으면 같은 본문과 extension_prompt로 확장 문제를 생성해
-   save_extension_result
-5) 다음 챕터로 진행
+1) chapter_ids에서 다음 chapter_id를 고르고, summary_pending_chapter_ids와
+   extension_pending_chapter_ids 양쪽의 포함 여부를 확인
+2) get_chapter_content(work_id, chapter_id)로 본문을 한 번만 받기
+3) summary_pending_chapter_ids에 있으면 summarizer_prompt로 생성한 결과를
+   save_chapter_result(work_id, chapter_id, data)로 저장
+4) extension_pending_chapter_ids에 있으면 같은 본문과 extension_prompt로 생성한 결과를
+   save_extension_result(work_id, chapter_id, data)로 저장
+5) 두 목록 중 실제로 포함된 요청된 결과 유형만 저장하고 다음 챕터로 진행
 실패 시 1회 재시도. 그래도 실패하면 다음 챕터로.
-chapter_ids는 get_subagent_prompts 응답에 포함됩니다.
+chapter_ids는 두 pending 목록의 자연 정렬된 합집합입니다.
 """
 
 WORKFLOW_INSTRUCTIONS_PARALLEL = """\
 최대 5개 챕터를 동시에 sub-agent로 디스패치하세요.
-- 각 sub-agent는 get_chapter_content → 처리 → save_chapter_result까지 완수.
+- 각 sub-agent는 chapter_id가 summary_pending_chapter_ids와
+  extension_pending_chapter_ids에 각각 포함되는지 먼저 확인합니다.
+- get_chapter_content는 챕터당 한 번만 호출해 본문을 공유합니다.
+- summary_pending_chapter_ids에 있으면 summarizer_prompt 결과만
+  save_chapter_result로 저장합니다.
+- extension_pending_chapter_ids에 있으면 extension_prompt 결과만
+  save_extension_result로 저장합니다. 외부 검색은 사용하지 않습니다.
+- 두 목록 중 실제로 포함된 요청된 결과 유형만 저장하세요.
 - save_*는 서버가 동시성을 보장하므로 결과 도착 순서대로 호출 가능합니다.
 - 5개 배치 완료 후 다음 5개 시작.
-- extension이 활성화돼 있으면 같은 챕터 본문과 extension_prompt로 별도 생성해
-  save_extension_result까지 완료합니다. 외부 검색은 사용하지 않습니다.
 - 실패 챕터는 모든 배치 종료 후 1회 재시도.
-chapter_ids는 get_subagent_prompts 응답에 포함됩니다.
+chapter_ids는 두 pending 목록의 자연 정렬된 합집합입니다.
 """
 
 
@@ -293,6 +302,8 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
             "extension_prompt": str | None,   # extension 비활성이면 None
             "workflow_instructions": str,
             "chapter_ids": [str, ...],
+            "summary_pending_chapter_ids": [str, ...],
+            "extension_pending_chapter_ids": [str, ...],
             "enabled_types": {"multiple_choice": bool, ...},
         }
     """
@@ -337,13 +348,16 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         )
         workflow = ocr_note + workflow
 
-    # 비본문(skipped) 챕터는 sub-agent 디스패치 대상에서 제외
+    # 결과 유형별 pending 목록의 합집합만 sub-agent 디스패치 대상으로 노출
     all_chapter_ids = sorted(state.get("chapters", {}).keys(), key=_chapter_sort_key)
-    chapter_ids = [
-        cid for cid in all_chapter_ids
-        if not state["chapters"][cid].get("skip")
+    pending = workspace.pending_chapters_from_state(state)
+    summary_pending = pending["summary_pending"]
+    extension_pending = pending["extension_pending"]
+    pending_ids = set(summary_pending) | set(extension_pending)
+    chapter_ids = [cid for cid in all_chapter_ids if cid in pending_ids]
+    skipped_chapter_ids = [
+        cid for cid in all_chapter_ids if state["chapters"][cid].get("skip")
     ]
-    skipped_chapter_ids = [cid for cid in all_chapter_ids if cid not in chapter_ids]
 
     return {
         "mode": mode,
@@ -352,6 +366,8 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         "extension_prompt": extension_prompt,
         "workflow_instructions": workflow,
         "chapter_ids": chapter_ids,
+        "summary_pending_chapter_ids": summary_pending,
+        "extension_pending_chapter_ids": extension_pending,
         "skipped_chapter_ids": skipped_chapter_ids,
         "enabled_types": {k: bool(opts.get(k)) for k in
                           ("multiple_choice", "short_answer", "reflection", "extension")},
