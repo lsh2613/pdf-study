@@ -39,3 +39,5 @@ from a PDF. Use this MCP workflow instead.
 스크립트가 `.venv` 생성, 의존성 설치, import 검증을 수행한 뒤 Claude Code,
 Codex CLI, Antigravity CLI 설정을 자동 적용합니다. 자세한 내용은 [docs/10-mcp-setup.md](docs/10-mcp-setup.md)를
 참조하세요.
+
+테스트까지 실행할 개발 환경이 필요하면 `./scripts/setup_mcp.sh --dev`를 사용하세요. 일반 사용자는 기본 설치만으로 충분합니다.

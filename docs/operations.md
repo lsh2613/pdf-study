@@ -14,6 +14,14 @@
 
 이 명령은 저장소 안에 `.venv`를 만들고, 패키지를 editable로 설치하고, `mcp`, `fitz`, `PIL`, `rich`, `markdown_it`, `paddle`, `paddleocr`, `pdf_study` import를 확인한다. 검증이 끝나면 Claude Code, Codex CLI, Antigravity CLI 설정을 자동 적용한다. 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다.
 
+기본 설치는 MCP 실행에 필요한 런타임 의존성만 설치한다. 테스트까지 실행할 개발 환경이 필요하면 다음 명령을 사용한다.
+
+```bash
+./scripts/setup_mcp.sh --dev
+```
+
+`--dev`는 런타임 의존성에 pytest를 추가로 설치하고 개발 환경 검증까지 수행한다. 일반 사용자는 기본 설치만으로 별도 Python 패키지 설치 없이 MCP를 실행할 수 있다.
+
 특정 클라이언트만 갱신하려면 `--claude`, `--codex`, `--antigravity-cli` 중 필요한 옵션을 붙인다. 기본은 현재 프로젝트의 로컬 설정이며, 전역 설정에 적용하려면 `--global`을 붙인다.
 
 설정만 다시 출력하려면 다음 명령을 쓴다.
@@ -64,7 +72,7 @@ scan_toc_with_ocr(work_id)
 
 ## 검증
 
-전체 회귀 확인은 다음 명령으로 한다.
+개발 환경을 아직 만들지 않았다면 먼저 `./scripts/setup_mcp.sh --dev`를 실행한다. 전체 회귀 확인은 다음 명령으로 한다.
 
 ```bash
 .venv/bin/python -m pytest

@@ -89,17 +89,21 @@ P2(유지보수·개발 경험) 순이다.
   건너뛰는 테스트를 추가했다. `.venv/bin/pytest -q` 결과는 `256 passed, 5 warnings`
   이다.
 
-### F-006 [P1] 설치 후 문서에 적힌 `.venv` 테스트 명령을 바로 실행할 수 없다
+### F-006 [해결: 2026-07-21] 개발 의존성 설치와 운영 설치가 분리되지 않았다
 
-- 발생 조건: 새 checkout에서 `./scripts/setup_mcp.sh`만 실행한 뒤
-  `.venv/bin/python -m pytest`를 실행한다.
-- 관찰 증상: 설치 스크립트는 런타임 의존성만 설치하고 pytest는 설치·검증하지
-  않지만 `docs/operations.md`는 같은 `.venv`에서 pytest를 실행하도록 안내한다.
-- 추가 불일치: `pyproject.toml`에는 `[project.optional-dependencies].dev`의
-  `pytest>=8.0`과 `[dependency-groups].dev`의 `pytest>=9.1.1`이 중복되어 있다.
-  `pytest-mock`도 선언되어 있지만 현재 테스트에서 사용하지 않는다.
-- 가능한 접근: dev 의존성 정의를 하나로 통합하고 `setup_mcp.sh --dev` 또는
-  `uv sync --group dev` 절차를 문서화한다.
+- 결정: 일반 사용자는 기본 설치만으로 MCP를 실행하고, 개발·검증 환경은
+  `setup_mcp.sh --dev` 한 번으로 준비하도록 한다. 개발 의존성의 canonical 원본은
+  `[project.optional-dependencies].dev`로 둔다.
+- 구현: `pyproject.toml`의 중복 `[dependency-groups].dev`를 제거하고 pytest를
+  `>=9.1.1` 하나로 통일했으며, 사용하지 않는 `pytest-mock`을 제거했다.
+  `setup_mcp.sh --dev`는 uv와 pip fallback 모두 `.[dev]`를 설치하고 pytest까지
+  검증한다. 기본 설치 경로는 런타임 의존성만 설치한다.
+- 문서: README, MCP 설치 안내, 운영 절차에 기본 설치와 `--dev`의 차이를 기록했다.
+  `uv.lock`도 단일 dev 의존성 정의에 맞춰 갱신했다.
+- 검증: `tests/test_setup_mcp.py`에서 `--dev --check`, 단일 dev 정의와 미사용
+  플러그인 제거를 검증했다. `--dev --check`는 런타임·pytest 확인에 성공했고,
+  빈 venv의 `--check`는 예상대로 실패했다. 전체 테스트는 `258 passed, 5 warnings`로
+  통과했다.
 
 ### F-007 [P1] 로컬 MCP 설정 적용 위치와 보호 방식이 프로젝트 기준에 맞지 않는다
 

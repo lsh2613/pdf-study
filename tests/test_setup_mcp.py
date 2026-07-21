@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 
@@ -46,6 +47,8 @@ def test_mcp_setup_guide_documents_local_venv_install():
     assert "Claude Code, Codex CLI, Antigravity CLI 설정을 자동 적용" in text
     assert "대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용" in text
     assert "--print-config" in text
+    assert "--dev" in text
+    assert "pytest" in text
     assert "설치, import 검증, 클라이언트 설정 적용을 하지 않고" in text
     assert "--check" in text
     assert "기존 `.venv`에서 필수 import가 가능한지만 확인" in text
@@ -66,3 +69,28 @@ def test_setup_script_checks_paddle_runtime_dependencies():
     assert '"paddle": "paddlepaddle"' in text
     assert '"paddleocr": "paddleocr"' in text
     assert "PDF_STUDY_PADDLEOCR_CACHE" in text
+
+
+def test_setup_script_dev_check_validates_pytest():
+    """--dev --check는 개발 환경의 pytest까지 확인해야 한다."""
+    bash = shutil.which("bash")
+    assert bash, "bash is required to validate setup_mcp.sh"
+
+    out = subprocess.check_output(
+        [bash, str(SCRIPT), "--dev", "--check"],
+        text=True,
+        cwd=ROOT,
+    )
+
+    assert "pytest" in out
+
+
+def test_pyproject_has_one_dev_dependency_definition_without_unused_plugin():
+    """개발 의존성은 하나의 원본으로 pytest만 선언해야 한다."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert project["project"]["optional-dependencies"]["dev"] == [
+        "pytest>=9.1.1",
+    ]
+    assert "dependency-groups" not in project
+    assert "pytest-mock" not in (ROOT / "pyproject.toml").read_text(encoding="utf-8")

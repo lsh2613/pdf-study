@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'INNER_EOF'
-Usage: scripts/setup_mcp.sh [--global|--local] [--print-config] [--check] [--claude] [--codex] [--antigravity-cli] [--help]
+Usage: scripts/setup_mcp.sh [--global|--local] [--print-config] [--check] [--dev] [--claude] [--codex] [--antigravity-cli] [--help]
 
 Create a project-local .venv for pdf-study, install this package into it,
 verify required runtime dependencies, and automatically apply MCP config to clients.
@@ -19,6 +19,7 @@ Options:
 
   --print-config   Print the MCP config JSON for this checkout and exit.
   --check          Verify the existing .venv can import required dependencies.
+  --dev            Install and verify development dependencies, including pytest.
   --help           Show this help.
 
 Environment:
@@ -161,8 +162,25 @@ print(f"pdf-study MCP environment OK: {sys.executable}")
 PY
 }
 
+check_dev_env() {
+  "$VENV_PY" - <<'PY'
+from __future__ import annotations
+import importlib
+import sys
+
+try:
+    importlib.import_module("pytest")
+except Exception as exc:  # noqa: BLE001 - show exact import failure
+    print(f"pdf-study development environment check failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+print(f"pdf-study development environment OK (pytest): {sys.executable}")
+PY
+}
+
 TARGETS=()
 SCOPE="local"
+DEV_MODE=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -184,7 +202,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --check)
       check_env
+      if [[ "$DEV_MODE" -eq 1 ]]; then
+        check_dev_env
+      fi
       exit 0
+      ;;
+    --dev)
+      DEV_MODE=1
+      shift
       ;;
     --claude|--codex|--antigravity-cli)
       TARGETS+=("${1#--}")
@@ -202,6 +227,11 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
   TARGETS=("claude" "codex" "antigravity-cli")
 fi
 
+INSTALL_SPEC="$REPO_DIR"
+if [[ "$DEV_MODE" -eq 1 ]]; then
+  INSTALL_SPEC="${REPO_DIR}[dev]"
+fi
+
 echo "Creating project-local venv: $VENV_DIR"
 
 if ! command -v uv >/dev/null 2>&1; then
@@ -213,7 +243,7 @@ fi
 if command -v uv >/dev/null 2>&1; then
   echo "uv detected. Forcing uv to download and use Python 3.13 for the local environment..."
   uv venv --python 3.13 "$VENV_DIR"
-  VIRTUAL_ENV="$VENV_DIR" uv pip install -e "$REPO_DIR"
+  VIRTUAL_ENV="$VENV_DIR" uv pip install -e "$INSTALL_SPEC"
 else
   # Find a compatible Python version (< 3.14) because PaddlePaddle doesn't support 3.14 yet
   for py in python3.13 python3.12 python3.11 python3.10 "$PYTHON_BIN"; do
@@ -231,7 +261,7 @@ else
 
   echo "Installing pdf-study into: $VENV_DIR"
   "$VENV_PY" -m pip install -U pip setuptools wheel
-  "$VENV_PY" -m pip install -e "$REPO_DIR"
+  "$VENV_PY" -m pip install -e "$INSTALL_SPEC"
 fi
 
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -249,6 +279,10 @@ if [[ "$(uname)" == "Darwin" ]]; then
 fi
 
 check_env
+
+if [[ "$DEV_MODE" -eq 1 ]]; then
+  check_dev_env
+fi
 
 echo ""
 echo "Applying MCP config to selected clients: ${TARGETS[*]}"

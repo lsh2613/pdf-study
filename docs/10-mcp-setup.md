@@ -8,6 +8,14 @@ scripts/setup_mcp.sh
 
 이 명령은 `.venv` 생성, 패키지 설치, import 검증을 실행한 뒤 Claude Code, Codex CLI, Antigravity CLI 설정을 자동 적용한다. 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다.
 
+기본 설치는 MCP 실행에 필요한 런타임 의존성만 설치한다. 테스트까지 실행할 개발 환경이 필요하면 다음처럼 `--dev`를 붙인다.
+
+```bash
+scripts/setup_mcp.sh --dev
+```
+
+`--dev`는 기본 런타임 의존성에 pytest를 추가로 설치하고 검증한다. 일반 사용자는 기본 설치만으로 PDF 학습 MCP를 바로 실행할 수 있다.
+
 특정 클라이언트만 갱신하려면 대상 옵션을 붙인다.
 
 ```bash
