@@ -881,6 +881,33 @@ def test_get_subagent_prompts_validates_only_pending_raw(tmp_path, ko_short):
     assert "각 non-skip 챕터" not in response["error"]
 
 
+def test_get_subagent_prompts_ignores_missing_raw_when_all_results_completed(
+    tmp_path, ko_short,
+):
+    wid = server.init_work(
+        str(ko_short), str(tmp_path / "out_all_completed"), enable_extension=True,
+    )["data"]["work_id"]
+    _scan(wid)
+    result = _sc(
+        wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}],
+    )
+    assert result["ok"], result
+    assert server.save_chapter_result(wid, "ch1", _result())["ok"] is True
+    assert server.save_extension_result(wid, "ch1", _ext())["ok"] is True
+
+    (workspace.chapters_raw_dir(wid) / "ch1.json").unlink()
+
+    response = server.get_subagent_prompts(wid)
+
+    assert response["ok"] is True, response
+    assert response["data"]["summary_pending_chapter_ids"] == []
+    assert response["data"]["extension_pending_chapter_ids"] == []
+    assert response["data"]["chapter_ids"] == []
+    assert "finalize_study" in response["next_action"]
+    assert "save_chapter_result" not in response["next_action"]
+    assert "save_extension_result" not in response["next_action"]
+
+
 def test_get_subagent_prompts_next_action_mentions_only_summary_when_pending(
     tmp_path, ko_short,
 ):
