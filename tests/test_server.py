@@ -1332,6 +1332,70 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
     assert r10["data"]["entry_page"] == "main.html"
 
 
+def test_pending_guidance_tracks_each_remaining_result_kind(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 6]},
+        {"chapter_id": "ch2", "title": "B", "pdf_pages": [7, 12]},
+    ])
+
+    saved_summary = server.save_chapter_result(wid, "ch1", _result())
+    assert saved_summary["ok"], saved_summary
+    assert "save_extension_result" in saved_summary["next_action"]
+    assert "save_chapter_result" not in saved_summary["next_action"]
+
+    saved_extension = server.save_extension_result(wid, "ch2", _ext())
+    assert saved_extension["ok"], saved_extension
+    assert "save_chapter_result" in saved_extension["next_action"]
+    assert "save_extension_result" not in saved_extension["next_action"]
+
+    ch1 = server.get_chapter_content(wid, "ch1")
+    assert "save_extension_result" in ch1["next_action"]
+    assert "save_chapter_result" not in ch1["next_action"]
+
+    ch2 = server.get_chapter_content(wid, "ch2")
+    assert "save_chapter_result" in ch2["next_action"]
+    assert "save_extension_result" not in ch2["next_action"]
+
+    completed_ch1 = server.save_extension_result(wid, "ch1", _ext())
+    assert "list_pending_chapters" in completed_ch1["next_action"]
+    assert "save_chapter_result" not in completed_ch1["next_action"]
+    assert "save_extension_result" not in completed_ch1["next_action"]
+
+    completed_ch2 = server.save_chapter_result(wid, "ch2", _result())
+    assert "list_pending_chapters" in completed_ch2["next_action"]
+    assert "save_chapter_result" not in completed_ch2["next_action"]
+    assert "save_extension_result" not in completed_ch2["next_action"]
+
+
+def test_pending_guidance_lists_summary_and_extension_separately_on_resume(
+    tmp_path, ko_short,
+):
+    out = tmp_path / "out"
+    wid = server.init_work(str(ko_short), str(out))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [
+        {"chapter_id": "ch1", "title": "A", "pdf_pages": [1, 6]},
+        {"chapter_id": "ch2", "title": "B", "pdf_pages": [7, 12]},
+    ])
+    server.save_chapter_result(wid, "ch1", _result())
+    server.save_extension_result(wid, "ch2", _ext())
+
+    pending = server.list_pending_chapters(wid)
+    assert pending["data"]["summary_pending"] == ["ch2"]
+    assert pending["data"]["extension_pending"] == ["ch1"]
+    assert "summary_pending=['ch2']" in pending["next_action"]
+    assert "extension_pending=['ch1']" in pending["next_action"]
+
+    workspace._registry.clear()
+    resumed = server.resume_work(output_dir=str(out))
+    assert resumed["data"]["summary_pending"] == ["ch2"]
+    assert resumed["data"]["extension_pending"] == ["ch1"]
+    assert "summary_pending=['ch2']" in resumed["next_action"]
+    assert "extension_pending=['ch1']" in resumed["next_action"]
+
+
 def test_finalize_requires_output_format(tmp_path, ko_short):
     """output_format 미지정 시 거부 + 사용자에게 물어보라는 안내."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]

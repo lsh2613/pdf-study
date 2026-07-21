@@ -61,6 +61,84 @@ def _ensure_save_target(state: dict[str, Any], chapter_id: str) -> None:
         raise ValueError(f"chapter is skipped: {chapter_id}")
 
 
+def _pending_kinds(state: dict[str, Any], chapter_id: str) -> list[str]:
+    pending = workspace.pending_chapters_from_state(state)
+    kinds: list[str] = []
+    if chapter_id in pending["summary_pending"]:
+        kinds.append("summary")
+    if chapter_id in pending["extension_pending"]:
+        kinds.append("extension")
+    return kinds
+
+
+def _pending_guidance(
+    state: dict[str, Any],
+    work_id: str,
+    chapter_id: str | None = None,
+) -> str:
+    """현재 state 스냅샷에서 실제로 남은 결과 종류만 안내한다."""
+    if chapter_id is not None:
+        kinds = _pending_kinds(state, chapter_id)
+        actions: list[str] = []
+        if "summary" in kinds:
+            actions.append(
+                "summarizer_prompt 스키마대로 요약·문제를 만들어 "
+                f'save_chapter_result(work_id="{work_id}", '
+                f'chapter_id="{chapter_id}", data=...)로 저장하세요'
+            )
+        if "extension" in kinds:
+            actions.append(
+                "같은 text와 extension_prompt로 확장 문제를 만들어 "
+                f'save_extension_result(work_id="{work_id}", '
+                f'chapter_id="{chapter_id}", data=...)로 저장하세요'
+            )
+        if actions:
+            return (
+                f"이 챕터({chapter_id})의 text를 읽고 "
+                + ". ".join(actions)
+                + f'. 완료 후 list_pending_chapters(work_id="{work_id}")로 '
+                "전체 누락을 확인하세요."
+            )
+        return (
+            f"{chapter_id}에 남은 결과가 없습니다. "
+            f'list_pending_chapters(work_id="{work_id}")로 전체 누락을 확인하고, '
+            "모두 완료됐으면 finalize_study로 진행하세요."
+        )
+
+    pending = workspace.pending_chapters_from_state(state)
+    summary_pending = pending["summary_pending"]
+    extension_pending = pending["extension_pending"]
+    if not summary_pending and not extension_pending:
+        return (
+            f"summary_pending={summary_pending}, extension_pending={extension_pending}. "
+            f'남은 챕터가 없습니다. finalize_study(work_id="{work_id}", '
+            "output_format=...)로 진행하세요. output_format은 사용자에게 "
+            "'html(웹 사이트) / md_tui(터미널 학습)' 중 물어보고 그 선택을 "
+            "전달하세요."
+        )
+
+    instructions: list[str] = []
+    if summary_pending:
+        instructions.append(
+            f"summary_pending={summary_pending}는 summarizer_prompt로 생성해 "
+            "save_chapter_result로 저장하세요"
+        )
+    else:
+        instructions.append(f"summary_pending={summary_pending}")
+    if extension_pending:
+        instructions.append(
+            f"extension_pending={extension_pending}는 extension_prompt로 생성해 "
+            "save_extension_result로 저장하세요"
+        )
+    else:
+        instructions.append(f"extension_pending={extension_pending}")
+    return (
+        f'get_subagent_prompts(work_id="{work_id}")로 워크플로를 받은 뒤 '
+        + ". ".join(instructions)
+        + ". 모두 끝나면 list_pending_chapters로 확인하세요."
+    )
+
+
 def _is_nonempty_str(v: Any) -> bool:
     return isinstance(v, str) and bool(v.strip())
 
@@ -568,10 +646,7 @@ def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
             next_action=_question_setup_next_action(work_id, question_setup),
         )
 
-    pending = workspace.list_pending_chapters_impl(work_id)
-    opts = state.get("question_options", {})
-    ext_pending = pending["extension_pending"] if opts.get("extension") else []
-    has_pending = bool(pending["summary_pending"] or ext_pending)
+    pending = workspace.pending_chapters_from_state(state)
 
     return _ok(
         {
@@ -581,15 +656,9 @@ def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
             "execution_mode": state.get("execution_mode"),
             "extraction_mode": state.get("extraction_mode"),
             "summary_pending": pending["summary_pending"],
-            "extension_pending": ext_pending,
+            "extension_pending": pending["extension_pending"],
         },
-        next_action=(
-            f'get_subagent_prompts(work_id="{work_id}") 로 워크플로를 받아 '
-            "summary_pending/extension_pending 챕터만 처리한 뒤 "
-            "finalize_study를 호출하세요."
-            if has_pending
-            else f'남은 챕터가 없습니다. finalize_study(work_id="{work_id}")로 진행하세요.'
-        ),
+        next_action=_pending_guidance(state, work_id),
     )
 
 
@@ -951,16 +1020,8 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
     raw = analysis.get_chapter_content_impl(work_id, chapter_id)
     # 본문을 받아간 시점 = 요약 처리 시작 → 진행 모니터링용 in_progress 마킹
     workspace.mark_chapter_in_progress(work_id, chapter_id, kind="summary")
-    guide = (
-        f"이 챕터({chapter_id})의 text를 읽고 "
-        "summarizer_prompt 스키마대로 요약·문제를 만들어 "
-    )
-    return _ok(raw, next_action=(
-        guide + f"save_chapter_result(work_id=\"{work_id}\", "
-        f"chapter_id=\"{chapter_id}\", data=...)로 저장하세요. extension이 "
-        "활성이면 같은 text와 extension_prompt로 확장 문제를 만들어 "
-        "save_extension_result도 처리한 뒤, 다음 챕터로 넘어가세요."
-    ))
+    state = workspace.load_state(work_id)
+    return _ok(raw, next_action=_pending_guidance(state, work_id, chapter_id))
 
 
 # ---------------------------------------------------------------------------
@@ -1065,13 +1126,14 @@ def save_chapter_result(
         path = workspace.save_chapter_result(work_id, chapter_id, data_to_save)
     except (KeyError, ValueError, RuntimeError, OSError) as e:
         return _save_target_error(e, chapter_id)
-    return _ok({"saved_path": str(path)}, next_action=(
-        f"{chapter_id} 요약/문제 저장 완료. extension이 활성이면 같은 챕터 본문과 "
-        "extension_prompt로 확장 문제를 만들어 save_extension_result로 저장하세요. "
-        "그다음 남은 chapter_id로 진행하고, 전부 끝나면 "
-        f"list_pending_chapters(work_id=\"{work_id}\")로 누락이 없는지 확인 후 "
-        "finalize_study를 호출하세요."
-    ))
+    saved_state = workspace.load_state(work_id)
+    return _ok(
+        {"saved_path": str(path)},
+        next_action=(
+            f"{chapter_id} 요약/문제 저장 완료. "
+            + _pending_guidance(saved_state, work_id, chapter_id)
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1126,11 +1188,14 @@ def save_extension_result(
         path = workspace.save_extension_result(work_id, chapter_id, data_to_save)
     except (KeyError, ValueError, RuntimeError, OSError) as e:
         return _save_target_error(e, chapter_id)
-    return _ok({"saved_path": str(path)}, next_action=(
-        f"{chapter_id} 확장 문제 저장 완료. 남은 chapter_id로 진행하세요. "
-        f"모두 끝나면 list_pending_chapters(work_id=\"{work_id}\")로 확인 후 "
-        "finalize_study(output_format=…)로 마무리하세요."
-    ))
+    saved_state = workspace.load_state(work_id)
+    return _ok(
+        {"saved_path": str(path)},
+        next_action=(
+            f"{chapter_id} 확장 문제 저장 완료. "
+            + _pending_guidance(saved_state, work_id, chapter_id)
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1162,30 +1227,15 @@ def list_pending_chapters(work_id: str) -> dict[str, Any]:
     재시도 루프에서 사용. extension이 비활성이면 extension_pending은 무시.
     """
     state = workspace.load_state(work_id)
-    pending = workspace.list_pending_chapters_impl(work_id)
+    pending = workspace.pending_chapters_from_state(state)
     opts = state.get("question_options", {})
     summary_pending = pending["summary_pending"]
-    ext_pending = pending["extension_pending"] if opts.get("extension") else []
-    blocking = sorted(set(summary_pending) | set(ext_pending))
-    if blocking:
-        na = (
-            f"아직 처리할 챕터: summary={summary_pending}, extension={ext_pending}. "
-            "각 챕터를 get_chapter_content→(요약/문제)→save_chapter_result"
-            "(+save_extension_result)로 끝내세요. 이미 한 번 실패한 챕터는 1회만 "
-            "재시도하고, 계속 실패하면 finalize_study(force=True)로 부분 렌더가 "
-            "가능합니다."
-        )
-    else:
-        na = (
-            "모든 챕터 처리 완료. finalize_study(work_id, output_format)로 "
-            "마무리하세요 — output_format은 사용자에게 'html(웹 사이트) / "
-            "md_tui(터미널 학습)' 중 물어보고 그 선택을 전달하세요."
-        )
+    ext_pending = pending["extension_pending"]
     return _ok({
         "summary_pending": summary_pending,
         "extension_pending": ext_pending,
         "extension_enabled": bool(opts.get("extension")),
-    }, next_action=na)
+    }, next_action=_pending_guidance(state, work_id))
 
 
 # ---------------------------------------------------------------------------
@@ -1242,9 +1292,8 @@ def finalize_study(
     state = workspace.load_state(work_id)
 
     # 완료 가드: pending 챕터가 남아 있으면 거부 (force로 우회 가능)
-    pending = workspace.list_pending_chapters_impl(work_id)
-    opts = state.get("question_options", {})
-    ext_pending = pending["extension_pending"] if opts.get("extension") else []
+    pending = workspace.pending_chapters_from_state(state)
+    ext_pending = pending["extension_pending"]
     blocking = sorted(set(pending["summary_pending"]) | set(ext_pending))
     if blocking and not force:
         return _err(
