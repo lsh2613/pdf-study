@@ -378,6 +378,13 @@ def _assert_mode_choices(r):
     assert all(c.get("label") and c.get("desc") for c in r["data"]["choices"])
     assert r["data"]["execution_modes"] == ["sequential", "parallel"]
     assert r["data"]["extraction_modes"] == ["text", "ocr"]
+    assert [choice["desc"] for choice in r["data"]["choices"]] == [
+        "디지털 PDF · 안정적·빠르고 저렴",
+        "디지털 PDF · 최대 5개 동시로 가장 빠름",
+        "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리",
+        "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리",
+    ]
+    assert "무난한 기본" not in r["error"]
     # 구조화 선택 도구(AskUserQuestion) 사용 + verbatim 정책이 안내에 포함
     assert "AskUserQuestion" in r["error"]
 

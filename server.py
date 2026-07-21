@@ -848,7 +848,7 @@ def set_chapters(
       ※ 단, scan_pdf의 text_quality가 garbled(mojibake)/no_text_layer면 text 추출이
         무의미하므로 data.choices를 **OCR 2조합으로만** 좁혀 돌려줍니다
         (data.forced_extraction_mode="ocr"). 이때는 그 2개만 제시하세요.
-        - ① Sequential + Text: 안정적·빠르고 저렴 (디지털 PDF, 무난한 기본)
+        - ① Sequential + Text: 안정적·빠르고 저렴 (디지털 PDF)
         - ② Parallel + Text: 최대 5개 챕터 동시로 가장 빠름 (디지털 PDF)
         - ③ Sequential + OCR: PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리
         - ④ Parallel + OCR: PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리
@@ -883,7 +883,7 @@ def set_chapters(
         combos = [
             {"execution_mode": "sequential", "extraction_mode": "text",
              "label": "Sequential + Text",
-             "desc": "디지털 PDF · 안정적·빠르고 저렴 (무난한 기본)"},
+             "desc": "디지털 PDF · 안정적·빠르고 저렴"},
             {"execution_mode": "parallel", "extraction_mode": "text",
              "label": "Parallel + Text",
              "desc": "디지털 PDF · 최대 5개 동시로 가장 빠름"},
@@ -927,7 +927,7 @@ def set_chapters(
                 "원하는 하나를 골라 두 값을 전달해 다시 호출하세요. 4개 모두 유효하니 "
                 "임의로 빼지 말고 전부 제시할 것.\n"
                 "① Sequential + Text — 한 챕터씩 순차 + 라이브러리 텍스트 추출. "
-                "안정적·빠르고 저렴 (디지털 PDF, 무난한 기본값).\n"
+                "안정적·빠르고 저렴 (디지털 PDF).\n"
                 "② Parallel + Text — 최대 5개 챕터 동시 + 텍스트 추출. 가장 빠름 "
                 "(병렬 디스패치 가능한 클라이언트).\n"
                 "③ Sequential + OCR — PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리.\n"
