@@ -72,23 +72,22 @@ P2(유지보수·개발 경험) 순이다.
 - 영향: 비개발 사용자는 해당 선택지가 자동 적용되는 값이라고 오해할 수 있다.
 - 가능한 접근: 네 선택지의 장단점만 중립적으로 기술하고 “기본” 표현을 제거한다.
 
-### F-005 [P1] 테스트 상태 문서와 실제 재현 절차가 맞지 않는다
+### F-005 [해결: 2026-07-21] 테스트 fixture가 생성기 변경을 감지하지 못한다
 
-- `docs/tracking/status.md`는 최근 223개 테스트 통과를 기록하지만 현재 clean
-  checkout에서 수집·통과하는 테스트는 210개다.
-- F-001 처리 과정에서 상태 문서의 검증 개수는 현재 수집되는 210개로 교정했지만,
-  아래 stale fixture 재현성 문제는 이 항목에서 해결하지 않았다.
-- clean archive에서 `PYTHONPATH=<parent> python3 -m pytest -q`를 실행한 결과는
-  `210 passed, 5 warnings`였다.
-- 현재 작업 폴더에서는 `23 failed, 187 passed`였다. 남아 있던 ignored fixture
-  `tests/fixtures/ko_with_toc.pdf`에는 내장 목차가 없었지만 현재 생성기로 새로 만든
-  파일에는 3개 북마크가 있었다.
-- `tests/conftest.py`는 fixture가 없을 때만 재생성하므로 생성기 변경 뒤의 stale
-  fixture를 감지하지 못한다.
-- 영향: 같은 커밋에서도 개발자마다 테스트 결과가 달라지고 상태 문서를 신뢰하기
-  어렵다.
-- 가능한 접근: fixture 생성 버전/해시가 달라지면 재생성하거나 테스트마다 임시
-  디렉터리에 생성한다. 상태 문서에는 검증 커밋·명령·실제 개수를 함께 기록한다.
+- 조사 보정: 과거 clean checkout에서는 `210 passed`, 기존 작업 폴더에서는 stale
+  `ko_with_toc.pdf` 때문에 `23 failed, 187 passed`가 나왔다. F-011 이후 기존
+  checkout의 테스트 수는 `253개`였고, 이번 회귀 테스트 추가 후 현재는 `256개`다.
+- 원인: `tests/conftest.py`가 PDF fixture의 존재 여부만 확인해, 생성기 변경 뒤에도
+  기존 ignored PDF를 그대로 사용했다.
+- 결정: fixture 생성기와 입력 폰트 fingerprint, 생성된 PDF별 SHA-256을
+  `tests/fixtures/.fixture-manifest.json`에 기록한다. manifest가 없거나 fingerprint·
+  파일 해시가 다르면 pytest 시작 시 fixture를 재생성하고, 같으면 재사용한다.
+- 구현: `build_fixtures.ensure_fixtures`가 manifest 검증과 재생성을 담당하며,
+  manifest는 임시 파일 작성 후 교체한다. `tests/conftest.py`는 기존 파일 존재 검사
+  대신 이 헬퍼를 호출한다. manifest와 생성 PDF는 계속 git에서 제외한다.
+- 검증: stale fingerprint·변경된 PDF는 재생성을 수행하고 최신 manifest는 재생성을
+  건너뛰는 테스트를 추가했다. `.venv/bin/pytest -q` 결과는 `256 passed, 5 warnings`
+  이다.
 
 ### F-006 [P1] 설치 후 문서에 적힌 `.venv` 테스트 명령을 바로 실행할 수 없다
 

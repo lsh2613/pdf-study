@@ -11,10 +11,14 @@
     from pdf_study.tests.fixtures.build_fixtures import build_all
     build_all()
 
-생성된 PDF는 git에 들어가지 않습니다(.gitignore). 매번 재생성 가능.
+생성된 PDF는 git에 들어가지 않습니다(.gitignore). 생성기 fingerprint가
+바뀌면 pytest 시작 시 자동으로 재생성됩니다.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 from pathlib import Path
 
 import fitz
@@ -27,10 +31,87 @@ KO_FONT = os.environ.get(
     "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
 )
 
+FIXTURE_MANIFEST_NAME = ".fixture-manifest.json"
+FIXTURE_NAMES = ("ko_with_toc", "ko_short", "scanned_empty")
+
 FIXTURES_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = FIXTURES_DIR / "_assets"
 
 PAGE_W, PAGE_H = 595, 841
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def fixture_fingerprint() -> dict[str, str]:
+    """생성기와 입력 폰트가 바뀌었는지 판단하는 fingerprint."""
+    font_path = Path(KO_FONT)
+    return {
+        "generator_sha256": _sha256(Path(__file__)),
+        "font_path": str(font_path),
+        "font_sha256": _sha256(font_path) if font_path.exists() else "missing",
+    }
+
+
+def _fixture_paths(out_dir: Path) -> dict[str, Path]:
+    return {name: out_dir / f"{name}.pdf" for name in FIXTURE_NAMES}
+
+
+def _manifest_path(out_dir: Path) -> Path:
+    return out_dir / FIXTURE_MANIFEST_NAME
+
+
+def _manifest_payload(paths: dict[str, Path]) -> dict:
+    return {
+        "fingerprint": fixture_fingerprint(),
+        "files": {
+            path.name: {"sha256": _sha256(path)}
+            for path in paths.values()
+        },
+    }
+
+
+def _write_manifest(out_dir: Path, paths: dict[str, Path]) -> None:
+    manifest_path = _manifest_path(out_dir)
+    temporary_path = manifest_path.with_name(f".{manifest_path.name}.tmp")
+    temporary_path.write_text(
+        json.dumps(_manifest_payload(paths), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporary_path.replace(manifest_path)
+
+
+def _manifest_is_current(out_dir: Path) -> bool:
+    paths = _fixture_paths(out_dir)
+    manifest_path = _manifest_path(out_dir)
+    if not manifest_path.exists() or any(not path.exists() for path in paths.values()):
+        return False
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        files = manifest["files"]
+        if manifest["fingerprint"] != fixture_fingerprint():
+            return False
+        return all(
+            files[path.name]["sha256"] == _sha256(path)
+            for path in paths.values()
+        )
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
+
+
+def ensure_fixtures(out_dir: Path | None = None) -> dict[str, Path]:
+    """fixture가 생성기와 일치할 때 재사용하고, 아니면 다시 생성한다."""
+    out_dir = out_dir or FIXTURES_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = _fixture_paths(out_dir)
+    if _manifest_is_current(out_dir):
+        return paths
+
+    paths = build_all(out_dir)
+    _write_manifest(out_dir, paths)
+    return paths
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +392,6 @@ def build_all(out_dir: Path | None = None) -> dict[str, Path]:
 
 
 if __name__ == "__main__":
-    for name, p in build_all().items():
+    for name, p in ensure_fixtures().items():
         size_kb = p.stat().st_size / 1024
         print(f"  {name:18s} {p}  ({size_kb:.1f} KB)")

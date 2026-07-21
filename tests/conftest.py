@@ -10,20 +10,16 @@ from pathlib import Path
 
 import pytest
 
-from .fixtures.build_fixtures import FIXTURES_DIR, build_all
-
-_FIXTURE_FILES = ("ko_with_toc.pdf", "ko_short.pdf", "scanned_empty.pdf")
+from .fixtures.build_fixtures import FIXTURES_DIR, ensure_fixtures
 
 
 def pytest_configure(config):
-    """PDF fixture가 빠져 있으면 즉시 빌드.
+    """PDF fixture가 없거나 오래되었으면 즉시 빌드.
 
-    polyfill: 합성 PDF는 git에 들어가지 않으므로 첫 실행/clean 환경에서
-    자동으로 생성한다.
+    합성 PDF는 git에 들어가지 않으므로 첫 실행/clean 환경에서 자동으로
+    생성하고, 생성기나 입력 폰트가 바뀌면 기존 파일을 교체한다.
     """
-    missing = [f for f in _FIXTURE_FILES if not (FIXTURES_DIR / f).exists()]
-    if missing:
-        build_all()
+    ensure_fixtures()
 
 
 @pytest.fixture(scope="session")

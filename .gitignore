@@ -9,6 +9,7 @@ __pycache__/
 # 합성 테스트 fixture (build_fixtures로 매번 재생성 가능, 폰트 임베드로 6MB)
 tests/fixtures/*.pdf
 tests/fixtures/_assets/
+tests/fixtures/.fixture-manifest.json
 .pytest_cache/
 
 # MCP 클라이언트별 로컬 설정 (venv/Python 절대 경로 등 사용자 환경 의존)

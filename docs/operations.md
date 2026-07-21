@@ -70,6 +70,10 @@ scan_toc_with_ocr(work_id)
 .venv/bin/python -m pytest
 ```
 
+pytest 시작 시 `tests/fixtures/.fixture-manifest.json`을 확인한다. 합성 PDF가 없거나
+fixture 생성기·입력 폰트·PDF 파일 해시가 현재 manifest와 다르면 fixture를 자동으로
+재생성한다. manifest와 생성 PDF는 로컬 ignored 파일이므로 커밋하지 않는다.
+
 변경 범위가 좁을 때는 관련 테스트를 먼저 실행하고, 완료 전 전체 테스트를 실행한다. 예시는 다음과 같다.
 
 ```bash
