@@ -478,6 +478,32 @@ def test_list_pending_chapters(tmp_path, fake_pdf):
     assert {"ch1", "ch2"} == set(pending["extension_pending"])
 
 
+def test_pending_chapters_from_state_splits_result_types():
+    state = {
+        "question_options": {"extension": True},
+        "chapters": {
+            "ch10": {"summary_status": "pending", "extension_status": "completed"},
+            "ch2": {"summary_status": "completed", "extension_status": "failed"},
+            "ch1": {"summary_status": "completed", "extension_status": "completed"},
+            "appendix": {"skip": True, "summary_status": "skipped", "extension_status": "skipped"},
+        },
+    }
+    assert workspace.pending_chapters_from_state(state) == {
+        "summary_pending": ["ch10"],
+        "extension_pending": ["ch2"],
+    }
+
+
+def test_pending_chapters_from_state_ignores_disabled_extension():
+    state = {
+        "question_options": {"extension": False},
+        "chapters": {
+            "ch1": {"summary_status": "completed", "extension_status": "pending"},
+        },
+    }
+    assert workspace.pending_chapters_from_state(state)["extension_pending"] == []
+
+
 def test_concurrent_writes_keep_state_intact(tmp_path, fake_pdf):
     """50 스레드가 동시에 update_chapter_status + save_chapter_result 호출.
 

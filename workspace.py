@@ -879,6 +879,30 @@ def mark_chapter_in_progress(work_id: str, chapter_id: str, *, kind: str) -> Non
 _DONE_STATUSES = ("completed", "skipped")
 
 
+def _chapter_sort_key(chapter_id: str) -> tuple[int, str]:
+    if chapter_id.startswith("ch") and chapter_id[2:].isdigit():
+        return (int(chapter_id[2:]), chapter_id)
+    return (10**9, chapter_id)
+
+
+def pending_chapters_from_state(state: dict[str, Any]) -> dict[str, list[str]]:
+    extension_enabled = bool(state.get("question_options", {}).get("extension"))
+    summary_pending: list[str] = []
+    extension_pending: list[str] = []
+    for chapter_id in sorted(state.get("chapters", {}), key=_chapter_sort_key):
+        entry = state["chapters"][chapter_id]
+        if entry.get("skip"):
+            continue
+        if entry.get("summary_status") not in _DONE_STATUSES:
+            summary_pending.append(chapter_id)
+        if extension_enabled and entry.get("extension_status") not in _DONE_STATUSES:
+            extension_pending.append(chapter_id)
+    return {
+        "summary_pending": summary_pending,
+        "extension_pending": extension_pending,
+    }
+
+
 def list_pending_chapters_impl(work_id: str) -> dict[str, list[str]]:
     """summary/extension이 아직 처리되지 않은 챕터 ID 목록.
 
@@ -887,18 +911,7 @@ def list_pending_chapters_impl(work_id: str) -> dict[str, list[str]]:
     Returns:
         {
             "summary_pending": ["ch1", "ch3"],
-            "extension_pending": ["ch1", "ch2"],   # 옵션 비활성 필터링은 server에서
+            "extension_pending": ["ch1", "ch2"],
         }
     """
-    state = load_state(work_id)
-    summary_pending: list[str] = []
-    extension_pending: list[str] = []
-    for cid, entry in state.get("chapters", {}).items():
-        if entry.get("summary_status") not in _DONE_STATUSES:
-            summary_pending.append(cid)
-        if entry.get("extension_status") not in _DONE_STATUSES:
-            extension_pending.append(cid)
-    return {
-        "summary_pending": sorted(summary_pending),
-        "extension_pending": sorted(extension_pending),
-    }
+    return pending_chapters_from_state(load_state(work_id))
