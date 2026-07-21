@@ -41,7 +41,7 @@
 
 처리 모드 선택 실패 응답의 각 선택지는 `execution_mode`, `extraction_mode`, `label`, `desc`를 담는다. 텍스트 레이어가 없거나 깨진 PDF에서는 `forced_extraction_mode="ocr"`가 함께 오고, 선택지는 OCR 조합만 남는다. 클라이언트는 빠진 text 선택지를 다시 만들어 사용자에게 보여주면 안 된다.
 
-`get_subagent_prompts(work_id)`는 요약자 프롬프트, 확장 문제 프롬프트, 처리 순서, 본문 챕터 ID 목록을 반환한다. skip 챕터는 `chapter_ids`에서 제외되고 `skipped_chapter_ids`에 따로 들어간다. non-skip 챕터의 raw 본문 파일이 없거나 `text`가 비어 있거나 `char_count`가 실제 길이와 맞지 않으면 실패하며, `data.invalid_chapters`에 챕터별 사유를 담는다. 남아 있는 OCR 실패는 `data.failed_chapters`에도 같은 `{chapter_id, failed_pages, error}` 형태로 노출한다.
+`get_subagent_prompts(work_id)`는 요약자 프롬프트, 확장 문제 프롬프트, 처리 순서와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 반환한다. 두 목록은 각각 아직 저장할 요약·기본 문제와 확장 문제가 남은 챕터 ID를 자연 정렬해 담는다. 기존 클라이언트용 `chapter_ids`는 두 pending 목록의 자연 정렬 합집합이며 완료된 챕터는 포함하지 않는다. skip 챕터는 모든 처리 목록에서 제외되고 `skipped_chapter_ids`에 따로 들어간다. workflow와 성공 `next_action`은 각 목록에 실제로 남은 결과 유형만 생성·저장하도록 안내하며, 두 pending 목록이 모두 비면 렌더링으로 진행하게 한다. raw 본문 파일, 비어 있지 않은 `text`, 실제 길이와 같은 `char_count` 검증은 두 pending 목록의 합집합에만 적용하므로 완료 챕터의 raw 손상은 재개를 막지 않는다. pending raw가 유효하지 않으면 실패하고 `data.invalid_chapters`에 챕터별 사유를 담으며, 그중 남아 있는 OCR 실패는 `data.failed_chapters`에도 같은 `{chapter_id, failed_pages, error}` 형태로 노출한다.
 
 `get_chapter_content(work_id, chapter_id)`는 챕터 입력을 반환한다. text 모드와 OCR 모드 모두 `text`가 들어간다. OCR 모드의 `text`는 `set_chapters` 시점에 PaddleOCR CPU로 선계산해 `chapters_raw/chN.json`에 저장한 본문이다. 등록되지 않은 `chapter_id`, skip 챕터, 아직 챕터가 설정되지 않은 작업은 실패한다.
 

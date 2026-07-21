@@ -37,6 +37,7 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
 ## 반드시 지킬 일
 
 - PDF 학습 요청은 일반 요약으로 처리하지 않는다. 기본 흐름은 `init_work → scan_pdf → set_chapters → get_subagent_prompts → save_* → list_pending_chapters → finalize_study`다. 내장 목차가 없거나 목차 재분석이 필요하면 `scan_pdf` 뒤에 `prepare_ocr → scan_toc_with_ocr`를 거쳐 챕터를 구성한 다음 `set_chapters`로 간다.
+- `get_subagent_prompts`의 `summary_pending_chapter_ids`와 `extension_pending_chapter_ids`는 실제 남은 결과를 각각 담고, 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합만 담는다. 완료 챕터는 raw 검증과 처리·저장 안내에서 제외하며 workflow와 `next_action`은 실제 pending 결과 유형만 안내해야 한다.
 - `init_work`가 단답형·주관식·확장형 문제 선택을 요구하면 응답의 항목과 설명을 그대로 사용자에게 보여주고, 선택적 학습자 정보도 함께 안내한다. 사용자의 명시적 선택을 `scan_pdf`에 전달하기 전에는 PDF 스캔으로 넘어가지 않는다. 객관식만 기존 호환을 위해 기본 활성이다.
 - `init_work`가 기존 출력 작업을 발견하면 `resume`, `replace`, `new_output_dir` 선택지를 그대로 보여준다. `replace`는 사용자의 명시적 선택을 받은 뒤에만 `replace_existing=true`로 전달한다. 렌더 결과 정리는 `.pdf-study-manifest.json`에 기록된 관리 경로에 한정하며 다른 사용자 파일을 삭제하거나 덮어쓰면 안 된다.
 - 챕터 경계는 PDF 북마크 또는 목차 페이지 이미지로만 정한다. PDF 텍스트를 긁어 목차를 추정하는 코드를 추가하면 안 된다. `scan_pdf`는 목차 후보 이미지를 렌더할 뿐 OCR 모델을 준비하거나 실행하지 않는다.

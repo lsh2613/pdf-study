@@ -56,6 +56,14 @@
 
 대응: 서버 경계에서 활성 문제 유형별 필수값을 검사한 뒤에만 `completed`로 바꾼다. 새 문제 유형이나 저장 스키마를 추가하면 누락 검사를 먼저 확장해야 한다.
 
+## 재개 시 완료 결과 재처리
+
+증상: 일부 챕터의 요약이나 확장 문제만 남은 작업을 재개했는데 모든 non-skip 챕터를 다시 읽고 두 결과를 모두 저장하라는 안내가 나온다. 완료 챕터의 raw 파일이 사라졌을 때 남은 작업과 무관한 검증 오류로 재개가 막힐 수도 있다.
+
+원인: 처리 대상을 하나의 전체 챕터 목록으로 만들면 요약 pending과 확장 pending이 서로 다른 상태를 표현할 수 없고, raw 검증과 다음 작업 안내도 완료 여부를 구분하지 못한다.
+
+대응: 한 상태 스냅샷에서 `summary_pending_chapter_ids`와 `extension_pending_chapter_ids`를 각각 계산하고, 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합으로 만든다. raw 검증은 이 합집합에만 적용한다. workflow, `get_subagent_prompts`와 챕터별·전체 `next_action`은 실제로 남은 결과 유형의 save 도구만 안내한다. 변경 후에는 두 pending 집합이 다른 재개, 완료 챕터 raw 누락, 확장 비활성, 모든 결과 완료를 함께 확인한다.
+
 ## 결과 파일과 상태 저장 순서
 
 증상: 잘못된 챕터 ID나 건너뛰기 챕터에 저장을 시도했거나, 파일 저장 뒤 상태 저장이 실패했는데 `chapters/summaries`, `chapters/quiz`, `chapters/extension_quiz`에 JSON 파일이 남는다.

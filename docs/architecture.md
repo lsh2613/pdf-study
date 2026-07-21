@@ -22,7 +22,7 @@ pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, �
 
 클라이언트가 챕터와 처리 방식을 확정하면 `set_chapters`가 스캔 여부와 입력 전체를 먼저 검증한다. 실패하면 기존 작업을 바꾸지 않으며, 성공하면 모드·챕터와 처리 시작 phase를 하나의 잠금 구간에서 상태 파일에 등록한다. 같은 작업의 다른 `set_chapters` 호출은 앞선 호출의 본문 준비와 phase 종결 뒤에 시작한다. `pdf_pages`는 본문 추출 경계로 쓰고 `source_pages`는 상태·raw·응답에 보존하는 표시 메타로만 쓴다. text 모드에서는 이 시점에 본문 텍스트를 추출해 `chapters_raw`에 저장한다. OCR 모드에서는 이 시점에 본문 페이지 이미지를 렌더링하고 PaddleOCR CPU로 읽어 `chapters_raw`에 `text`와 `char_count`를 저장한다. 본문 준비가 끝나면 `chapter_processing`은 `completed`, 하나라도 실패하면 재시도 가능한 챕터별 오류와 함께 `failed`가 된다.
 
-`get_subagent_prompts`는 처리 모드와 학습자 정보에 맞는 한국어 프롬프트를 돌려준다. 각 챕터 처리자는 `get_chapter_content`로 입력을 받고, 요약·핵심 포인트·활성 문제 유형을 한국어로 만든 뒤 `save_chapter_result`로 저장한다. 확장 문제가 켜져 있으면 같은 챕터 본문과 학습자 정보를 받은 확장 프롬프트가 외부 검색 없이 응용 문제를 만들고 `save_extension_result`가 저장한다.
+`get_subagent_prompts`는 처리 모드와 학습자 정보에 맞는 한국어 프롬프트와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 돌려준다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이며, raw 본문 검증도 이 처리 대상 합집합에만 적용되어 이미 완료된 챕터의 예전 raw 상태가 재개를 막지 않는다. 각 챕터 처리자는 `get_chapter_content`로 입력을 한 번 받고, 해당 챕터가 요약 pending 목록에 있을 때만 요약·핵심 포인트·활성 기본 문제를 `save_chapter_result`로 저장한다. 확장 pending 목록에 있을 때만 같은 본문과 학습자 정보를 받은 확장 프롬프트가 외부 검색 없이 응용 문제를 만들고 `save_extension_result`가 저장한다. workflow와 `next_action`도 실제로 남은 결과 유형만 안내한다.
 
 `list_pending_chapters`가 남은 요약 또는 확장 문제를 확인한다. 남은 챕터가 있으면 `finalize_study`는 기본적으로 거부한다. 모두 끝난 뒤 `finalize_study`가 HTML 또는 Markdown+TUI 결과물을 같은 중립 JSON에서 staging에 만들고, 성공한 세대의 관리 경로만 최종 폴더에 설치한다. 같은 형식과 같은 학습 fingerprint일 때만 기존 진도를 staging으로 복사한다.
 
@@ -68,15 +68,17 @@ flowchart TD
     L --> P["get_subagent_prompts"]
     O --> P
 
-    P --> Q["get_chapter_content"]
-    Q --> R["save_chapter_result"]
-    R --> S{"확장 문제 사용?"}
+    P --> Q["chapter_ids = 두 pending 목록의 합집합"]
+    Q --> R["get_chapter_content"]
+    R --> S{"요약 pending?"}
+    S -->|예| S0["save_chapter_result"]
+    S -->|아니오| S1{"확장 pending?"}
+    S0 --> S1
 
-    S -->|예| T["같은 본문 + extension_prompt"]
+    S1 -->|예| T["같은 본문 + extension_prompt"]
     T --> U["save_extension_result"]
     U --> V["list_pending_chapters"]
-
-    S -->|아니오| V
+    S1 -->|아니오| V
 
     V --> W{"남은 챕터 있음?"}
     W -->|예| Q
