@@ -7,4 +7,4 @@
 - engineering-notes.md: 놓치기 쉬운 동작과 확인 절차
 - operations.md: 설치·실행·검증 절차
 - contracts.md: MCP 도구와 출력물의 외부 계약
-- 10-mcp-setup.md: MCP 클라이언트에 적용할 로컬 `.venv` 설정
+- 10-mcp-setup.md: MCP 로컬 `.venv` 빠른 설치 안내(상세 절차는 operations.md)

@@ -230,10 +230,13 @@ P2(유지보수·개발 경험) 순이다.
   바로 다음 구현 커밋 `7e1d682 refactor: 한국어 단일 학습 흐름으로 통합`으로
   적용된 과거 계획이었다. 활성 계획처럼 보이는 미완료 체크박스와 환경 의존적인
   스킬 요구를 남기지 않도록 삭제했으며, 원본과 구현 관계는 Git 이력으로 보존한다.
+- [해결: 2026-07-22] `docs/10-mcp-setup.md`와 `docs/operations.md`에 중복되던
+  설치·옵션·검증 설명은 `operations.md`를 기준으로 통합했다. 기존 설치 링크와
+  북마크를 보존하기 위해 `10-mcp-setup.md`는 기본 설치 명령과 상세 절차 링크만
+  제공하는 짧은 진입 문서로 축소했다.
 
 | 대상 | 관찰 내용 | 정리 방향 |
 |---|---|---|
-| `docs/10-mcp-setup.md`와 `docs/operations.md` 설치 절 | venv 생성, 세 클라이언트 적용, `--print-config`, `--check`, uv/libomp 설명이 반복된다. | `operations.md`를 기준으로 두고 `10-mcp-setup.md`는 짧은 진입 안내와 링크만 남기거나 합친다. |
 | `AGENTS.md`와 `CLAUDE.md` | 현재 바이트 단위로 동일하다. 두 진입 파일은 필요하지만 각각 수정하면 드리프트한다. | 하나의 canonical 원본에서 생성하거나 symlink를 사용하고 동등성 검사를 둔다. |
 | `.claude/skills/commit/SKILL.md`와 `.codex/skills/commit/SKILL.md` | provider 경로와 co-author 3곳만 다르고 나머지 절차가 중복된다. | 공통 템플릿과 provider 변수로 생성하고 동기화 테스트를 둔다. |
 | 문제 JSON 계약 | `prompts.py` 예시, `server.py` 수동 검증, `docs/contracts.md`, 테스트 fixture에 같은 스키마가 반복된다. | typed model 또는 JSON Schema 하나를 canonical로 두고 검증과 프롬프트 예시를 생성한다. |
