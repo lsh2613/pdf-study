@@ -18,12 +18,13 @@
 - 프로젝트 로컬 `.venv` 설치 스크립트와 클라이언트 설정 자동 적용, 환경 확인 명령이 있다. 기본 설치는 런타임만 준비하고 `setup_mcp.sh --dev`는 pytest까지 준비·검증한다. 로컬 MCP 설정은 호출 위치가 아니라 저장소 루트를 기준으로 안전하게 원자 적용하며, 손상된 기존 설정은 백업·덮어쓰지 않는다.
 - 처리 모드 선택지는 순차/병렬과 text/OCR의 네 조합을 모두 보여주며, 기본값이나 추천으로 오해할 표현을 붙이지 않는다.
 - Markdown+TUI 렌더러의 설계 주석은 현재 `docs/contracts.md`와 `docs/architecture.md`를 참조하며, 삭제된 문서 경로를 가리키지 않는다.
+- 다음 도구에 사용자 선택이 필요하면 앞선 성공 응답의 `next_step`이 필수 파라미터와 구조화된 선택지를 제공한다. 처리 모드와 출력 형식의 실패 응답 선택지는 잘못된 호출을 위한 fallback으로 유지한다.
 
 ## 검증 상태
 
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, 선택지 요구, 최종 렌더링, 진도 저장 서버, 설치 스크립트와 MCP 설정 보호를 다룬다.
 - 테스트 시작 시 fixture 생성기 fingerprint와 PDF 해시를 확인해 오래된 합성 PDF를 자동 재생성한다.
-- 최근 확인: 현재 checkout에서 `.venv/bin/pytest -q`가 263개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
+- 최근 확인: 현재 checkout에서 `.venv/bin/pytest -q`가 268개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
 
 ## 남은 일
 

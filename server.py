@@ -23,6 +23,47 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP("pdf-study-builder")
 
 
+_PROCESSING_MODE_CHOICES = (
+    {
+        "execution_mode": "sequential",
+        "extraction_mode": "text",
+        "label": "Sequential + Text",
+        "desc": "디지털 PDF · 안정적·빠르고 저렴",
+    },
+    {
+        "execution_mode": "parallel",
+        "extraction_mode": "text",
+        "label": "Parallel + Text",
+        "desc": "디지털 PDF · 최대 5개 동시로 가장 빠름",
+    },
+    {
+        "execution_mode": "sequential",
+        "extraction_mode": "ocr",
+        "label": "Sequential + OCR",
+        "desc": "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리",
+    },
+    {
+        "execution_mode": "parallel",
+        "extraction_mode": "ocr",
+        "label": "Parallel + OCR",
+        "desc": "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리",
+    },
+)
+
+_OUTPUT_FORMAT_CHOICES = (
+    {
+        "value": "html",
+        "label": "HTML",
+        "desc": "정적 웹사이트 — 브라우저로 열람 + 진도 저장 서버",
+    },
+    {
+        "value": "md_tui",
+        "label": "Markdown + TUI",
+        "desc": "챕터별 Markdown + 터미널 학습 TUI",
+    },
+)
+
+
 # ---------------------------------------------------------------------------
 # 응답 헬퍼
 # ---------------------------------------------------------------------------
@@ -37,6 +78,29 @@ def _err(
     next_action: str | None = None,
 ) -> dict[str, Any]:
     return {"ok": False, "error": error, "data": data, "next_action": next_action}
+
+
+def _processing_mode_choices(text_quality: str | None) -> list[dict[str, str]]:
+    choices = [dict(choice) for choice in _PROCESSING_MODE_CHOICES]
+    if text_quality in ("garbled", "no_text_layer"):
+        return [choice for choice in choices if choice["extraction_mode"] == "ocr"]
+    return choices
+
+
+def _set_chapters_next_step(text_quality: str | None) -> dict[str, Any]:
+    return {
+        "tool": "set_chapters",
+        "required_parameters": ["chapters", "execution_mode", "extraction_mode"],
+        "choices": _processing_mode_choices(text_quality),
+    }
+
+
+def _finalize_next_step() -> dict[str, Any]:
+    return {
+        "tool": "finalize_study",
+        "required_parameters": ["output_format"],
+        "choices": [dict(choice) for choice in _OUTPUT_FORMAT_CHOICES],
+    }
 
 
 def _save_target_error(exc: BaseException, chapter_id: str) -> dict[str, Any]:
@@ -69,6 +133,15 @@ def _pending_kinds(state: dict[str, Any], chapter_id: str) -> list[str]:
     if chapter_id in pending["extension_pending"]:
         kinds.append("extension")
     return kinds
+
+
+def _ready_to_finalize(state: dict[str, Any]) -> bool:
+    pending = workspace.pending_chapters_from_state(state)
+    return (
+        state.get("phases", {}).get("chapter_setup") == "completed"
+        and not pending["summary_pending"]
+        and not pending["extension_pending"]
+    )
 
 
 def _pending_guidance(
@@ -108,13 +181,19 @@ def _pending_guidance(
     pending = workspace.pending_chapters_from_state(state)
     summary_pending = pending["summary_pending"]
     extension_pending = pending["extension_pending"]
-    if not summary_pending and not extension_pending:
+    if not summary_pending and not extension_pending and _ready_to_finalize(state):
         return (
             f"summary_pending={summary_pending}, extension_pending={extension_pending}. "
             f'남은 챕터가 없습니다. finalize_study(work_id="{work_id}", '
             "output_format=...)로 진행하세요. output_format은 사용자에게 "
             "'html(웹 사이트) / md_tui(터미널 학습)' 중 물어보고 그 선택을 "
             "전달하세요."
+        )
+
+    if not summary_pending and not extension_pending:
+        return (
+            "챕터가 아직 확정되지 않았습니다. scan_pdf 결과 또는 목차 OCR 결과를 확인해 "
+            "챕터와 처리 모드를 구성한 뒤 set_chapters를 호출하세요."
         )
 
     instructions: list[str] = []
@@ -502,8 +581,9 @@ def init_work(
       명시적으로 선택했을 때만 True. 기존 작업이 있으면 기본 호출은 상태를 바꾸지
       않고 resume/replace/새 출력 폴더 선택지를 반환합니다.
 
-    처리 모드(순차/병렬 · text/ocr)는 이 단계에서 받지 않습니다 — 목차를 분석해
-    챕터를 확정한 뒤 **set_chapters에서** 사용자에게 물어 정합니다.
+    처리 모드(순차/병렬 · text/ocr)는 이 단계에서 받지 않습니다. scan_pdf 응답의
+    set_chapters_next_step.choices를 사용자에게 보여 선택을 받은 뒤 set_chapters에
+    전달합니다.
     다음 단계: scan_pdf(work_id)
     """
     resolved_dir = (output_dir or "").strip()
@@ -647,17 +727,20 @@ def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
         )
 
     pending = workspace.pending_chapters_from_state(state)
+    data = {
+        "work_id": work_id,
+        "output_dir": state.get("output_dir"),
+        "current_phase": state.get("current_phase"),
+        "execution_mode": state.get("execution_mode"),
+        "extraction_mode": state.get("extraction_mode"),
+        "summary_pending": pending["summary_pending"],
+        "extension_pending": pending["extension_pending"],
+    }
+    if _ready_to_finalize(state):
+        data["next_step"] = _finalize_next_step()
 
     return _ok(
-        {
-            "work_id": work_id,
-            "output_dir": state.get("output_dir"),
-            "current_phase": state.get("current_phase"),
-            "execution_mode": state.get("execution_mode"),
-            "extraction_mode": state.get("extraction_mode"),
-            "summary_pending": pending["summary_pending"],
-            "extension_pending": pending["extension_pending"],
-        },
+        data,
         next_action=_pending_guidance(state, work_id),
     )
 
@@ -699,11 +782,13 @@ def scan_pdf(
 
     **페이지 오프셋 + 선택지 흐름 (필수)**:
     recommendations에 page_offset(PDF = 원문 + offset), offset_confidence,
-    각 챕터의 pdf_pages(PDF 페이지)·source_pages(원문 페이지), user_choices,
-    next_step_guidance가 담깁니다. next_step_guidance를 그대로 따라 챕터를
-    **PDF·원문 페이지 둘 다** 표기해 보여주고, MCP가 준 user_choices를 **그대로**
-    제시해(임의로 항목을 만들거나 빼지 말 것) 선택을 받으세요.
-    다음 단계: set_chapters(work_id, chapters, execution_mode, extraction_mode, book_info)
+    각 챕터의 pdf_pages(PDF 페이지)·source_pages(원문 페이지), 구조화된
+    recommendations.user_choice_options, 호환용 user_choices, next_step_guidance가
+    담깁니다. user_choice_options를 그대로 제시해 챕터 구성을 선택받으세요.
+    응답.data.set_chapters_next_step은 이후 set_chapters에 필요한 execution_mode·
+    extraction_mode의 구조화된 choices를 제공합니다. 내장 목차가 있으면
+    data.next_step도 set_chapters이고, 목차 이미지 경로에서는 OCR 뒤에 이 선택을
+    사용합니다.
     """
     state = workspace.load_state(work_id)
     supplied = {
@@ -762,13 +847,18 @@ def scan_pdf(
     rec = data.get("recommendations", {})
     if rec.get("rejected"):
         return _err(rec.get("reason") or "scan rejected", data=data)
+    text_quality = data.get("text_quality") or workspace.load_state(work_id).get("text_quality")
+    set_chapters_step = _set_chapters_next_step(text_quality)
+    data["set_chapters_next_step"] = set_chapters_step
     if rec.get("primary_mode") == "analyze_toc_from_images":
+        data["next_step"] = {"tool": "prepare_ocr", "required_parameters": []}
         next_action = (
             f'prepare_ocr(work_id="{work_id}") 후 '
             f'scan_toc_with_ocr(work_id="{work_id}")로 toc_page_images[].ocr_text를 '
             "얻고, path 이미지와 함께 확인해 chapters를 구성하세요."
         )
     else:
+        data["next_step"] = set_chapters_step
         next_action = (
             f'set_chapters(work_id="{work_id}", chapters=recommendations.suggested_chapters, '
             "execution_mode=<사용자 선택>, extraction_mode=<사용자 선택>, book_info={...})"
@@ -802,7 +892,8 @@ def scan_toc_with_ocr(work_id: str) -> dict[str, Any]:
     """scan_pdf가 렌더한 목차 후보 이미지를 PaddleOCR CPU로 읽습니다.
 
     이 도구는 챕터를 자동 확정하지 않습니다. 응답의 toc_page_images[].ocr_text와
-    path 이미지를 확인해 chapters를 구성한 뒤 set_chapters를 호출하세요.
+    path 이미지를 확인해 chapters를 구성한 뒤, data.next_step.choices에서 고른
+    처리 모드와 함께 set_chapters를 호출하세요.
     """
     data = analysis.scan_toc_with_ocr_impl(work_id)
     if data.get("requires_prepare_ocr"):
@@ -813,6 +904,9 @@ def scan_toc_with_ocr(work_id: str) -> dict[str, Any]:
             data=data,
             next_action=f'prepare_ocr(work_id="{work_id}")',
         )
+    data["next_step"] = _set_chapters_next_step(
+        workspace.load_state(work_id).get("text_quality")
+    )
     return _ok(data, next_action=(
         f'set_chapters(work_id="{work_id}", chapters=<toc_page_images[].ocr_text와 '
         "path 이미지로 구성>, execution_mode=<사용자 선택>, "
@@ -842,7 +936,9 @@ def set_chapters(
       저장 데이터에는 pdf_pages/source_pages만 사용합니다.
     - execution_mode("sequential"|"parallel") · extraction_mode("text"|"ocr"):
       **둘 다 기본값 없음 — 임의로 정하지 말고 반드시 사용자에게 물어 선택을
-      받으세요.** 하나라도 미지정/오타면 거부되며 응답.data.choices에 아래 4조합과
+      받으세요.** 정상 scan_pdf/scan_toc_with_ocr 응답의 next_step.choices에 아래
+      조합이 먼저 들어갑니다. 하나라도 미지정/오타면 거부되며 응답.data.choices에
+      같은 조합이 fallback으로 담깁니다.
       특징이 담깁니다. **4개 모두 유효하니 임의로 합치거나 빼지 말고 전부** 그대로
       제시한 뒤 고른 조합을 전달하세요.
       ※ 단, scan_pdf의 text_quality가 garbled(mojibake)/no_text_layer면 text 추출이
@@ -880,20 +976,7 @@ def set_chapters(
             tq = None
         force_ocr = tq in ("garbled", "no_text_layer")
 
-        combos = [
-            {"execution_mode": "sequential", "extraction_mode": "text",
-             "label": "Sequential + Text",
-             "desc": "디지털 PDF · 안정적·빠르고 저렴"},
-            {"execution_mode": "parallel", "extraction_mode": "text",
-             "label": "Parallel + Text",
-             "desc": "디지털 PDF · 최대 5개 동시로 가장 빠름"},
-            {"execution_mode": "sequential", "extraction_mode": "ocr",
-             "label": "Sequential + OCR",
-             "desc": "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리"},
-            {"execution_mode": "parallel", "extraction_mode": "ocr",
-             "label": "Parallel + OCR",
-             "desc": "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리"},
-        ]
+        combos = _processing_mode_choices(tq)
 
         if force_ocr:
             reason = (
@@ -901,7 +984,7 @@ def set_chapters(
                 if tq == "garbled"
                 else "텍스트 레이어가 거의 없어"
             )
-            choices = [c for c in combos if c["extraction_mode"] == "ocr"]
+            choices = combos
             msg = (
                 f"이 PDF는 {reason} text 추출이 무의미합니다(text_quality={tq}). "
                 "따라서 **OCR 조합만 선택할 수 있습니다** — text 조합은 제시하지 마세요. "
@@ -1233,18 +1316,23 @@ def get_work_state(work_id: str) -> dict[str, Any]:
 def list_pending_chapters(work_id: str) -> dict[str, Any]:
     """summary/extension이 아직 완료되지 않은 챕터 ID 목록.
 
-    재시도 루프에서 사용. extension이 비활성이면 extension_pending은 무시.
+    재시도 루프에서 사용. extension이 비활성이면 extension_pending은 무시한다.
+    챕터 설정이 완료되고 두 pending 목록이 모두 비면 data.next_step에
+    finalize_study의 output_format 선택지가 구조화되어 들어간다.
     """
     state = workspace.load_state(work_id)
     pending = workspace.pending_chapters_from_state(state)
     opts = state.get("question_options", {})
     summary_pending = pending["summary_pending"]
     ext_pending = pending["extension_pending"]
-    return _ok({
+    data = {
         "summary_pending": summary_pending,
         "extension_pending": ext_pending,
         "extension_enabled": bool(opts.get("extension")),
-    }, next_action=_pending_guidance(state, work_id))
+    }
+    if _ready_to_finalize(state):
+        data["next_step"] = _finalize_next_step()
+    return _ok(data, next_action=_pending_guidance(state, work_id))
 
 
 # ---------------------------------------------------------------------------
@@ -1262,7 +1350,9 @@ def finalize_study(
     """학습 자료를 output_dir에 렌더링합니다.
 
     - output_format: "html" | "md_tui". **기본값 없음 — 임의로 정하지 말고
-      반드시 사용자에게 물어 선택을 받으세요.** 미지정 시 거부됩니다.
+      반드시 사용자에게 물어 선택을 받으세요.** 완료된 list_pending_chapters 또는
+      resume_work 응답의 data.next_step.choices를 먼저 사용합니다. 미지정 호출은
+      같은 선택지를 담아 거부됩니다.
         - html: 정적 사이트 (브라우저로 열람)
         - md_tui: 챕터별 폴더 + summary.md + 학습 TUI
     - keep_work_dir: False면 .work/ 폴더 삭제
@@ -1284,12 +1374,7 @@ def finalize_study(
             "md_tui: 챕터별 Markdown + 학습 TUI' 중 무엇을 원하는지 물어본 뒤 "
             "그 선택을 output_format으로 전달해 다시 호출하세요.\n"
             + analysis.CHOICE_POLICY,
-            data={"choices": [
-                {"value": "html", "label": "HTML",
-                 "desc": "정적 웹사이트 — 브라우저로 열람 + 진도 저장 서버"},
-                {"value": "md_tui", "label": "Markdown + TUI",
-                 "desc": "챕터별 Markdown + 터미널 학습 TUI"},
-            ]},
+            data={"choices": [dict(choice) for choice in _OUTPUT_FORMAT_CHOICES]},
         )
     renderer_cls = RENDERERS.get(output_format)
     if renderer_cls is None:

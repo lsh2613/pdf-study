@@ -389,6 +389,51 @@ def _assert_mode_choices(r):
     assert "AskUserQuestion" in r["error"]
 
 
+def test_scan_pdf_exposes_structured_next_set_chapters_choices(tmp_path, ko_with_toc):
+    """정상 scan_pdf 응답이 set_chapters의 사용자 선택을 미리 제공한다."""
+    wid = server.init_work(str(ko_with_toc), str(tmp_path / "out"))["data"]["work_id"]
+
+    scanned = _scan(wid)
+
+    assert scanned["ok"], scanned
+    recommendations = scanned["data"]["recommendations"]
+    chapter_choices = recommendations["user_choice_options"]
+    assert [choice["value"] for choice in chapter_choices] == recommendations["user_choices"]
+    assert all(choice["label"] and choice["desc"] for choice in chapter_choices)
+
+    next_step = scanned["data"]["next_step"]
+    assert next_step["tool"] == "set_chapters"
+    assert next_step["required_parameters"] == [
+        "chapters", "execution_mode", "extraction_mode",
+    ]
+    assert {
+        (choice["execution_mode"], choice["extraction_mode"])
+        for choice in next_step["choices"]
+    } == {
+        ("sequential", "text"),
+        ("parallel", "text"),
+        ("sequential", "ocr"),
+        ("parallel", "ocr"),
+    }
+
+
+def test_scan_pdf_exposes_only_ocr_modes_when_text_is_unavailable(
+    tmp_path, scanned_empty,
+):
+    """text가 금지된 PDF도 실패 호출 없이 유효한 다음 모드만 제공한다."""
+    wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
+
+    scanned = _scan(wid)
+
+    assert scanned["ok"], scanned
+    set_chapters_step = scanned["data"]["set_chapters_next_step"]
+    assert set_chapters_step["tool"] == "set_chapters"
+    assert {
+        (choice["execution_mode"], choice["extraction_mode"])
+        for choice in set_chapters_step["choices"]
+    } == {("sequential", "ocr"), ("parallel", "ocr")}
+
+
 def test_set_chapters_requires_execution_mode(tmp_path, ko_short):
     """execution_mode 미지정 시 거부 + 4조합 안내."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
@@ -1265,6 +1310,11 @@ def test_scan_toc_with_ocr_returns_ocr_text(tmp_path, scanned_empty):
     assert r["data"]["toc_page_images"][0]["ocr_error"] is None
     assert r["data"]["toc_page_images"][0]["ocr_status"] == "completed"
     assert "set_chapters" in r["next_action"]
+    assert r["data"]["next_step"]["tool"] == "set_chapters"
+    assert {
+        (choice["execution_mode"], choice["extraction_mode"])
+        for choice in r["data"]["next_step"]["choices"]
+    } == {("sequential", "ocr"), ("parallel", "ocr")}
 
 
 def test_scan_toc_with_ocr_requires_prepare_when_cache_missing(
@@ -1495,6 +1545,78 @@ def test_finalize_requires_output_format(tmp_path, ko_short):
     assert {c["value"] for c in r["data"]["choices"]} == {"html", "md_tui"}
     # 구조화 선택 도구(AskUserQuestion) 사용 정책이 안내에 포함
     assert "AskUserQuestion" in r["error"]
+
+
+def test_completed_pending_exposes_finalize_choices_without_failure(tmp_path, ko_short):
+    """완료된 작업은 list_pending_chapters에서 출력 형식 선택지를 제공한다."""
+    wid = server.init_work(
+        str(ko_short),
+        str(tmp_path / "out"),
+        enable_short_answer=True,
+        enable_reflection=True,
+        enable_extension=False,
+    )["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    server.save_chapter_result(wid, "ch1", _result())
+
+    pending = server.list_pending_chapters(wid)
+
+    assert pending["ok"], pending
+    next_step = pending["data"]["next_step"]
+    assert next_step["tool"] == "finalize_study"
+    assert next_step["required_parameters"] == ["output_format"]
+    assert next_step["choices"] == [
+        {
+            "value": "html",
+            "label": "HTML",
+            "desc": "정적 웹사이트 — 브라우저로 열람 + 진도 저장 서버",
+        },
+        {
+            "value": "md_tui",
+            "label": "Markdown + TUI",
+            "desc": "챕터별 Markdown + 터미널 학습 TUI",
+        },
+    ]
+
+    fallback = server.finalize_study(wid)
+    assert fallback["data"]["choices"] == next_step["choices"]
+
+
+def test_pending_before_chapter_setup_does_not_offer_finalize_choices(
+    tmp_path, ko_short,
+):
+    """챕터를 확정하기 전의 빈 pending은 렌더링 가능 상태가 아니다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+
+    pending = server.list_pending_chapters(wid)
+
+    assert pending["ok"], pending
+    assert "next_step" not in pending["data"]
+
+
+def test_completed_resume_exposes_finalize_choices_without_failure(tmp_path, ko_short):
+    """재개한 완료 작업도 실패 호출 없이 다음 출력 형식을 선택할 수 있다."""
+    out = tmp_path / "out"
+    wid = server.init_work(
+        str(ko_short),
+        str(out),
+        enable_short_answer=True,
+        enable_reflection=True,
+        enable_extension=False,
+    )["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    server.save_chapter_result(wid, "ch1", _result())
+    workspace._registry.clear()
+
+    resumed = server.resume_work(output_dir=str(out))
+
+    assert resumed["ok"], resumed
+    assert resumed["data"]["next_step"]["tool"] == "finalize_study"
+    assert {choice["value"] for choice in resumed["data"]["next_step"]["choices"]} == {
+        "html", "md_tui",
+    }
 
 
 def test_finalize_rejects_unknown_format(tmp_path, ko_short):
