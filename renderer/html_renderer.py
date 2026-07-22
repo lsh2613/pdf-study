@@ -218,7 +218,7 @@ def _unescape_if_double_escaped(text: str) -> str:
 
 # templates 디렉터리 (이 파일과 동일 패키지의 templates/html)
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates" / "html"
-_STATIC_ASSET_FILES = ("style.css", "grading.js", "storage.js")
+_STATIC_ASSET_FILES = ("style.css", "storage.js")
 _STATIC_ROOT_FILES = ("study_html.py", "README.md")
 _LAUNCHER_TEMPLATE_FILES = ("start_study.sh.template", "start_study.bat.template")
 _PYTHON_EXECUTABLE_MARKER = "__PDF_STUDY_PYTHON__"
@@ -571,7 +571,6 @@ def _page_shell(
         f'{body}'
         '</main>'
         '<script src="assets/storage.js" defer></script>'
-        '<script src="assets/grading.js" defer></script>'
         '</body></html>'
     )
 

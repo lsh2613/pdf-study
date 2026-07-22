@@ -199,8 +199,10 @@ def test_html_uses_fixed_korean_document_language(ko_with_toc, tmp_path):
 
 def test_assets_are_copied(ko_with_toc, tmp_path):
     _, out, _ = _build_multi(ko_with_toc, tmp_path)
-    for f in ("assets/style.css", "assets/storage.js", "assets/grading.js"):
+    for f in ("assets/style.css", "assets/storage.js"):
         assert (out / f).exists(), f
+    assert not (out / "assets/grading.js").exists()
+    assert "assets/grading.js" not in (out / "ch1.html").read_text(encoding="utf-8")
     for f in ("study_html.py", "README.md"):
         assert (out / f).exists(), f
 

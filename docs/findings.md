@@ -220,9 +220,15 @@ P2(유지보수·개발 경험) 순이다.
 
 ## 불필요하거나 중복 관리되는 파일·정의
 
+### 완료 기록
+
+- [해결: 2026-07-22] `templates/html/grading.js`는 실제 채점 기능 없이 모든 HTML
+  결과물에 복사·로드되던 자리표시자였다. 실제 채점과 진도 저장은 `storage.js`가
+  계속 담당한다. 파일, 정적 자산 복사 목록, HTML `<script>` 태그와 존재 테스트를
+  제거했으며, 추후 기능이 필요하면 기능과 테스트를 함께 추가한다.
+
 | 대상 | 관찰 내용 | 정리 방향 |
 |---|---|---|
-| `templates/html/grading.js` | 실제 채점은 `storage.js`가 담당하며 이 파일은 6줄짜리 future placeholder다. 모든 HTML에 복사·로드되고 테스트도 존재만 강제한다. | 파일, 복사 목록, `<script>` 태그, 존재 테스트를 제거하고 실제 기능이 생길 때 다시 추가한다. |
 | `docs/superpowers/plans/2026-07-20-single-korean-flow.md` | 바로 다음 커밋에서 구현이 끝난 계획인데 체크박스는 모두 미완료이고 현재 저장소에 없는 `superpowers:*` 스킬을 필수라고 적는다. | 역사 보존이 필요하면 완료/적용 커밋을 표시해 archive하고, 필요 없으면 삭제한다. |
 | `docs/10-mcp-setup.md`와 `docs/operations.md` 설치 절 | venv 생성, 세 클라이언트 적용, `--print-config`, `--check`, uv/libomp 설명이 반복된다. | `operations.md`를 기준으로 두고 `10-mcp-setup.md`는 짧은 진입 안내와 링크만 남기거나 합친다. |
 | `AGENTS.md`와 `CLAUDE.md` | 현재 바이트 단위로 동일하다. 두 진입 파일은 필요하지만 각각 수정하면 드리프트한다. | 하나의 canonical 원본에서 생성하거나 symlink를 사용하고 동등성 검사를 둔다. |
