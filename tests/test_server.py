@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from pdf_study import server, workspace
+from pdf_study import question_contract, server, workspace
 
 
 @pytest.fixture(autouse=True)
@@ -84,6 +84,23 @@ def _ext():
     return {"questions": {"extension": [
         {"id": "ex1", "question": "?", "model_answer": "a"}
     ]}}
+
+
+def test_save_chapter_result_uses_question_contract(monkeypatch, ko_short, tmp_path):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    monkeypatch.setattr(
+        question_contract,
+        "missing_summary_fields",
+        lambda data, options, chapter_id: ["contract_probe"],
+    )
+
+    response = server.save_chapter_result(wid, "ch1", _result())
+
+    assert response["ok"] is False
+    assert response["data"]["missing"] == ["contract_probe"]
+    assert response["data"]["chapter_id"] == "ch1"
 
 
 def _assert_no_chapter_result_files(wid: str, chapter_id: str) -> None:

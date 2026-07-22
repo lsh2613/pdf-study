@@ -13,7 +13,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from . import analysis, prompts, workspace
+from . import analysis, prompts, question_contract, workspace
 from .renderer import RENDERERS
 from .renderer.output_manager import install_rendered_output
 
@@ -215,144 +215,6 @@ def _pending_guidance(
         + ". ".join(instructions)
         + ". 모두 끝나면 list_pending_chapters로 확인하세요."
     )
-
-
-def _is_nonempty_str(v: Any) -> bool:
-    return isinstance(v, str) and bool(v.strip())
-
-
-def _is_int(v: Any) -> bool:
-    return isinstance(v, int) and not isinstance(v, bool)
-
-
-def _validate_string_list(v: Any, path: str, missing: list[str], *, allow_empty: bool) -> bool:
-    if not isinstance(v, list):
-        missing.append(path)
-        return False
-    if not allow_empty and not v:
-        missing.append(path)
-        return False
-    ok = True
-    for idx, item in enumerate(v):
-        if not _is_nonempty_str(item):
-            missing.append(f"{path}[{idx}]")
-            ok = False
-    return ok
-
-
-def _validate_required_strings(
-    item: dict[str, Any],
-    fields: tuple[str, ...],
-    path: str,
-    missing: list[str],
-) -> None:
-    for field in fields:
-        if not _is_nonempty_str(item.get(field)):
-            missing.append(f"{path}.{field}")
-
-
-def _validate_basic_question_items(
-    items: list[Any],
-    qtype: str,
-    missing: list[str],
-) -> None:
-    for idx, item in enumerate(items):
-        path = f"questions.{qtype}[{idx}]"
-        if not isinstance(item, dict):
-            missing.append(path)
-            continue
-
-        if qtype == "multiple_choice":
-            _validate_required_strings(item, ("id", "question", "explanation"), path, missing)
-
-            options = item.get("options")
-            options_ok = _validate_string_list(
-                options,
-                f"{path}.options",
-                missing,
-                allow_empty=False,
-            )
-            if isinstance(options, list) and len(options) < 2:
-                missing.append(f"{path}.options")
-                options_ok = False
-
-            answer_index = item.get("answer_index")
-            if not _is_int(answer_index):
-                missing.append(f"{path}.answer_index")
-            elif options_ok and not (0 <= answer_index < len(options)):
-                missing.append(f"{path}.answer_index")
-        else:
-            _validate_required_strings(item, ("id", "question", "model_answer"), path, missing)
-
-
-def _missing_summary_fields(
-    data: dict[str, Any],
-    options: dict[str, bool],
-    chapter_id: str,
-) -> list[str]:
-    """save_chapter_result 페이로드에서 비었거나 누락된 필수 필드 목록.
-
-    prompts.py의 기본 문제 JSON 스키마를 서버 경계에서도 강제한다.
-    """
-    missing: list[str] = []
-    if not isinstance(data, dict):
-        return ["data"]
-
-    if "chapter_id" in data and data.get("chapter_id") != chapter_id:
-        missing.append("chapter_id")
-    if "title" in data and not isinstance(data.get("title"), str):
-        missing.append("title")
-
-    if not _is_nonempty_str(data.get("summary")):
-        missing.append("summary")
-
-    _validate_string_list(data.get("key_points"), "key_points", missing, allow_empty=False)
-
-    questions = data.get("questions")
-    if not isinstance(questions, dict):
-        missing.append("questions")
-        questions = {}
-
-    for qtype in ("multiple_choice", "short_answer", "reflection"):
-        if qtype not in questions or not isinstance(questions.get(qtype), list):
-            missing.append(f"questions.{qtype}")
-            continue
-        items = questions[qtype]
-        if options.get(qtype) and not items:
-            missing.append(f"questions.{qtype}")
-        _validate_basic_question_items(items, qtype, missing)
-
-    return missing
-
-
-def _missing_extension_fields(data: dict[str, Any], chapter_id: str) -> list[str]:
-    """save_extension_result 페이로드의 extension JSON 스키마 검증."""
-    missing: list[str] = []
-    if not isinstance(data, dict):
-        return ["data"]
-
-    if "chapter_id" in data and data.get("chapter_id") != chapter_id:
-        missing.append("chapter_id")
-
-    questions = data.get("questions")
-    if not isinstance(questions, dict):
-        missing.append("questions")
-        questions = {}
-
-    extension = questions.get("extension")
-    if not isinstance(extension, list) or not extension:
-        missing.append("questions.extension")
-        return missing
-
-    for idx, item in enumerate(extension):
-        path = f"questions.extension[{idx}]"
-        if not isinstance(item, dict):
-            missing.append(path)
-            continue
-
-        _validate_required_strings(item, ("id", "question", "model_answer"), path, missing)
-
-    return missing
 
 
 def _failed_chapters_from_invalid(invalid: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1203,7 +1065,7 @@ def save_chapter_result(
     if isinstance(data_to_save, dict):
         data_to_save.pop("body_text", None)
 
-    missing = _missing_summary_fields(data_to_save, options, chapter_id)
+    missing = question_contract.missing_summary_fields(data_to_save, options, chapter_id)
     if missing:
         return _err(
             f"챕터 결과에 필수 값이 비었거나 누락됐습니다: {missing}. "
@@ -1258,7 +1120,7 @@ def save_extension_result(
     if isinstance(data_to_save, dict):
         data_to_save.pop("body_text", None)
 
-    missing = _missing_extension_fields(data_to_save, chapter_id)
+    missing = question_contract.missing_extension_fields(data_to_save, chapter_id)
     if missing:
         return _err(
             "확장 결과에 questions.extension(비어있지 않은 배열)이 필요합니다. "
