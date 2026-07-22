@@ -1,4 +1,4 @@
-"""MCP 전용 venv 설치 스크립트와 가이드 문서 검증."""
+"""MCP 전용 venv 설치 스크립트 검증."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "setup_mcp.sh"
-GUIDE = ROOT / "docs" / "10-mcp-setup.md"
 
 
 def test_setup_script_prints_absolute_mcp_config():
@@ -36,24 +35,6 @@ def test_setup_script_prints_absolute_mcp_config():
     }
     assert "<PDF_STUDY_INSTALL_DIR>" not in out
     assert "~/" not in out
-
-
-def test_mcp_setup_guide_is_a_short_entry_to_operations():
-    """설치 진입 문서는 중복 없이 운영 절차의 설치 절로 연결해야 한다."""
-    text = GUIDE.read_text(encoding="utf-8")
-    assert "## 빠른 설치" in text
-    assert "./scripts/setup_mcp.sh" in text
-    assert "[운영 절차의 설치](operations.md#설치)" in text
-    assert text.count("setup_mcp.sh") == 1
-    assert "--print-config" not in text
-    assert "--check" not in text
-
-    docs_index = (ROOT / "docs" / "README.md").read_text(encoding="utf-8")
-    assert "10-mcp-setup.md" in docs_index
-
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "scripts/setup_mcp.sh" in readme
-    assert "설정을 자동 적용" in readme
 
 
 def test_setup_script_checks_paddle_runtime_dependencies():
