@@ -239,10 +239,13 @@ P2(유지보수·개발 경험) 순이다.
   둘 다 필요하지만, 본문은 `AGENTS.md` 하나만 관리하도록 `CLAUDE.md → AGENTS.md`
   심볼릭 링크로 통합했다. 문서 내용·링크·주석 문자열을 검증하던 테스트도 사용자
   결정에 따라 제거했다.
+- [개선 대상 제외: 2026-07-22] `.claude/skills/commit/SKILL.md`와
+  `.codex/skills/commit/SKILL.md`의 공통 절차는 중복되지만, skill 경로와
+  `Co-Authored-By` 값은 provider별로 달라야 한다. 사용자의 명시적 결정에 따라
+  생성 템플릿이나 중립 skill로 통합하지 않고 두 파일을 유지한다.
 
 | 대상 | 관찰 내용 | 정리 방향 |
 |---|---|---|
-| `.claude/skills/commit/SKILL.md`와 `.codex/skills/commit/SKILL.md` | provider 경로와 co-author 3곳만 다르고 나머지 절차가 중복된다. | 공통 템플릿과 provider 변수로 생성하고 동기화 테스트를 둔다. |
 | 문제 JSON 계약 | `prompts.py` 예시, `server.py` 수동 검증, `docs/contracts.md`, 테스트 fixture에 같은 스키마가 반복된다. | typed model 또는 JSON Schema 하나를 canonical로 두고 검증과 프롬프트 예시를 생성한다. |
 | 처리 모드 선택지 | 함수 설명, `combos`, 오류 prose, `CHOICE_POLICY`, 여러 문서에 같은 문구가 반복된다. | 선택지 상수와 렌더 헬퍼를 한 곳에 두고 모든 응답에서 재사용한다. |
 | 렌더 공통 로더 | `MdTuiRenderer`가 중립 데이터 로더를 `html_renderer._load_all`에서 가져온다. | 공통 데이터 로더로 이동해 두 렌더러가 같은 공개 경계를 사용하게 한다. |
