@@ -88,13 +88,13 @@ def main():
 
     # 진입 페이지: index.html 우선, 없으면 main.html
     entry = "index.html" if (ROOT / "index.html").exists() else "main.html"
-    url = f"http://localhost:{args.port}/{entry}"
-
-    server = HTTPServer(("localhost", args.port), StudyHandler)
+    server = HTTPServer(("127.0.0.1", args.port), StudyHandler)
+    actual_port = server.server_port
+    url = f"http://127.0.0.1:{actual_port}/{entry}"
+    print(f"Study server running at {url}", flush=True)
     if not args.no_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
 
-    print(f"Study server running at {url}")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()

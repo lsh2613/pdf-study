@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -80,6 +81,25 @@ def _post_json(port, key, payload):
         method="POST",
     )
     return urllib.request.urlopen(req).read()
+
+
+def test_port_zero_prints_and_serves_assigned_url(serve_dir):
+    proc = subprocess.Popen(
+        [sys.executable, str(serve_dir / "study_html.py"), "--port", "0", "--no-browser"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+        cwd=str(serve_dir),
+    )
+    try:
+        line = proc.stdout.readline()
+        match = re.search(r"http://127\.0\.0\.1:(\d+)/main\.html", line)
+        assert match, line
+        actual_port = int(match.group(1))
+        assert actual_port > 0
+        assert actual_port != 0
+        _wait_ready(actual_port, "/main.html")
+    finally:
+        proc.terminate()
+        proc.wait(timeout=3)
 
 
 def test_progress_get_returns_null_when_missing(serve_proc):
