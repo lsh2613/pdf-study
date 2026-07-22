@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
+exec __PDF_STUDY_PYTHON__ "$SCRIPT_DIR/study_html.py" --port 0 "$@"

@@ -14,7 +14,9 @@ import html
 import json
 import logging
 import re
+import shlex
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -218,6 +220,8 @@ def _unescape_if_double_escaped(text: str) -> str:
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates" / "html"
 _STATIC_ASSET_FILES = ("style.css", "grading.js", "storage.js")
 _STATIC_ROOT_FILES = ("study_html.py", "README.md")
+_LAUNCHER_TEMPLATE_FILES = ("start_study.sh.template", "start_study.bat.template")
+_PYTHON_EXECUTABLE_MARKER = "__PDF_STUDY_PYTHON__"
 
 
 def _esc(s: Any) -> str:
@@ -292,7 +296,7 @@ def _load_all(work_id: str) -> dict[str, Any]:
 # Asset / launcher 복사
 # ---------------------------------------------------------------------------
 
-def _copy_assets(output_dir: Path) -> None:
+def _copy_assets(output_dir: Path, python_executable: str) -> None:
     assets_dir = output_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
     for name in _STATIC_ASSET_FILES:
@@ -305,6 +309,23 @@ def _copy_assets(output_dir: Path) -> None:
         if not src.exists():
             raise FileNotFoundError(f"template file missing: {src}")
         shutil.copyfile(src, output_dir / name)
+    for template_name in _LAUNCHER_TEMPLATE_FILES:
+        src = _TEMPLATES_DIR / template_name
+        if not src.exists():
+            raise FileNotFoundError(f"launcher template missing: {src}")
+        template = src.read_text(encoding="utf-8")
+        if _PYTHON_EXECUTABLE_MARKER not in template:
+            raise ValueError(f"launcher template missing marker: {src}")
+        if template_name.endswith(".sh.template"):
+            executable = shlex.quote(python_executable)
+        else:
+            executable = '"' + python_executable.replace('"', '""') + '"'
+        output_path = output_dir / template_name.removesuffix(".template")
+        output_path.write_text(
+            template.replace(_PYTHON_EXECUTABLE_MARKER, executable), encoding="utf-8"
+        )
+        if template_name.endswith(".sh.template"):
+            output_path.chmod(0o755)
 
 
 # ---------------------------------------------------------------------------
@@ -598,7 +619,7 @@ class HtmlRenderer(Renderer):
         opts = state.get("question_options") or {}
         page_offset = state.get("page_offset")
         output_dir.mkdir(parents=True, exist_ok=True)
-        _copy_assets(output_dir)
+        _copy_assets(output_dir, sys.executable)
 
         single = len(chapters) == 1
         book_title = book_info.get("title") or "Study"

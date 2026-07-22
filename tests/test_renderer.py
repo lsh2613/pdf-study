@@ -1,6 +1,9 @@
 """HtmlRenderer + 사이드바 + 완료 토글 + 옵션 비활성 섹션 검증."""
 from __future__ import annotations
 
+import stat
+import sys
+
 import pytest
 
 from pdf_study import server
@@ -200,6 +203,21 @@ def test_assets_are_copied(ko_with_toc, tmp_path):
         assert (out / f).exists(), f
     for f in ("study_html.py", "README.md"):
         assert (out / f).exists(), f
+
+
+def test_html_output_contains_project_local_launch_scripts(ko_with_toc, tmp_path):
+    _, out, _ = _build_multi(ko_with_toc, tmp_path)
+    sh = out / "start_study.sh"
+    bat = out / "start_study.bat"
+
+    assert sh.stat().st_mode & stat.S_IXUSR
+    assert sys.executable in sh.read_text(encoding="utf-8")
+    assert "study_html.py" in sh.read_text(encoding="utf-8")
+    assert "--port 0" in sh.read_text(encoding="utf-8")
+    assert "exec " in sh.read_text(encoding="utf-8")
+    assert '"$@"' in sh.read_text(encoding="utf-8")
+    assert sys.executable in bat.read_text(encoding="utf-8")
+    assert '"%~dp0study_html.py" --port 0 %*' in bat.read_text(encoding="utf-8")
 
 
 def test_storage_js_has_no_legacy_scroll_metrics(ko_with_toc, tmp_path):
