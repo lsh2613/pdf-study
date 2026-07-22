@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import copy
 import sys
 
 import pytest
@@ -68,22 +69,26 @@ def _sc(wid, chapters, **kw):
 
 def _result(summary="요약"):
     """save_chapter_result용 유효 페이로드(summary·key_points·mc/sa/rf 모두 채움)."""
-    return {
-        "summary": summary, "key_points": ["p1", "p2"],
-        "questions": {
-            "multiple_choice": [{"id": "mc1", "question": "?", "options": ["A", "B"],
-                                 "answer_index": 0, "explanation": "A가 정답입니다."}],
-            "short_answer": [{"id": "sa1", "question": "?", "model_answer": "a"}],
-            "reflection": [{"id": "rf1", "question": "?", "model_answer": "a"}],
-        },
-    }
+    result = copy.deepcopy(question_contract.summary_payload_example())
+    result["summary"] = summary
+    result["key_points"] = ["p1", "p2"]
+    questions = result["questions"]
+    questions["multiple_choice"][0].update(
+        id="mc1", question="?", options=["A", "B"], answer_index=0,
+        explanation="A가 정답입니다.",
+    )
+    questions["short_answer"][0].update(id="sa1", question="?", model_answer="a")
+    questions["reflection"][0].update(id="rf1", question="?", model_answer="a")
+    return result
 
 
 def _ext():
     """save_extension_result용 유효 페이로드(extension 1개)."""
-    return {"questions": {"extension": [
-        {"id": "ex1", "question": "?", "model_answer": "a"}
-    ]}}
+    result = copy.deepcopy(question_contract.extension_payload_example())
+    result["questions"]["extension"][0].update(
+        id="ex1", question="?", model_answer="a",
+    )
+    return result
 
 
 def test_save_chapter_result_uses_question_contract(monkeypatch, ko_short, tmp_path):

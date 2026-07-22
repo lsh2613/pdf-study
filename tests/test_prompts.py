@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from pdf_study import prompts
+from pdf_study import prompts, question_contract
 
 
 def _state(**overrides):
@@ -29,6 +29,30 @@ def test_prompt_contract_is_korean_only():
     assert "language" not in out
     assert "JSON 객체 하나만" in out["summarizer_prompt"]
     assert "한국어 요약" in out["summarizer_prompt"]
+
+
+def test_prompts_embed_canonical_question_examples(monkeypatch):
+    monkeypatch.setattr(
+        question_contract,
+        "summary_payload_example",
+        lambda: {"contract_probe": True},
+    )
+
+    prompt = prompts.build_prompts(_state())["summarizer_prompt"]
+
+    assert '"contract_probe": true' in prompt
+
+
+def test_extension_prompt_embeds_canonical_question_example(monkeypatch):
+    monkeypatch.setattr(
+        question_contract,
+        "extension_payload_example",
+        lambda: {"contract_probe": True},
+    )
+
+    prompt = prompts.build_prompts(_state())["extension_prompt"]
+
+    assert '"contract_probe": true' in prompt
 
 
 def test_extension_prompt_omitted_when_disabled():

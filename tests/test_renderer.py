@@ -1,12 +1,13 @@
 """HtmlRenderer + 사이드바 + 완료 토글 + 옵션 비활성 섹션 검증."""
 from __future__ import annotations
 
+import copy
 import stat
 import sys
 
 import pytest
 
-from pdf_study import server
+from pdf_study import question_contract, server
 from pdf_study.renderer.html_renderer import (
     HtmlRenderer,
     _FallbackMd,
@@ -37,23 +38,34 @@ def stub_scan_toc_ocr(monkeypatch):
 
 
 def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):
-    questions = {
-        "multiple_choice": [
-            {"id": f"{cid}_mc", "question": "?",
-             "options": ["A", "B"], "answer_index": 0, "explanation": "해설"}
-        ] if mc else [],
-        "short_answer": [
-            {"id": f"{cid}_sa", "question": "?", "model_answer": "ans"}
-        ] if sa else [],
-        "reflection": [
-            {"id": f"{cid}_rf", "question": "?", "model_answer": "ans"}
-        ] if rf else [],
-    }
-    return {
-        "chapter_id": cid, "title": f"제목 {cid}",
-        "summary": "본문 요약 내용입니다.", "key_points": ["p1", "p2"],
-        "questions": questions,
-    }
+    result = copy.deepcopy(question_contract.summary_payload_example())
+    result.update(
+        chapter_id=cid, title=f"제목 {cid}", summary="본문 요약 내용입니다.",
+        key_points=["p1", "p2"],
+    )
+    questions = result["questions"]
+    questions["multiple_choice"][0].update(
+        id=f"{cid}_mc", question="?", options=["A", "B"], answer_index=0,
+        explanation="해설",
+    )
+    questions["short_answer"][0].update(id=f"{cid}_sa", question="?", model_answer="ans")
+    questions["reflection"][0].update(id=f"{cid}_rf", question="?", model_answer="ans")
+    if not mc:
+        questions["multiple_choice"] = []
+    if not sa:
+        questions["short_answer"] = []
+    if not rf:
+        questions["reflection"] = []
+    return result
+
+
+def _fake_extension(cid: str):
+    result = copy.deepcopy(question_contract.extension_payload_example())
+    result["chapter_id"] = cid
+    result["questions"]["extension"][0].update(
+        id=f"{cid}_ex", question="?", model_answer="ans",
+    )
+    return result
 
 
 def _build_multi(ko_with_toc, tmp_path, *, opts=None):
@@ -69,13 +81,7 @@ def _build_multi(ko_with_toc, tmp_path, *, opts=None):
         cid = c["chapter_id"]
         server.save_chapter_result(wid, cid, _fake_summary(cid))
         if server.get_subagent_prompts(wid)["data"]["enabled_types"]["extension"]:
-            server.save_extension_result(wid, cid, {
-                "chapter_id": cid,
-                "questions": {"extension": [
-                    {"id": f"{cid}_ex", "question": "?",
-                     "model_answer": "ans"}
-                ]},
-            })
+            server.save_extension_result(wid, cid, _fake_extension(cid))
     fin = server.finalize_study(wid, "html")
     assert fin["ok"], fin
     return wid, tmp_path / "out", chs
@@ -91,12 +97,7 @@ def _build_single(ko_short, tmp_path, *, opts=None):
     ], execution_mode="sequential", extraction_mode="text")
     server.save_chapter_result(wid, "ch1", _fake_summary("ch1"))
     if server.get_subagent_prompts(wid)["data"]["enabled_types"]["extension"]:
-        server.save_extension_result(wid, "ch1", {
-            "chapter_id": "ch1",
-            "questions": {"extension": [
-                {"id": "ch1_ex", "question": "?", "model_answer": "ans"}
-            ]},
-        })
+        server.save_extension_result(wid, "ch1", _fake_extension("ch1"))
     fin = server.finalize_study(wid, "html")
     assert fin["ok"], fin
     return wid, tmp_path / "out"
@@ -302,12 +303,7 @@ def test_managed_output_removes_pages_for_removed_chapters(ko_with_toc, tmp_path
     ])
     saved = server.save_chapter_result(wid, "ch1", _fake_summary("ch1"))
     assert saved["ok"], saved
-    extension = server.save_extension_result(wid, "ch1", {
-        "chapter_id": "ch1",
-        "questions": {"extension": [
-            {"id": "ch1_ex", "question": "?", "model_answer": "ans"},
-        ]},
-    })
+    extension = server.save_extension_result(wid, "ch1", _fake_extension("ch1"))
     assert extension["ok"], extension
 
     rerendered = server.finalize_study(wid, "html")

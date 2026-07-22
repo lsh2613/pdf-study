@@ -1,9 +1,10 @@
 """Sub-agent 시스템 프롬프트 + 워크플로 지시문 생성."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from . import workspace
+from . import question_contract, workspace
 
 
 # ---------------------------------------------------------------------------
@@ -135,30 +136,9 @@ _SUMMARIZER = """\
 코드펜스(```)는 금지하지만, summary 값 **안에서는** 마크다운(코드블록 포함)을
 자유롭게 쓰세요. summary의 줄바꿈은 **실제 줄바꿈(개행)**으로 넣으세요 —
 `\\n` 같은 글자를 직접 타이핑하지 마세요(JSON 직렬화는 도구가 알아서 합니다).
+summary에는 한국어 요약을 넣으세요.
 
-{{
-  "chapter_id": "<주어진 chapter_id 그대로>",
-  "title": "<주어진 title 그대로>",
-  "summary": "<한국어 요약 (마크다운, 서브 챕터가 있으면 서브 챕터별 섹션)>",
-  "key_points": ["...", "..."],
-  "questions": {{
-    "multiple_choice": [
-      {{
-        "id": "mc_1",
-        "question": "...",
-        "options": ["A", "B", "C", "D"],
-        "answer_index": 0,
-        "explanation": "..."
-      }}
-    ],
-    "short_answer": [
-      {{"id": "sa_1", "question": "...", "model_answer": "..."}}
-    ],
-    "reflection": [
-      {{"id": "rf_1", "question": "...", "model_answer": "..."}}
-    ]
-  }}
-}}
+{summary_json_example}
 
 비활성화된 유형은 해당 키를 빈 배열([])로 두세요. 키 자체는 유지.
 저장은 save_chapter_result(work_id, chapter_id, <이 JSON>)로 보냅니다.
@@ -190,18 +170,7 @@ _EXTENSION = """\
 
 [출력 형식 — JSON]
 ```text
-{{
-  "chapter_id": "<as given>",
-  "questions": {{
-    "extension": [
-      {{
-        "id": "ex_1",
-        "question": "...",
-        "model_answer": "..."
-      }}
-    ]
-  }}
-}}
+{extension_json_example}
 ```
 JSON 본문만 출력. 코드펜스 금지. save_extension_result로 저장.
 """
@@ -316,6 +285,9 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     user_context_block = _format_user_context(user_context)
     enabled_types_block = _format_enabled_types(opts)
     input_mode_block = INPUT_MODE_OCR if ocr_mode else INPUT_MODE_TEXT
+    summary_json_example = json.dumps(
+        question_contract.summary_payload_example(), ensure_ascii=False, indent=2,
+    )
     summarizer_prompt = _SUMMARIZER.format(
         book_info_block=book_info_block,
         user_context_block=user_context_block,
@@ -324,15 +296,20 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         input_mode_block=input_mode_block,
         summary_format_block=SUMMARY_FORMAT,
         question_guidelines_block=BASIC_QUESTION_GUIDELINES,
+        summary_json_example=summary_json_example,
     )
 
     extension_prompt: str | None = None
     if opts.get("extension"):
+        extension_json_example = json.dumps(
+            question_contract.extension_payload_example(), ensure_ascii=False, indent=2,
+        )
         extension_prompt = _EXTENSION.format(
             book_info_block=book_info_block,
             user_context_block=user_context_block,
             scales_table=QUESTION_SCALES_TABLE,
             extension_guidelines_block=EXTENSION_GUIDELINES,
+            extension_json_example=extension_json_example,
         )
 
     workflow = (
