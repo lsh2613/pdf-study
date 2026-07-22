@@ -66,7 +66,9 @@ pending 판정의 정확한 상태 매핑은 다음과 같다.
 
 `list_pending_chapters(work_id)`는 완료되지 않은 요약과 확장 챕터 ID를 반환한다. save 도구의 검증을 통과해 completed가 된 챕터와 skip 챕터만 남은 작업에서 제외된다. 챕터 설정이 완료되고 두 pending 목록이 모두 비면 `data.next_step`에 `finalize_study`와 필수 `output_format`, `html`·`md_tui`의 구조화된 선택지가 들어간다.
 
-`finalize_study(work_id, output_format, keep_work_dir, force)`는 최종 결과물을 만든다. `output_format`은 `html` 또는 `md_tui`만 허용한다. 정상 흐름에서는 완료된 `list_pending_chapters` 또는 `resume_work`의 `data.next_step.choices`를 사용자에게 그대로 보여준다. 값이 없으면 같은 선택지가 실패 응답의 `data.choices`에 fallback으로 들어간다. 남은 챕터가 있으면 `force=true`가 아닌 한 실패하며, 처리되지 않은 챕터를 조용히 제외하고 결과물을 만들면 안 된다. `force=true`에서도 현재 상태가 `completed`가 아닌 챕터의 예전 요약·문제 JSON은 읽지 않는다.
+`finalize_study(work_id, output_format, keep_work_dir, force)`는 최종 결과물을 만든다. `output_format`은 `html` 또는 `md_tui`만 허용한다. 정상 흐름에서는 완료된 `list_pending_chapters` 또는 `resume_work`의 `data.next_step.choices`를 사용자에게 그대로 보여준다. 값이 없으면 같은 선택지가 실패 응답의 `data.choices`에 fallback으로 들어간다. 남은 챕터가 있으면 `force=true`가 아닌 한 실패하며, 처리되지 않은 챕터를 조용히 제외하고 결과물을 만들면 안 된다. `force=true`에서도 현재 상태가 `completed`가 아닌 챕터의 예전 요약·문제 JSON은 읽지 않는다. `keep_work_dir=false`면 최초 렌더가 성공한 뒤 `.work`를 함께 지우며, 보존된 작업은 성공 응답의 `data.cleanup_work` 계약으로 나중에 렌더 없이 정리할 수 있다.
+
+`cleanup_work(work_id)`는 `finalize_study`로 rendering phase가 완료된 작업의 정확한 `.work`만 삭제한다. 결과 파일, manifest, 진도, 사용자 파일은 건드리지 않고 렌더링도 다시 실행하지 않는다. 최종 렌더가 끝나지 않은 작업은 재개 데이터를 보호하기 위해 실패한다. 성공하면 해당 work_id의 메모리 등록도 제거하므로 같은 서버 프로세스에서 다시 작업하려면 새 작업을 시작해야 한다.
 
 렌더러는 임시 staging 폴더에 완전한 새 세대를 만든 뒤 이전 manifest의 관리 경로만 교체한다. 렌더 또는 설치가 실패하면 이전 결과와 manifest를 복원하고 partial 파일을 최종 폴더에 남기지 않는다. manifest가 관리하지 않는 기존 경로와 새 렌더 경로가 충돌하면 사용자 파일을 덮어쓰지 않고 실패한다.
 

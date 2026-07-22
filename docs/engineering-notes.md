@@ -80,6 +80,8 @@
 
 대응: `init_work`는 기존 관리 작업을 발견하면 상태를 바꾸기 전에 `resume`, `replace`, `new_output_dir` 선택을 요구한다. 명시적 replace도 새 입력을 먼저 검증하고 `.work`만 제거하며 이전 렌더 결과는 다음 렌더 성공까지 둔다. 렌더는 staging에서 끝까지 만든 뒤 `.pdf-study-manifest.json`의 관리 경로만 rollback 가능한 순서로 교체한다. manifest 밖의 파일은 제거하거나 덮어쓰지 않는다. 중립 데이터 로더는 현재 상태가 `completed`인 결과 파일만 읽는다.
 
+완료 결과 뒤 `.work`만 정리할 때는 `cleanup_work`가 작업 잠금 안에서 rendering 완료 상태를 확인하고 해당 디렉터리만 삭제한다. 이 경로는 렌더러나 manifest 교체를 호출하지 않으며, 결과 파일·진도·사용자 파일을 보존한다.
+
 진도는 manifest의 `output_format`과 `study_fingerprint`가 모두 현재 값과 같을 때만 복사한다. fingerprint는 PDF 식별 정보, 책 정보, 문제 옵션, non-skip 챕터 메타와 완료된 요약·문제 payload를 포함한다. 이 경계를 바꾼 뒤에는 챕터 감소, 형식 전환, 내용 변경, 렌더 예외, 사용자 파일 충돌을 함께 테스트한다.
 
 ## HTML 마크다운 폴백

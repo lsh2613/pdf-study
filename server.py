@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import re
-import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -1411,22 +1410,25 @@ def finalize_study(
 
     workspace.update_phase(work_id, "rendering", "completed")
 
+    work_dir = workspace.get_work_dir(work_id)
     if not keep_work_dir:
-        work_dir = workspace.get_work_dir(work_id)
-        if work_dir.exists():
-            shutil.rmtree(work_dir)
+        workspace.cleanup_workspace(work_id)
 
     # 중간 데이터(.work) 정리 안내 — 두 포맷 공통
     work_cleanup = (
         "\n\n[작업 데이터 정리] 중간 작업 폴더(.work/: 페이지 이미지·raw·상태 파일)가 "
         "보존되어 있습니다"
         + (" (현재 keep_work_dir=False라 이미 삭제됨)." if not keep_work_dir
-           else f" ({workspace.get_work_dir(work_id)}).")
+           else f" ({work_dir}).")
         + f" 사용자에게 이 중간 데이터를 삭제할지 보존할지 물어보세요. 삭제를 원하면 "
-        f"finalize_study(work_id=\"{work_id}\", output_format=\"{output_format}\", "
-        "keep_work_dir=False)로 다시 호출하면 .work/가 제거됩니다(재실행 시 캐시로 "
-        "쓰려면 보존)."
+        f"cleanup_work(work_id=\"{work_id}\")를 호출하면 .work/만 제거됩니다(재실행 시 "
+        "캐시로 쓰려면 보존)."
     )
+    cleanup_action = {
+        "tool": "cleanup_work",
+        "required_parameters": [],
+        "desc": "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다.",
+    }
 
     # MCP 서버를 띄운 그 인터프리터(=의존성 rich·pymupdf가 이미 설치된 venv).
     # 이걸로 실행하면 별도 설치 없이 바로 동작한다. 다른 python으로 실행하면
@@ -1444,6 +1446,8 @@ def finalize_study(
             "entry_script": "study_tui.py",
             "python": py,
         }
+        if keep_work_dir:
+            data["cleanup_work"] = cleanup_action
         next_action = (
             f"학습 자료(Markdown + 터미널 TUI)가 {output_dir}에 만들어졌습니다.\n"
             f"\n[학습 시작] 다음 명령을 실행하세요:\n"
@@ -1473,6 +1477,7 @@ def finalize_study(
             "python": py,
             "entry_page": entry,
             "default_url": "http://localhost:8765/" + entry,
+            **({"cleanup_work": cleanup_action} if keep_work_dir else {}),
         },
         next_action=(
             f"학습 자료가 {output_dir}에 만들어졌습니다.\n"
@@ -1488,6 +1493,28 @@ def finalize_study(
             f"백그라운드로 띄웠다면 `lsof -i :8765` 로 PID를 찾아 `kill <pid>` "
             f"하거나, `pkill -f \"study_html.py --port 8765\"` 로 종료할 수 있습니다."
             + work_cleanup
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# 11. cleanup_work
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+@_safe("cleanup_work")
+def cleanup_work(work_id: str) -> dict[str, Any]:
+    """완료된 학습 결과는 유지하고 해당 작업의 `.work` 중간 데이터만 삭제합니다.
+
+    `finalize_study`가 성공해 렌더링이 완료된 작업에만 사용할 수 있습니다. 결과 파일,
+    manifest, 사용자 파일은 건드리지 않으며 렌더링도 다시 실행하지 않습니다.
+    """
+    data = workspace.cleanup_workspace(work_id)
+    return _ok(
+        data,
+        next_action=(
+            "중간 작업 데이터(.work/)만 삭제했습니다. 최종 학습 자료와 기존 진도는 "
+            "그대로 사용할 수 있습니다."
         ),
     )
 

@@ -115,6 +115,11 @@ python3 study_tui.py
 
 결과 폴더의 `.pdf-study-manifest.json`은 현재 형식과 서버가 생성한 경로를 기록한다. 같은 작업을 다시 렌더하면 manifest 경로만 새 세대로 교체되며, 형식과 학습 fingerprint가 같을 때만 기존 진도가 유지된다.
 
+최종 결과를 확인한 뒤 PDF 본문·raw·상태가 든 `.work/`만 지우려면 MCP의
+`cleanup_work(work_id)`를 호출한다. 이 동작은 결과물·진도·manifest를 유지하고
+다시 렌더링하지 않는다. 렌더가 완료되지 않은 작업은 재개 데이터를 보호하기 위해
+정리할 수 없다.
+
 ## 로컬 산출물
 
 `result/`, `.work/`, `.venv/`, `.pytest_cache/`, 생성 fixture PDF는 커밋 대상이 아니다. `.work/`에는 사용자의 PDF 본문과 학습 결과가 들어갈 수 있으므로 공개 저장소에 포함하면 안 된다.

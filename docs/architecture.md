@@ -24,7 +24,7 @@ pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, �
 
 `get_subagent_prompts`는 처리 모드와 학습자 정보에 맞는 한국어 프롬프트와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 돌려준다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이며, raw 본문 검증도 이 처리 대상 합집합에만 적용되어 이미 완료된 챕터의 예전 raw 상태가 재개를 막지 않는다. 각 챕터 처리자는 `get_chapter_content`로 입력을 한 번 받고, 해당 챕터가 요약 pending 목록에 있을 때만 요약·핵심 포인트·활성 기본 문제를 `save_chapter_result`로 저장한다. 확장 pending 목록에 있을 때만 같은 본문과 학습자 정보를 받은 확장 프롬프트가 외부 검색 없이 응용 문제를 만들고 `save_extension_result`가 저장한다. workflow와 `next_action`도 실제로 남은 결과 유형만 안내한다.
 
-`list_pending_chapters`가 남은 요약 또는 확장 문제를 확인한다. 남은 챕터가 있으면 `finalize_study`는 기본적으로 거부한다. 챕터 설정이 완료되고 모두 끝나면 `list_pending_chapters`는 `finalize_study`의 출력 형식 선택지를 다음 단계 계약으로 반환한다. 사용자의 명시 선택 뒤 `finalize_study`가 HTML 또는 Markdown+TUI 결과물을 같은 중립 JSON에서 staging에 만들고, 성공한 세대의 관리 경로만 최종 폴더에 설치한다. 같은 형식과 같은 학습 fingerprint일 때만 기존 진도를 staging으로 복사한다.
+`list_pending_chapters`가 남은 요약 또는 확장 문제를 확인한다. 남은 챕터가 있으면 `finalize_study`는 기본적으로 거부한다. 챕터 설정이 완료되고 모두 끝나면 `list_pending_chapters`는 `finalize_study`의 출력 형식 선택지를 다음 단계 계약으로 반환한다. 사용자의 명시 선택 뒤 `finalize_study`가 HTML 또는 Markdown+TUI 결과물을 같은 중립 JSON에서 staging에 만들고, 성공한 세대의 관리 경로만 최종 폴더에 설치한다. 같은 형식과 같은 학습 fingerprint일 때만 기존 진도를 staging으로 복사한다. 완료 결과의 중간 데이터가 더 이상 필요 없으면 별도 `cleanup_work`가 렌더 계층을 거치지 않고 해당 `.work`만 제거한다.
 
 ## 흐름도
 

@@ -316,6 +316,37 @@ def replace_workspace(output_dir: str | Path) -> None:
             _chapter_setup_locks.pop(old_work_id, None)
 
 
+def cleanup_workspace(work_id: str) -> dict[str, str | bool]:
+    """완료된 작업의 `.work`만 안전하게 삭제하고 메모리 등록을 해제한다."""
+    work_dir = get_work_dir(work_id)
+    output_dir = work_dir.parent
+    if work_dir.name != ".work":
+        raise ValueError(f"unsafe work directory: {work_dir}")
+
+    with _get_lock(work_id):
+        state = load_state(work_id)
+        if state.get("phases", {}).get("rendering") != "completed":
+            raise ValueError(
+                "cleanup_work requires completed rendering; run finalize_study first"
+            )
+        if not work_dir.exists():
+            raise FileNotFoundError(f"work directory not found: {work_dir}")
+        shutil.rmtree(work_dir)
+
+    with _registry_meta:
+        _registry.pop(work_id, None)
+    with _locks_meta:
+        _locks.pop(work_id, None)
+    with _chapter_setup_locks_meta:
+        _chapter_setup_locks.pop(work_id, None)
+
+    return {
+        "work_id": work_id,
+        "output_dir": str(output_dir),
+        "work_dir_deleted": True,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 워크스페이스 생성
 # ---------------------------------------------------------------------------

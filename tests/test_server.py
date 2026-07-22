@@ -1619,6 +1619,63 @@ def test_completed_resume_exposes_finalize_choices_without_failure(tmp_path, ko_
     }
 
 
+def test_cleanup_work_removes_completed_workspace_without_rerender(
+    tmp_path, ko_short, monkeypatch,
+):
+    """완료 작업의 .work만 지우며 이미 설치한 결과를 다시 렌더하지 않는다."""
+    out = tmp_path / "out"
+    wid = server.init_work(
+        str(ko_short),
+        str(out),
+        enable_short_answer=True,
+        enable_reflection=True,
+        enable_extension=False,
+    )["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    server.save_chapter_result(wid, "ch1", _result())
+    finalized = server.finalize_study(wid, "html")
+    assert finalized["ok"], finalized
+    assert finalized["data"]["cleanup_work"] == {
+        "tool": "cleanup_work",
+        "required_parameters": [],
+        "desc": "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다.",
+    }
+    main_before = (out / "main.html").read_bytes()
+    manifest_before = (out / ".pdf-study-manifest.json").read_bytes()
+
+    def should_not_render(*args, **kwargs):
+        pytest.fail("cleanup_work must not render output again")
+
+    monkeypatch.setattr(server, "install_rendered_output", should_not_render)
+
+    cleaned = server.cleanup_work(wid)
+
+    assert cleaned["ok"], cleaned
+    assert cleaned["data"] == {
+        "work_id": wid,
+        "output_dir": str(out),
+        "work_dir_deleted": True,
+    }
+    assert not (out / ".work").exists()
+    assert (out / "main.html").read_bytes() == main_before
+    assert (out / ".pdf-study-manifest.json").read_bytes() == manifest_before
+    with pytest.raises(KeyError, match="unknown work_id"):
+        workspace.get_work_dir(wid)
+
+
+def test_cleanup_work_rejects_unrendered_workspace(tmp_path, ko_short):
+    """최종 결과가 없는 작업은 .work를 지워 재개 불가능하게 만들 수 없다."""
+    out = tmp_path / "out"
+    wid = server.init_work(str(ko_short), str(out))["data"]["work_id"]
+
+    cleaned = server.cleanup_work(wid)
+
+    assert cleaned["ok"] is False
+    assert "finalize_study" in cleaned["error"]
+    assert (out / ".work" / "state.json").exists()
+
+
 def test_finalize_rejects_unknown_format(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     _scan(wid)
