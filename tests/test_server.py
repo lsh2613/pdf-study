@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from pdf_study import server, workspace
@@ -1395,7 +1397,7 @@ def test_unknown_work_id_returns_ok_false(tmp_path):
     assert r["ok"] is False
 
 
-def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
+def test_html_launch_scripts_finalize_response(tmp_path, ko_short):
     """init → scan → set → save → finalize 까지 의도된 응답 형식과 상태 전이."""
     r1 = server.init_work(str(ko_short), str(tmp_path / "out"))
     _check_envelope(r1); assert r1["ok"]
@@ -1457,15 +1459,20 @@ def test_full_flow_save_and_finalize_html(tmp_path, ko_short):
     assert (out / "main.html").exists()
     assert not (out / "index.html").exists()
 
-    msg = r10["next_action"]
-    assert "study_html.py" in msg
-    assert "http://localhost:8765" in msg
-    assert "file://" in msg
-    assert "Ctrl+C" in msg
-    assert "브라우저 탭" in msg
     assert r10["data"]["launch_command"].startswith("cd ")
     assert "study_html.py" in r10["data"]["launch_command"]
+    assert r10["data"]["python"] == sys.executable
     assert r10["data"]["entry_page"] == "main.html"
+    assert r10["data"]["default_url"] == "http://localhost:8765/main.html"
+    assert r10["data"]["launch_scripts"] == {
+        "macos_linux": "start_study.sh",
+        "windows": "start_study.bat",
+    }
+    assert r10["data"]["auto_port_on_script_launch"] is True
+    assert "start_study.sh" in r10["next_action"]
+    assert "start_study.bat" in r10["next_action"]
+    assert "자동으로 선택" in r10["next_action"]
+    assert "Ctrl+C" in r10["next_action"]
 
 
 def test_pending_guidance_tracks_each_remaining_result_kind(tmp_path, ko_short):

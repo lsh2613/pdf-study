@@ -76,7 +76,7 @@ pending 판정의 정확한 상태 매핑은 다음과 같다.
 
 ## 출력물 계약
 
-HTML 출력은 다중 챕터일 때 `index.html`과 `chN.html`, 단일 챕터일 때 `main.html`을 만든다. `assets/`, `study_html.py`, `README.md`가 함께 복사된다. 진도 저장은 `study_html.py`가 제공하는 로컬 progress API를 통해 이뤄진다.
+HTML 출력은 다중 챕터일 때 `index.html`과 `chN.html`, 단일 챕터일 때 `main.html`을 만든다. `assets/`, `study_html.py`, `start_study.sh`, `start_study.bat`, `README.md`가 함께 복사된다. 생성 완료 HTML 응답은 기존 `launch_command`, `python`, `entry_page`, 고정 포트의 `default_url`을 유지하고, `launch_scripts={"macos_linux":"start_study.sh","windows":"start_study.bat"}`, `auto_port_on_script_launch=true`를 추가한다. 사용자는 같은 컴퓨터의 자료를 생성한 프로젝트 환경에서 플랫폼별 스크립트를 더블클릭해 실행한다. 스크립트는 사용 가능한 포트를 자동 배정하고 loopback 전용 서버를 열어 브라우저를 시작한다. 문제가 있으면 기존 직접 실행 경로 `study_html.py --port 8765`를 계속 사용할 수 있다. 진도 저장은 변함없이 `study_html.py`가 제공하는 로컬 progress API와 `progress/` 아래 JSON을 사용한다.
 
 Markdown+TUI 출력은 `book.md`, 루트 `study_tui.py`, 챕터별 `summary.md`, `quiz.json`, 챕터별 launcher를 만든다. 진도는 각 챕터 폴더의 `progress.json`에 저장된다.
 

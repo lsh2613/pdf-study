@@ -97,13 +97,18 @@ fixture 생성기·입력 폰트·PDF 파일 해시가 현재 manifest와 다르
 
 같은 출력 폴더에 기존 작업이나 완료 결과가 있으면 `init_work`는 자동 덮어쓰지 않는다. 응답의 `resume`, `replace`, `new_output_dir` 선택지를 그대로 보여주고 사용자의 답에 따라 `resume_work`, `init_work(..., replace_existing=true)`, 또는 다른 `output_dir`의 `init_work`를 호출한다. `replace`는 기존 `.work`를 새 작업으로 바꾸지만, 이전 렌더 결과는 새 렌더가 성공할 때까지 유지한다.
 
-HTML 결과물은 결과 폴더에서 다음 명령으로 연다.
+HTML 결과물은 결과 폴더에서 macOS/Linux의 `start_study.sh` 또는 Windows의
+`start_study.bat`을 더블클릭해 연다. 두 스크립트는 이 자료를 만든 같은 컴퓨터의
+프로젝트 환경을 사용하며, 사용 가능한 포트를 자동 선택해 loopback 전용 서버와
+브라우저를 시작한다. 서버 창을 닫거나 그 창에서 `Ctrl+C`를 누르면 종료한다.
+
+문제가 있을 때는 기존 직접 실행 경로로 고정 포트 서버를 열 수 있다.
 
 ```bash
-python3 study_html.py
+python study_html.py --port 8765
 ```
 
-이 서버를 거쳐야 답안과 완료 토글이 `progress/`에 저장된다. HTML 파일을 `file://`로 직접 열면 진도 저장 API가 동작하지 않는다.
+이 서버를 거쳐야 답안과 완료 토글이 `progress/` 아래 JSON에 저장된다. HTML 파일을 `file://`로 직접 열면 진도 저장 API가 동작하지 않는다.
 
 Markdown+TUI 결과물은 결과 폴더에서 다음 명령으로 연다.
 

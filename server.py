@@ -1360,9 +1360,10 @@ def finalize_study(
       (조용한 부분 렌더링 방지). 일부 챕터가 끝내 실패해 부분 결과라도
       만들고 싶을 때만 force=True를 사용하세요.
 
-    응답의 next_action에 학습 자료 실행 명령이 포함됩니다.
-    - html: `python3 study_html.py`(진도 API 서버). 이 서버를 띄워야 답안/완료
-      토글이 progress/ 폴더에 저장되며, 파일을 직접 열면(file://) 동작 안 함.
+    응답의 next_action에 학습 자료 실행 방법이 포함됩니다.
+    - html: 생성된 폴더에서 macOS/Linux는 `start_study.sh`, Windows는
+      `start_study.bat`을 더블클릭합니다. 런처가 사용 가능한 포트를 선택해 진도
+      API 서버와 브라우저를 시작합니다.
     - md_tui: `python3 study_tui.py`(터미널 TUI). rich가 없으면 자동 설치 시도,
       불가능한 환경이면 평문 모드로 폴백(항상 실행). 진도는 각 챕터
       progress.json에 직접 저장(서버 불필요).
@@ -1477,21 +1478,20 @@ def finalize_study(
             "python": py,
             "entry_page": entry,
             "default_url": "http://localhost:8765/" + entry,
+            "launch_scripts": {
+                "macos_linux": "start_study.sh",
+                "windows": "start_study.bat",
+            },
+            "auto_port_on_script_launch": True,
             **({"cleanup_work": cleanup_action} if keep_work_dir else {}),
         },
         next_action=(
             f"학습 자료가 {output_dir}에 만들어졌습니다.\n"
-            f"\n[서버 시작] 진도 저장과 완료 토글이 동작하려면 다음 명령을 "
-            f"실행하세요:\n"
-            f"  {launch_cmd}\n"
-            f"기본 포트는 8765이며 브라우저가 자동으로 "
-            f"http://localhost:8765/{entry} 를 엽니다. 파일을 더블클릭"
-            f"(file://)으로 열면 /api/progress 호출이 막혀 답안이 저장되지 "
-            f"않습니다.\n"
-            f"\n[서버 종료] 서버를 실행한 터미널에서 Ctrl+C 를 누르세요. "
-            f"브라우저 탭/창을 닫는 것만으로는 서버가 꺼지지 않습니다. "
-            f"백그라운드로 띄웠다면 `lsof -i :8765` 로 PID를 찾아 `kill <pid>` "
-            f"하거나, `pkill -f \"study_html.py --port 8765\"` 로 종료할 수 있습니다."
+            f"\n[학습 시작] 결과 폴더에서 macOS/Linux는 `start_study.sh`, "
+            f"Windows는 `start_study.bat`을 더블클릭하세요. 스크립트가 사용 가능한 "
+            f"포트를 자동으로 선택하고 브라우저를 엽니다.\n"
+            f"\n[서버 종료] 스크립트가 연 서버 창을 닫거나 그 창에서 Ctrl+C 를 "
+            f"누르세요. 브라우저 탭/창을 닫는 것만으로는 서버가 꺼지지 않습니다."
             + work_cleanup
         ),
     )

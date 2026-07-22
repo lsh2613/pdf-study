@@ -13,6 +13,7 @@
 - 병렬 챕터 저장을 고려해 작업 상태 갱신은 잠금과 원자적 파일 교체를 사용한다.
 - `set_chapters`는 입력과 책 정보 준비를 무부작용으로 검증한 뒤 모드·챕터·처리 phase를 한 번에 확정하며, 같은 작업의 호출을 직렬화하고 본문 준비 성공과 실패를 `chapter_processing`에 종결 상태로 남긴다.
 - HTML 사이트와 Markdown+TUI 출력이 같은 저장 결과에서 생성된다.
+- HTML 결과는 macOS/Linux의 `start_study.sh`와 Windows의 `start_study.bat`을 함께 제공한다. 같은 컴퓨터의 프로젝트 환경에서 더블클릭하면 사용 가능한 loopback 포트를 자동 선택해 브라우저를 열며, 기존 `study_html.py` 직접 실행 정보도 호환을 위해 유지한다.
 - 기존 출력 작업은 `init_work`가 이어가기·교체·새 폴더 선택을 요구하며 자동 덮어쓰지 않는다. 렌더 결과는 `.pdf-study-manifest.json`의 관리 경로만 staging 세대로 교체하고, 같은 형식·학습 fingerprint에서만 진도를 유지한다.
 - 서버 재시작 후 `resume_work`로 기존 `.work` 상태를 다시 등록할 수 있다.
 - 프로젝트 로컬 `.venv` 설치 스크립트와 클라이언트 설정 자동 적용, 환경 확인 명령이 있다. 기본 설치는 런타임만 준비하고 `setup_mcp.sh --dev`는 pytest까지 준비·검증한다. 로컬 MCP 설정은 호출 위치가 아니라 저장소 루트를 기준으로 안전하게 원자 적용하며, 손상된 기존 설정은 백업·덮어쓰지 않는다.
@@ -25,7 +26,7 @@
 
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, 선택지 요구, 최종 렌더링, 진도 저장 서버, 설치 스크립트와 MCP 설정 보호를 다룬다.
 - 테스트 시작 시 fixture 생성기 fingerprint와 PDF 해시를 확인해 오래된 합성 PDF를 자동 재생성한다.
-- 최근 확인: 현재 checkout에서 `.venv/bin/pytest -q`가 270개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
+- 최근 확인: 현재 checkout에서 `.venv/bin/python -m pytest -q`가 272개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
 
 ## 남은 일
 
