@@ -13,7 +13,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from . import analysis, prompts, question_contract, workspace
+from . import analysis, processing_mode_contract, prompts, question_contract, workspace
 from .renderer import RENDERERS
 from .renderer.output_manager import install_rendered_output
 
@@ -21,33 +21,6 @@ logger = logging.getLogger(__name__)
 
 mcp = FastMCP("pdf-study-builder")
 
-
-_PROCESSING_MODE_CHOICES = (
-    {
-        "execution_mode": "sequential",
-        "extraction_mode": "text",
-        "label": "Sequential + Text",
-        "desc": "디지털 PDF · 안정적·빠르고 저렴",
-    },
-    {
-        "execution_mode": "parallel",
-        "extraction_mode": "text",
-        "label": "Parallel + Text",
-        "desc": "디지털 PDF · 최대 5개 동시로 가장 빠름",
-    },
-    {
-        "execution_mode": "sequential",
-        "extraction_mode": "ocr",
-        "label": "Sequential + OCR",
-        "desc": "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리",
-    },
-    {
-        "execution_mode": "parallel",
-        "extraction_mode": "ocr",
-        "label": "Parallel + OCR",
-        "desc": "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리",
-    },
-)
 
 _OUTPUT_FORMAT_CHOICES = (
     {
@@ -80,18 +53,11 @@ def _err(
 
 
 def _processing_mode_choices(text_quality: str | None) -> list[dict[str, str]]:
-    choices = [dict(choice) for choice in _PROCESSING_MODE_CHOICES]
-    if text_quality in ("garbled", "no_text_layer"):
-        return [choice for choice in choices if choice["extraction_mode"] == "ocr"]
-    return choices
+    return processing_mode_contract.choices(text_quality)
 
 
 def _set_chapters_next_step(text_quality: str | None) -> dict[str, Any]:
-    return {
-        "tool": "set_chapters",
-        "required_parameters": ["chapters", "execution_mode", "extraction_mode"],
-        "choices": _processing_mode_choices(text_quality),
-    }
+    return processing_mode_contract.set_chapters_next_step(text_quality)
 
 
 def _finalize_next_step() -> dict[str, Any]:
@@ -826,8 +792,8 @@ def set_chapters(
       extraction_mode='ocr'로 다시 호출하도록 강제합니다(data.forced_extraction_mode="ocr").
     다음 단계: get_subagent_prompts(work_id)
     """
-    if execution_mode not in ("sequential", "parallel") or \
-            extraction_mode not in ("text", "ocr"):
+    if execution_mode not in processing_mode_contract.VALID_EXECUTION_MODES or \
+            extraction_mode not in processing_mode_contract.VALID_EXTRACTION_MODES:
         # text_quality가 garbled(mojibake)/no_text_layer면 text 추출이 무의미하므로
         # 선택지에서 text 조합을 빼고 **OCR 조합만** 제시한다(애초에 못 고르게).
         # scan_pdf가 텍스트 레이어로 측정해 둔 값이라 재독 불필요.
@@ -835,58 +801,10 @@ def set_chapters(
             tq = workspace.load_state(work_id).get("text_quality")
         except Exception:
             tq = None
-        force_ocr = tq in ("garbled", "no_text_layer")
-
-        combos = _processing_mode_choices(tq)
-
-        if force_ocr:
-            reason = (
-                "텍스트 레이어 인코딩이 깨져 있어(mojibake)"
-                if tq == "garbled"
-                else "텍스트 레이어가 거의 없어"
-            )
-            choices = combos
-            msg = (
-                f"이 PDF는 {reason} text 추출이 무의미합니다(text_quality={tq}). "
-                "따라서 **OCR 조합만 선택할 수 있습니다** — text 조합은 제시하지 마세요. "
-                "아래 2가지 중 하나를 사용자에게 보여주고 골라 두 값을 전달해 다시 "
-                "호출하세요.\n"
-                "③ Sequential + OCR — PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리.\n"
-                "④ Parallel + OCR — PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리.\n"
-                "OCR 선처리는 execution_mode와 별개로 서버 내부 상한(최대 2개 챕터, "
-                "CPU 1코어면 1개)으로 제한됩니다. extraction_mode는 'ocr' 고정, "
-                "execution_mode만 'sequential'|'parallel'에서 선택.\n"
-            )
-            data = {
-                "choices": choices,
-                "execution_modes": ["sequential", "parallel"],
-                "extraction_modes": ["ocr"],
-                "text_quality": tq,
-                "forced_extraction_mode": "ocr",
-            }
-        else:
-            msg = (
-                "execution_mode와 extraction_mode를 모두 지정해야 합니다. 기본값을 "
-                "임의로 정하지 말고, 아래 4가지 조합과 특징을 사용자에게 그대로 보여준 뒤 "
-                "원하는 하나를 골라 두 값을 전달해 다시 호출하세요. 4개 모두 유효하니 "
-                "임의로 빼지 말고 전부 제시할 것.\n"
-                "① Sequential + Text — 한 챕터씩 순차 + 라이브러리 텍스트 추출. "
-                "안정적·빠르고 저렴 (디지털 PDF).\n"
-                "② Parallel + Text — 최대 5개 챕터 동시 + 텍스트 추출. 가장 빠름 "
-                "(병렬 디스패치 가능한 클라이언트).\n"
-                "③ Sequential + OCR — PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리.\n"
-                "④ Parallel + OCR — PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리. "
-                "OCR 선처리는 서버 내부 상한(최대 2개 챕터, CPU 1코어면 1개)으로 "
-                "별도 제한됩니다.\n"
-                "execution_mode는 'sequential'|'parallel', extraction_mode는 'text'|'ocr'.\n"
-            )
-            data = {
-                "choices": combos,
-                "execution_modes": ["sequential", "parallel"],
-                "extraction_modes": ["text", "ocr"],
-            }
-
-        return _err(msg + analysis.CHOICE_POLICY, data=data)
+        return _err(
+            processing_mode_contract.invalid_mode_message(tq) + analysis.CHOICE_POLICY,
+            data=processing_mode_contract.invalid_mode_data(tq),
+        )
 
     # text 모드 가드: 텍스트 레이어가 깨졌거나(garbled) 사실상 없으면(no_text_layer)
     # 라이브러리 추출 본문이 쓰레기가 된다 → OCR로 강제 전환하도록 거부한다.
