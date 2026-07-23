@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import html
-import json
 import logging
 import re
 import shlex
@@ -20,10 +19,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .. import workspace
-from ..prompts import _chapter_sort_key  # 내부 헬퍼 재사용
 from .base import Renderer
 from .page_labels import format_page_label
+from .study_loader import _unescape_if_double_escaped, load_study_data
 
 logger = logging.getLogger(__name__)
 
@@ -199,23 +197,6 @@ def _demote_headings(html_text: str) -> str:
     )
 
 
-def _unescape_if_double_escaped(text: str) -> str:
-    r"""summary가 진짜 줄바꿈 없이 리터럴 `\n`(역슬래시+n)만 갖고 있으면 복구한다.
-
-    일부 에이전트가 줄바꿈을 실제 개행이 아니라 `\n` 두 글자로 넣어 저장하는데,
-    그러면 마크다운 렌더러가 헤딩·목록·문단을 못 잡고 `\n`·`##`가 글자로 노출된다.
-    **진짜 개행이 하나도 없고 리터럴 시퀀스만 있을 때만** 변환하므로, 정상적으로
-    개행이 들어간 요약(코드블록 안의 `\n` 포함)은 건드리지 않는다.
-    """
-    if "\n" in text:
-        return text  # 진짜 개행이 있으면 정상 — 그대로 둔다
-    if "\\n" in text or "\\t" in text:
-        return (text.replace("\\r\\n", "\n")
-                    .replace("\\n", "\n")
-                    .replace("\\t", "\t"))
-    return text
-
-
 # templates 디렉터리 (이 파일과 동일 패키지의 templates/html)
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates" / "html"
 _STATIC_ASSET_FILES = ("style.css", "storage.js")
@@ -226,70 +207,6 @@ _PYTHON_EXECUTABLE_MARKER = "__PDF_STUDY_PYTHON__"
 
 def _esc(s: Any) -> str:
     return html.escape(str(s) if s is not None else "")
-
-
-# ---------------------------------------------------------------------------
-# 데이터 로딩
-# ---------------------------------------------------------------------------
-
-def _load_all(work_id: str) -> dict[str, Any]:
-    state = workspace.load_state(work_id)
-    book_info = workspace.load_book_info(work_id) or {}
-    summaries_dir = workspace.summaries_dir(work_id)
-    quiz_dir = workspace.quiz_dir(work_id)
-    ext_dir = workspace.extension_quiz_dir(work_id)
-    raw_dir = workspace.chapters_raw_dir(work_id)
-
-    all_ids = sorted(state.get("chapters", {}).keys(), key=_chapter_sort_key)
-    # skipped 챕터(찾아보기·색인 등 비본문)는 렌더 대상에서 제외
-    chapter_ids = [cid for cid in all_ids if not state["chapters"][cid].get("skip")]
-    chapters: list[dict[str, Any]] = []
-    for cid in chapter_ids:
-        meta = state["chapters"][cid]
-        sum_path = summaries_dir / f"{cid}.json"
-        quiz_path = quiz_dir / f"{cid}.json"
-        ext_path = ext_dir / f"{cid}.json"
-        raw_path = raw_dir / f"{cid}.json"
-
-        summary_completed = meta.get("summary_status") == "completed"
-        extension_completed = meta.get("extension_status") == "completed"
-        summary_data = (
-            json.loads(sum_path.read_text(encoding="utf-8"))
-            if summary_completed and sum_path.exists()
-            else None
-        )
-        quiz_data = (
-            json.loads(quiz_path.read_text(encoding="utf-8"))
-            if summary_completed and quiz_path.exists()
-            else None
-        )
-        ext_data = (
-            json.loads(ext_path.read_text(encoding="utf-8"))
-            if extension_completed and ext_path.exists()
-            else None
-        )
-        raw_data = json.loads(raw_path.read_text(encoding="utf-8")) if raw_path.exists() else None
-
-        # summaries(요약) + quiz(문제)는 분리 저장되지만 다운스트림은 한 dict로 본다.
-        if summary_data is not None or quiz_data is not None:
-            summary_data = summary_data or {}
-            if isinstance(summary_data.get("summary"), str):
-                summary_data["summary"] = _unescape_if_double_escaped(summary_data["summary"])
-            summary_data["questions"] = (quiz_data or {}).get("questions") or {}
-
-        chapters.append({
-            "chapter_id": cid,
-            "meta": meta,
-            "summary": summary_data,
-            "extension": ext_data,
-            "raw": raw_data,
-        })
-
-    return {
-        "state": state,
-        "book_info": book_info,
-        "chapters": chapters,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -607,7 +524,7 @@ def _index_body(
 
 class HtmlRenderer(Renderer):
     def render(self, work_id: str, output_dir: Path) -> None:
-        loaded = _load_all(work_id)
+        loaded = load_study_data(work_id)
         state = loaded["state"]
         book_info = loaded["book_info"]
         chapters = loaded["chapters"]

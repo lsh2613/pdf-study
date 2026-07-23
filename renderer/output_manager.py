@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import workspace
-from .html_renderer import _load_all
+from .study_loader import load_study_data
 
 MANIFEST_VERSION = 1
 SUPPORTED_FORMATS = {"html", "md_tui"}
@@ -28,7 +28,7 @@ def _canonical_json(data: Any) -> bytes:
 
 def render_study_fingerprint(work_id: str) -> str:
     """현재 렌더 입력이 같을 때만 같은 값을 갖는 결정적 fingerprint."""
-    loaded = _load_all(work_id)
+    loaded = load_study_data(work_id)
     state = loaded["state"]
     pdf_path = Path(state.get("pdf_path") or "")
     try:

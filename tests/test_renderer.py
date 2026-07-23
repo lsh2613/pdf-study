@@ -13,8 +13,8 @@ from pdf_study.renderer.html_renderer import (
     _FallbackMd,
     _chapter_body,
     _summary_section,
-    _unescape_if_double_escaped,
 )
+from pdf_study.renderer.study_loader import _unescape_if_double_escaped
 
 
 def _scan(wid):

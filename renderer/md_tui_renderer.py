@@ -5,7 +5,7 @@
 - summary.md = 읽기 전용(요약/핵심포인트), quiz.json = TUI 전용(4유형 문제+정답).
 - 엔진(study_tui.py)은 출력 루트에 1벌 복사, 각 챕터엔 엔진을 호출하는 얇은 launcher.
 - 옵션 비활성 유형은 quiz.json에서 생략 (sub-agent도 생성하지 않으므로 빈 유형 없음).
-- 데이터 로딩은 HtmlRenderer와 동일 소스 → _load_all 재사용.
+- 데이터 로딩은 출력 형식 중립 로더를 통해 HTML과 같은 저장 의미를 사용.
 """
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from .base import Renderer
-from .html_renderer import _load_all  # 동일한 state/book_info/chapters 로더 재사용
 from .page_labels import format_page_label
+from .study_loader import load_study_data
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def _quiz_data(chapter: dict[str, Any], opts: dict[str, bool]) -> dict[str, Any]
 
 class MdTuiRenderer(Renderer):
     def render(self, work_id: str, output_dir: Path) -> None:
-        loaded = _load_all(work_id)
+        loaded = load_study_data(work_id)
         state = loaded["state"]
         book_info = loaded["book_info"]
         chapters = loaded["chapters"]

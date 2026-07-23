@@ -18,6 +18,7 @@
 - 서버 재시작 후 `resume_work`로 기존 `.work` 상태를 다시 등록할 수 있다.
 - 프로젝트 로컬 `.venv` 설치 스크립트와 클라이언트 설정 자동 적용, 환경 확인 명령이 있다. 기본 설치는 런타임만 준비하고 `setup_mcp.sh --dev`는 pytest까지 준비·검증한다. 로컬 MCP 설정은 호출 위치가 아니라 저장소 루트를 기준으로 안전하게 원자 적용하며, 손상된 기존 설정은 백업·덮어쓰지 않는다.
 - 처리 모드 선택지는 `processing_mode_contract.py`가 순차/병렬과 text/OCR의 네 조합, 텍스트 품질별 OCR 제한, 다음 단계와 fallback 응답을 함께 관리한다. 기본값이나 추천으로 오해할 표현은 붙이지 않는다.
+- HTML·Markdown+TUI·출력 fingerprint는 `renderer/study_loader.py`의 중립 렌더 입력을 공유하므로, 완료 결과만 읽기와 skip 챕터 제외 규칙이 출력 형식별로 갈라지지 않는다.
 - Markdown+TUI 렌더러의 설계 주석은 현재 `docs/contracts.md`와 `docs/architecture.md`를 참조하며, 삭제된 문서 경로를 가리키지 않는다.
 - 다음 도구에 사용자 선택이 필요하면 앞선 성공 응답의 `next_step`이 필수 파라미터와 구조화된 선택지를 제공한다. 처리 모드와 출력 형식의 실패 응답 선택지는 잘못된 호출을 위한 fallback으로 유지한다.
 - 완료된 렌더 결과는 `cleanup_work`로 렌더링을 다시 하지 않고 `.work` 중간 데이터만 제거할 수 있다. 미완료 작업은 재개 데이터를 보호하기 위해 거부한다.

@@ -251,10 +251,12 @@ P2(유지보수·개발 경험) 순이다.
   다음 단계 객체, 모드 누락 fallback의 `data`와 안내 문구가 같은 정의를 사용한다.
   외부 `choices`, `execution_modes`, `extraction_modes`, OCR 강제 필드와 선택 흐름은
   유지했다.
+- [해결: 2026-07-23] 중립 렌더 입력 로더를 `renderer/study_loader.py`로 옮겼다.
+  HTML, Markdown+TUI, 출력 fingerprint가 같은 공개 내부 경계로 상태·책 정보·완료된
+  결과·skip 제외 규칙을 읽는다. 출력물과 manifest·진도 판정 방식은 바꾸지 않았다.
 
 | 대상 | 관찰 내용 | 정리 방향 |
 |---|---|---|
-| 렌더 공통 로더 | `MdTuiRenderer`가 중립 데이터 로더를 `html_renderer._load_all`에서 가져온다. | 공통 데이터 로더로 이동해 두 렌더러가 같은 공개 경계를 사용하게 한다. |
 | dev 의존성과 `pytest-mock` | optional extra와 dependency group에 pytest가 중복되고 `pytest-mock` 사용처가 없다. | dev 그룹 하나로 통합하고 미사용 의존성을 제거한 뒤 lock을 갱신한다. |
 | 배포 패키지의 `pdf_study.tests*` | `pyproject.toml`이 `tests`와 `tests.fixtures`를 런타임 패키지 목록에 명시한다. | 배포물에서 테스트 패키지를 제외하거나 별도 optional 진단 패키지로 목적을 명시한다. |
 | 렌더러 테스트 helper | `tests/test_renderer.py`와 `tests/test_md_tui_renderer.py`가 fake summary와 전체 작업 생성 루프를 각각 유지한다. | `conftest.py`의 공용 fixture/helper로 합친다. |
