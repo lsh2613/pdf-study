@@ -257,10 +257,12 @@ P2(유지보수·개발 경험) 순이다.
 - [해결: 2026-07-23] 배포 wheel에서 `pdf_study.tests`와
   `pdf_study.tests.fixtures`를 제외했다. 저장소의 pytest와 fixture 생성은 소스 트리에서
   그대로 실행되며, wheel은 서버·렌더러·템플릿만 포함한다.
+- [해결: 2026-07-23] HTML과 Markdown+TUI 렌더러 테스트의 공통 작업 준비를
+  `tests/conftest.py`로 통합했다. 문제 유형 선택, 유효한 결과 JSON 생성, 챕터 저장과
+  형식별 렌더링은 한 helper를 쓰고, 각 테스트 파일은 출력 형식별 검증만 유지한다.
 
 | 대상 | 관찰 내용 | 정리 방향 |
 |---|---|---|
-| 렌더러 테스트 helper | `tests/test_renderer.py`와 `tests/test_md_tui_renderer.py`가 fake summary와 전체 작업 생성 루프를 각각 유지한다. | `conftest.py`의 공용 fixture/helper로 합친다. |
 
 ## 권장 처리 순서
 

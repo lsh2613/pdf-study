@@ -1,13 +1,12 @@
 """HtmlRenderer + 사이드바 + 완료 토글 + 옵션 비활성 섹션 검증."""
 from __future__ import annotations
 
-import copy
 import stat
 import sys
 
 import pytest
 
-from pdf_study import question_contract, server
+from pdf_study import server
 from pdf_study.renderer.html_renderer import (
     HtmlRenderer,
     _FallbackMd,
@@ -15,16 +14,12 @@ from pdf_study.renderer.html_renderer import (
     _summary_section,
 )
 from pdf_study.renderer.study_loader import _unescape_if_double_escaped
-
-
-def _scan(wid):
-    options = server.workspace.load_state(wid)["question_options"]
-    return server.scan_pdf(
-        wid,
-        enable_short_answer=True if options.get("short_answer") is None else None,
-        enable_reflection=True if options.get("reflection") is None else None,
-        enable_extension=True if options.get("extension") is None else None,
-    )
+from .conftest import (
+    build_rendered_study,
+    fake_extension_result as _fake_extension,
+    fake_summary_result as _fake_summary,
+    scan_with_question_options as _scan,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -37,70 +32,26 @@ def stub_scan_toc_ocr(monkeypatch):
     monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda: StubWorker())
 
 
-def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):
-    result = copy.deepcopy(question_contract.summary_payload_example())
-    result.update(
-        chapter_id=cid, title=f"제목 {cid}", summary="본문 요약 내용입니다.",
-        key_points=["p1", "p2"],
-    )
-    questions = result["questions"]
-    questions["multiple_choice"][0].update(
-        id=f"{cid}_mc", question="?", options=["A", "B"], answer_index=0,
-        explanation="해설",
-    )
-    questions["short_answer"][0].update(id=f"{cid}_sa", question="?", model_answer="ans")
-    questions["reflection"][0].update(id=f"{cid}_rf", question="?", model_answer="ans")
-    if not mc:
-        questions["multiple_choice"] = []
-    if not sa:
-        questions["short_answer"] = []
-    if not rf:
-        questions["reflection"] = []
-    return result
-
-
-def _fake_extension(cid: str):
-    result = copy.deepcopy(question_contract.extension_payload_example())
-    result["chapter_id"] = cid
-    result["questions"]["extension"][0].update(
-        id=f"{cid}_ex", question="?", model_answer="ans",
-    )
-    return result
-
-
 def _build_multi(ko_with_toc, tmp_path, *, opts=None):
     """ko_with_toc.pdf 기반으로 multi-chapter site를 만들어 output_dir 반환."""
-    opts = opts or {}
-    r = server.init_work(str(ko_with_toc), str(tmp_path / "out"), **opts)
-    wid = r["data"]["work_id"]
-    s = _scan(wid)
-    chs = s["data"]["recommendations"]["suggested_chapters"]
-    server.set_chapters(wid, chs, execution_mode="sequential", extraction_mode="text",
-                        book_info={"title": "테스트용 한국어 책", "author": "T"})
-    for c in chs:
-        cid = c["chapter_id"]
-        server.save_chapter_result(wid, cid, _fake_summary(cid))
-        if server.get_subagent_prompts(wid)["data"]["enabled_types"]["extension"]:
-            server.save_extension_result(wid, cid, _fake_extension(cid))
-    fin = server.finalize_study(wid, "html")
-    assert fin["ok"], fin
-    return wid, tmp_path / "out", chs
+    return build_rendered_study(
+        ko_with_toc,
+        tmp_path,
+        "html",
+        options=opts,
+        book_info={"title": "테스트용 한국어 책", "author": "T"},
+    )
 
 
 def _build_single(ko_short, tmp_path, *, opts=None):
-    opts = opts or {}
-    r = server.init_work(str(ko_short), str(tmp_path / "out"), **opts)
-    wid = r["data"]["work_id"]
-    _scan(wid)
-    server.set_chapters(wid, [
-        {"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}
-    ], execution_mode="sequential", extraction_mode="text")
-    server.save_chapter_result(wid, "ch1", _fake_summary("ch1"))
-    if server.get_subagent_prompts(wid)["data"]["enabled_types"]["extension"]:
-        server.save_extension_result(wid, "ch1", _fake_extension("ch1"))
-    fin = server.finalize_study(wid, "html")
-    assert fin["ok"], fin
-    return wid, tmp_path / "out"
+    wid, out, _ = build_rendered_study(
+        ko_short,
+        tmp_path,
+        "html",
+        options=opts,
+        chapters=[{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}],
+    )
+    return wid, out
 
 
 def test_chapter_body_labels_pdf_and_source_pages():

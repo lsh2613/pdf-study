@@ -5,69 +5,22 @@ TUI 엔진(study_tui.py)은 대화형이라 직접 실행하지 않고,
 """
 from __future__ import annotations
 
-import copy
 import json
 
-from pdf_study import question_contract, server
+from pdf_study import server
 from pdf_study.renderer.md_tui_renderer import _book_md, _summary_md
-
-def _scan(wid):
-    options = server.workspace.load_state(wid)["question_options"]
-    return server.scan_pdf(
-        wid,
-        enable_short_answer=True if options.get("short_answer") is None else None,
-        enable_reflection=True if options.get("reflection") is None else None,
-        enable_extension=True if options.get("extension") is None else None,
-    )
-
-
-def _fake_summary(cid: str, *, mc=True, sa=True, rf=True):
-    result = copy.deepcopy(question_contract.summary_payload_example())
-    result.update(
-        chapter_id=cid, title=f"제목 {cid}", summary="본문 요약 내용입니다.",
-        key_points=["p1", "p2"],
-    )
-    questions = result["questions"]
-    questions["multiple_choice"][0].update(
-        id=f"{cid}_mc", question="Q?", options=["A", "B"], answer_index=1,
-        explanation="왜냐하면",
-    )
-    questions["short_answer"][0].update(id=f"{cid}_sa", question="Q?", model_answer="정답")
-    questions["reflection"][0].update(id=f"{cid}_rf", question="Q?", model_answer="정답")
-    if not mc:
-        questions["multiple_choice"] = []
-    if not sa:
-        questions["short_answer"] = []
-    if not rf:
-        questions["reflection"] = []
-    return result
-
-
-def _fake_extension(cid: str):
-    result = copy.deepcopy(question_contract.extension_payload_example())
-    result["chapter_id"] = cid
-    result["questions"]["extension"][0].update(
-        id=f"{cid}_ex", question="Q?", model_answer="정답",
-    )
-    return result
+from .conftest import build_rendered_study
 
 
 def _build_multi(ko_with_toc, tmp_path, *, opts=None):
-    opts = opts or {}
-    r = server.init_work(str(ko_with_toc), str(tmp_path / "out"), **opts)
-    wid = r["data"]["work_id"]
-    s = _scan(wid)
-    chs = s["data"]["recommendations"]["suggested_chapters"]
-    server.set_chapters(wid, chs, execution_mode="sequential", extraction_mode="text",
-                        book_info={"title": "테스트 책", "author": "T"})
-    for c in chs:
-        cid = c["chapter_id"]
-        server.save_chapter_result(wid, cid, _fake_summary(cid))
-        if server.get_subagent_prompts(wid)["data"]["enabled_types"]["extension"]:
-            server.save_extension_result(wid, cid, _fake_extension(cid))
-    fin = server.finalize_study(wid, "md_tui")
-    assert fin["ok"], fin
-    return tmp_path / "out", chs
+    _, out, chapters = build_rendered_study(
+        ko_with_toc,
+        tmp_path,
+        "md_tui",
+        options=opts,
+        summary_kwargs={"answer_index": 1, "question": "Q?", "model_answer": "정답"},
+    )
+    return out, chapters
 
 
 def test_markdown_labels_pdf_and_source_pages():
