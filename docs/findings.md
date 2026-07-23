@@ -254,10 +254,12 @@ P2(유지보수·개발 경험) 순이다.
 - [해결: 2026-07-23] 중립 렌더 입력 로더를 `renderer/study_loader.py`로 옮겼다.
   HTML, Markdown+TUI, 출력 fingerprint가 같은 공개 내부 경계로 상태·책 정보·완료된
   결과·skip 제외 규칙을 읽는다. 출력물과 manifest·진도 판정 방식은 바꾸지 않았다.
+- [해결: 2026-07-23] 배포 wheel에서 `pdf_study.tests`와
+  `pdf_study.tests.fixtures`를 제외했다. 저장소의 pytest와 fixture 생성은 소스 트리에서
+  그대로 실행되며, wheel은 서버·렌더러·템플릿만 포함한다.
 
 | 대상 | 관찰 내용 | 정리 방향 |
 |---|---|---|
-| 배포 패키지의 `pdf_study.tests*` | `pyproject.toml`이 `tests`와 `tests.fixtures`를 런타임 패키지 목록에 명시한다. | 배포물에서 테스트 패키지를 제외하거나 별도 optional 진단 패키지로 목적을 명시한다. |
 | 렌더러 테스트 helper | `tests/test_renderer.py`와 `tests/test_md_tui_renderer.py`가 fake summary와 전체 작업 생성 루프를 각각 유지한다. | `conftest.py`의 공용 fixture/helper로 합친다. |
 
 ## 권장 처리 순서

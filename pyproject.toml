@@ -32,8 +32,6 @@ packages = [
     "pdf_study",
     "pdf_study.pdf",
     "pdf_study.renderer",
-    "pdf_study.tests",
-    "pdf_study.tests.fixtures",
 ]
 package-dir = { "pdf_study" = "." }
 include-package-data = true
@@ -42,9 +40,6 @@ include-package-data = true
 # 합성 fixture PDF/이미지는 sdist/wheel에서 제외 (build_fixtures로 재생성).
 [tool.setuptools.package-data]
 "pdf_study" = ["templates/html/*", "templates/md_tui/*"]
-
-[tool.setuptools.exclude-package-data]
-"pdf_study.tests.fixtures" = ["*.pdf", "_assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
