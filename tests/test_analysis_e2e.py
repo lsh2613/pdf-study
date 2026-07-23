@@ -105,6 +105,71 @@ def test_scan_pdf_scanned_no_text_renders_toc_images_not_rejected(
     )
 
 
+def test_garbled_pdf_confirms_offset_from_toc_ocr_not_text_layer(
+    make_workspace, ko_short, monkeypatch,
+):
+    wid, _ = make_workspace(ko_short)
+    monkeypatch.setattr(
+        analysis.reader,
+        "evaluate_text_quality",
+        lambda doc, scan_size: {"quality": "garbled", "avg_chars_per_page": 0.0},
+    )
+    monkeypatch.setattr(
+        analysis.reader,
+        "detect_page_offset",
+        lambda doc: pytest.fail("garbled text layer must not determine page_offset"),
+    )
+    monkeypatch.setattr(analysis.reader, "locate_toc_pages", lambda doc, scan_size: [4, 7])
+
+    scanned = analysis.scan_pdf_impl(wid)
+    assert scanned["page_offset"] is None
+
+    def attach_ocr(items, ocr_language):
+        for item in items:
+            item["ocr_text"] = f"본문\n{item['page'] - 3}"
+            item["ocr_error"] = None
+            item["ocr_status"] = analysis.TOC_OCR_COMPLETED
+        return items
+
+    monkeypatch.setattr(analysis, "_attach_toc_ocr", attach_ocr)
+    completed = analysis.scan_toc_with_ocr_impl(wid)
+
+    assert completed["page_offset"] == 3
+    assert completed["page_offset_confidence"] == "high"
+    assert workspace.load_state(wid)["page_offset"] == 3
+
+
+def test_toc_ocr_does_not_clear_a_high_confidence_text_offset(
+    make_workspace, ko_short, monkeypatch,
+):
+    wid, _ = make_workspace(ko_short)
+    monkeypatch.setattr(
+        analysis.reader,
+        "evaluate_text_quality",
+        lambda doc, scan_size: {"quality": "good", "avg_chars_per_page": 10.0},
+    )
+    monkeypatch.setattr(
+        analysis.reader,
+        "detect_page_offset",
+        lambda doc: {"offset": 3, "confidence": "high"},
+    )
+    monkeypatch.setattr(analysis.reader, "locate_toc_pages", lambda doc, scan_size: [1, 2])
+    analysis.scan_pdf_impl(wid)
+
+    def attach_ocr(items, ocr_language):
+        for item in items:
+            item["ocr_text"] = "footer 없는 OCR"
+            item["ocr_error"] = None
+            item["ocr_status"] = analysis.TOC_OCR_COMPLETED
+        return items
+
+    monkeypatch.setattr(analysis, "_attach_toc_ocr", attach_ocr)
+    completed = analysis.scan_toc_with_ocr_impl(wid)
+
+    assert completed["page_offset"] == 3
+    assert completed["page_offset_confidence"] == "high"
+
+
 def test_force_vision_skips_outline(make_workspace, ko_with_toc):
     """force_vision=True면 내장 목차를 무시하고 목차 페이지 이미지 경로로 간다."""
     wid, _ = make_workspace(ko_with_toc)

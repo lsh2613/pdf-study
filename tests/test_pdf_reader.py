@@ -158,6 +158,20 @@ def test_detect_page_offset_none_when_no_page_numbers():
     assert r["confidence"] == "none"
 
 
+def test_detect_page_offset_from_ocr_texts_uses_repeated_footer_numbers():
+    pages = [
+        (4, "본문\n1"),
+        (5, "본문\n2"),
+        (6, "본문\n3"),
+        (7, "본문\n4"),
+    ]
+
+    assert reader.detect_page_offset_from_page_texts(pages) == {
+        "offset": 3,
+        "confidence": "high",
+    }
+
+
 # --- 페이지 → JPEG 렌더 (OCR 모드) ------------------------------------------
 
 def test_render_pages_writes_jpeg_per_page(tmp_path):

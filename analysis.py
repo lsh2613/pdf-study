@@ -41,6 +41,17 @@ def _ocr_cache_status_for_language(ocr_language: str) -> dict[str, Any]:
         return ocr.model_cache_status()
     return ocr.model_cache_status(ocr_language=ocr_language)
 
+
+def _trusted_offset_fields(offset_info: dict[str, Any]) -> dict[str, Any]:
+    """high 신뢰도만 공개 원문 페이지 매핑으로 승격한다."""
+    candidate = offset_info.get("offset")
+    confidence = offset_info.get("confidence", "none")
+    return {
+        "page_offset": candidate if confidence == "high" else None,
+        "page_offset_candidate": candidate if confidence == "low" else None,
+        "page_offset_confidence": confidence,
+    }
+
 # 모든 "선택지를 사용자에게 제시" 지점에 공통으로 붙이는 정책. 메인 에이전트가
 # MCP 선택지를 자기 말로 풀어쓰거나(요약/번역), '권장·기본값' 같은 표현을 임의로
 # 덧붙이는 드리프트를 막기 위함. server.py의 거부 메시지도 이걸 재사용한다.
@@ -386,17 +397,54 @@ def scan_toc_with_ocr_impl(work_id: str) -> dict[str, Any]:
 
     updated = _attach_toc_ocr(toc_page_images, ocr_language)
     summary = _toc_ocr_summary(updated)
+    offset_info = reader.detect_page_offset_from_page_texts(
+        (item["page"], item.get("ocr_text") or "")
+        for item in updated
+        if item.get("ocr_status") == TOC_OCR_COMPLETED
+    )
+    ocr_offset_fields = _trusted_offset_fields(offset_info)
+    # 정상 텍스트 레이어에서 이미 high로 확정한 값은 OCR footer가 없거나
+    # 불완전하다는 이유로 지우지 않는다. OCR high 결과는 더 직접적인 이미지
+    # 근거이므로 우선하고, 깨진 레이어는 항상 OCR 결과를 사용한다.
+    if ocr_offset_fields["page_offset"] is not None or \
+            state.get("page_offset_confidence") != "high":
+        offset_fields = ocr_offset_fields
+    else:
+        offset_fields = {
+            "page_offset": state.get("page_offset"),
+            "page_offset_candidate": state.get("page_offset_candidate"),
+            "page_offset_confidence": state.get("page_offset_confidence"),
+        }
+    page_count = int(outline_data.get("page_count") or state.get("page_count") or 0)
+    recommendations = _build_recommendations(
+        page_count,
+        None,
+        page_offset=offset_fields["page_offset"],
+        offset_confidence=offset_fields["page_offset_confidence"],
+    )
+    recommendations["page_offset_candidate"] = offset_fields["page_offset_candidate"]
     outline_data["toc_page_images"] = updated
     outline_data["toc_ocr"] = summary
+    outline_data["page_offset"] = offset_fields["page_offset"]
+    outline_data["page_offset_candidate"] = offset_fields["page_offset_candidate"]
+    outline_data["page_offset_confidence"] = offset_fields["page_offset_confidence"]
+    outline_data["recommendations"] = recommendations
     workspace.save_outline(work_id, outline_data)
-    workspace.update_state(work_id, toc_ocr_status=summary["status"])
+    workspace.update_state(
+        work_id,
+        toc_ocr_status=summary["status"],
+        **offset_fields,
+    )
 
     return {
         "requires_prepare_ocr": False,
         "ocr_cache": _ocr_cache_status_for_language(ocr_language),
         "toc_page_images": updated,
         "toc_ocr": summary,
-        "recommendations": outline_data.get("recommendations", {}),
+        "page_offset": offset_fields["page_offset"],
+        "page_offset_candidate": offset_fields["page_offset_candidate"],
+        "page_offset_confidence": offset_fields["page_offset_confidence"],
+        "recommendations": recommendations,
     }
 
 
@@ -469,9 +517,9 @@ def scan_pdf_impl(
         text_quality = quality["quality"]
         scan_end = min(scan_size, page_count) if page_count else 0
 
-        if text_quality == "no_text_layer":
-            # 텍스트 레이어가 없으면(스캔본) offset 측정이 무의미하다.
-            # → 불필요한 페이지 읽기(최대 page_count p 꼬리말 스캔)를 피한다.
+        if text_quality in ("garbled", "no_text_layer"):
+            # 깨진 레이어의 숫자와 스캔본은 footer 근거로 쓰지 않는다. 목차 OCR
+            # 완료 뒤 렌더 이미지 OCR 결과로만 offset을 확정한다.
             offset_info = {"offset": None, "confidence": "none"}
         else:
             # 원문 페이지번호 ↔ PDF 페이지 오프셋 (꼬리말 번호 다수결)
@@ -496,8 +544,9 @@ def scan_pdf_impl(
     finally:
         doc.close()
 
-    page_offset = offset_info["offset"]
-    offset_confidence = offset_info["confidence"]
+    offset_fields = _trusted_offset_fields(offset_info)
+    page_offset = offset_fields["page_offset"]
+    offset_confidence = offset_fields["page_offset_confidence"]
 
     recommendations = _build_recommendations(
         page_count,
@@ -512,8 +561,7 @@ def scan_pdf_impl(
         work_id,
         page_count=page_count,
         text_quality=text_quality,
-        page_offset=page_offset,
-        page_offset_confidence=offset_confidence,
+        **offset_fields,
         toc_ocr_status=toc_ocr["status"],
     )
     workspace.update_phase(work_id, "scanning", "completed")
@@ -522,6 +570,7 @@ def scan_pdf_impl(
         "page_count": page_count,
         "text_quality": text_quality,
         "page_offset": page_offset,
+        "page_offset_candidate": offset_fields["page_offset_candidate"],
         "page_offset_confidence": offset_confidence,
         "outline_present": use_outline,
         "toc_page_images": toc_page_images,
@@ -535,6 +584,7 @@ def scan_pdf_impl(
         "text_quality": text_quality,
         "avg_chars_per_page": quality["avg_chars_per_page"],
         "page_offset": page_offset,
+        "page_offset_candidate": offset_fields["page_offset_candidate"],
         "page_offset_confidence": offset_confidence,
         "outline_present": use_outline,
         # 내장 목차가 없을 때만 채워진다 — OCR은 scan_toc_with_ocr에서 수행

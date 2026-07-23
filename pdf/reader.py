@@ -11,7 +11,7 @@ import logging
 import re
 import unicodedata
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import fitz  # PyMuPDF
 from PIL import Image
@@ -342,41 +342,16 @@ def _footer_source_page(raw: str) -> int | None:
     return None
 
 
-def detect_page_offset(doc: fitz.Document, sample_cap: int = 400) -> dict[str, Any]:
-    """원문 페이지번호 ↔ PDF 페이지의 오프셋을 추정.
-
-    각 페이지 꼬리말의 원문 번호를 읽어 candidate = (PDF 페이지 − 원문 페이지)를
-    모으고, 최빈값(mode)을 오프셋으로 본다. 빈 페이지·번호 없는 표지·도입부는
-    자연히 후보에서 빠지고, 본문 노이즈(코드 줄번호 등)는 단발이라 최빈에 밀린다.
-
-    오프셋은 음수일 수 있다(PDF가 앞 front matter를 일부 누락한 경우).
-    텍스트 레이어가 없거나 원문 번호가 전혀 없으면 offset=None/none.
-
-    Returns:
-        {
-            "offset": int | None,      # PDF = 원문 + offset
-            "confidence": "high" | "low" | "none",
-        }
-        (support/samples/runner_up는 confidence 판정에만 내부적으로 쓰고 반환하지 않는다.)
-    """
-    n = doc.page_count
-    if n == 0:
-        return {"offset": None, "confidence": "none"}
-
-    # 페이지가 매우 많으면 균등 표본만 (대용량 PDF 보호)
-    if n <= sample_cap:
-        indices = range(n)
-    else:
-        step = n / sample_cap
-        indices = sorted({int(i * step) for i in range(sample_cap)})
-
+def detect_page_offset_from_page_texts(
+    page_texts: Iterable[tuple[int, str]],
+) -> dict[str, Any]:
+    """페이지 이미지 OCR 또는 텍스트 레이어의 footer로 오프셋을 추정한다."""
     counts: dict[int, int] = {}
-    for idx in indices:
-        raw = doc.load_page(idx).get_text("text")
+    for page_number, raw in page_texts:
         source_page = _footer_source_page(raw)
         if source_page is None:
             continue
-        cand = (idx + 1) - source_page  # PDF(1-based) − 원문
+        cand = page_number - source_page  # PDF(1-based) − 원문
         counts[cand] = counts.get(cand, 0) + 1
 
     if not counts:
@@ -392,6 +367,24 @@ def detect_page_offset(doc: fitz.Document, sample_cap: int = 400) -> dict[str, A
         confidence = "low"
 
     return {"offset": offset, "confidence": confidence}
+
+
+def detect_page_offset(doc: fitz.Document, sample_cap: int = 400) -> dict[str, Any]:
+    """원문 페이지번호 ↔ PDF 페이지의 오프셋을 텍스트 레이어에서 추정한다."""
+    n = doc.page_count
+    if n == 0:
+        return {"offset": None, "confidence": "none"}
+
+    # 페이지가 매우 많으면 균등 표본만 (대용량 PDF 보호)
+    if n <= sample_cap:
+        indices = range(n)
+    else:
+        step = n / sample_cap
+        indices = sorted({int(i * step) for i in range(sample_cap)})
+
+    return detect_page_offset_from_page_texts(
+        (idx + 1, doc.load_page(idx).get_text("text")) for idx in indices
+    )
 
 
 # ---------------------------------------------------------------------------
