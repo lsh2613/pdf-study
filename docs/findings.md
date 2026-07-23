@@ -257,7 +257,6 @@ P2(유지보수·개발 경험) 순이다.
 
 | 대상 | 관찰 내용 | 정리 방향 |
 |---|---|---|
-| dev 의존성과 `pytest-mock` | optional extra와 dependency group에 pytest가 중복되고 `pytest-mock` 사용처가 없다. | dev 그룹 하나로 통합하고 미사용 의존성을 제거한 뒤 lock을 갱신한다. |
 | 배포 패키지의 `pdf_study.tests*` | `pyproject.toml`이 `tests`와 `tests.fixtures`를 런타임 패키지 목록에 명시한다. | 배포물에서 테스트 패키지를 제외하거나 별도 optional 진단 패키지로 목적을 명시한다. |
 | 렌더러 테스트 helper | `tests/test_renderer.py`와 `tests/test_md_tui_renderer.py`가 fake summary와 전체 작업 생성 루프를 각각 유지한다. | `conftest.py`의 공용 fixture/helper로 합친다. |
 
