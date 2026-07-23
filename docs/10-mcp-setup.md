@@ -12,7 +12,7 @@ pdf-study MCP는 전역 Python이 아니라 이 저장소 안의 프로젝트 �
 ```
 
 스크립트는 `.venv`를 만들고 MCP 실행에 필요한 의존성을 설치·검증한 뒤 Claude
-Code, Codex CLI, Antigravity CLI의 현재 프로젝트 로컬 설정을 자동 적용한다.
+Code, Codex CLI, Antigravity CLI의 전역 MCP 설정을 자동 적용한다.
 
-개발 환경, 특정 클라이언트·전역 적용, 설정 출력과 환경 확인, 운영체제별 의존성
+개발 환경, 특정 클라이언트 설정, 설정 출력과 환경 확인, 운영체제별 의존성
 처리 등 상세 절차는 [운영 절차의 설치](operations.md#설치)를 따른다.

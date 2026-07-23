@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -22,20 +23,19 @@ class ConfigError(RuntimeError):
     """Raised when an existing MCP config cannot be safely updated."""
 
 
-def config_paths(scope: str, project_dir: Path) -> dict[str, Path]:
-    if scope == "global":
-        return {
-            "claude": Path.home() / ".claude.json",
-            "codex": Path.home() / ".codex/config/mcp.json",
-            "antigravity-cli": Path.home() / ".gemini/antigravity-cli/mcp_config.json",
-        }
-    if scope == "local":
-        return {
-            "claude": project_dir / ".claude.json",
-            "codex": project_dir / ".codex/mcp.json",
-            "antigravity-cli": project_dir / ".agents/mcp_config.json",
-        }
-    raise ConfigError(f"unknown config scope: {scope}")
+def config_paths(
+    scope: str,
+    project_dir: Path,
+    *,
+    home_dir: Path | None = None,
+) -> dict[str, Path]:
+    if scope != "global":
+        raise ConfigError("MCP client configuration is supported only at global scope")
+    home = home_dir or Path.home()
+    return {
+        "claude": home / ".claude.json",
+        "antigravity-cli": home / ".gemini/antigravity-cli/mcp_config.json",
+    }
 
 
 def _config_key(target: str, scope: str) -> str:
@@ -68,6 +68,41 @@ def _server_entry(command: str, cache_dir: Path) -> dict[str, Any]:
         "command": command,
         "env": {"PDF_STUDY_PADDLEOCR_CACHE": str(cache_dir)},
     }
+
+
+def apply_codex_cli_config(
+    *,
+    command: str,
+    cache_dir: Path,
+    codex_bin: str,
+) -> None:
+    """Register and verify the server through Codex CLI's supported interface."""
+    add_command = [
+        codex_bin,
+        "mcp",
+        "add",
+        "--env",
+        f"PDF_STUDY_PADDLEOCR_CACHE={cache_dir}",
+        "pdf-study",
+        "--",
+        command,
+        "-m",
+        "pdf_study",
+    ]
+    get_command = [codex_bin, "mcp", "get", "pdf-study"]
+    for cli_command, action in ((add_command, "register"), (get_command, "verify")):
+        try:
+            completed = subprocess.run(
+                cli_command,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        except OSError as exc:
+            raise ConfigError(f"Codex CLI {action} failed: {exc}") from exc
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise ConfigError(f"Codex CLI {action} failed: {detail or 'unknown error'}")
 
 
 def _updated_config(
@@ -123,9 +158,12 @@ def apply_configs(
     project_dir: Path,
     scope: str,
     targets: list[str],
+    home_dir: Path | None = None,
 ) -> list[Path]:
-    paths = config_paths(scope, project_dir)
+    paths = config_paths(scope, project_dir, home_dir=home_dir)
     unique_targets = list(dict.fromkeys(targets))
+    if "codex" in unique_targets:
+        raise ConfigError("Codex CLI must be registered through codex mcp, not JSON config")
     prepared: list[tuple[Path, bytes, int]] = []
     snapshots: dict[Path, tuple[bool, bytes | None, int]] = {}
 
@@ -165,25 +203,39 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--command", required=True)
     parser.add_argument("--cache-dir", required=True, type=Path)
-    parser.add_argument("--scope", required=True, choices=("global", "local"))
+    parser.add_argument("--scope", required=True, choices=("global",))
     parser.add_argument("--project-dir", required=True, type=Path)
     parser.add_argument("targets", nargs="+", choices=TARGETS)
     args = parser.parse_args()
 
     try:
+        targets = list(dict.fromkeys(args.targets))
+        json_targets = [target for target in targets if target != "codex"]
         paths = apply_configs(
             command=args.command,
             cache_dir=args.cache_dir,
             project_dir=args.project_dir,
             scope=args.scope,
-            targets=args.targets,
-        )
+            targets=json_targets,
+        ) if json_targets else []
+
+        if "codex" in targets:
+            codex_bin = shutil.which("codex")
+            if codex_bin is None:
+                raise ConfigError("Codex CLI was not found on PATH")
+            apply_codex_cli_config(
+                command=args.command,
+                cache_dir=args.cache_dir,
+                codex_bin=codex_bin,
+            )
     except (ConfigError, OSError) as exc:
         print(f"❌ Failed to update MCP config: {exc}", file=os.sys.stderr)
         return 1
 
-    for target, path in zip(dict.fromkeys(args.targets), paths):
+    for target, path in zip(json_targets, paths):
         print(f"✅ Successfully updated {target} MCP config at: {path}")
+    if "codex" in targets:
+        print("✅ Successfully registered and verified Codex CLI MCP config")
     return 0
 
 

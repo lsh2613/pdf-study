@@ -12,9 +12,9 @@
 ./scripts/setup_mcp.sh
 ```
 
-이 명령은 저장소 안에 `.venv`를 만들고, 패키지를 editable로 설치하고, `mcp`, `fitz`, `PIL`, `rich`, `markdown_it`, `paddle`, `paddleocr`, `pdf_study` import를 확인한다. 검증이 끝나면 Claude Code, Codex CLI, Antigravity CLI 설정을 저장소 루트 기준으로 자동 적용한다. 저장소 밖에서 스크립트를 호출해도 로컬 설정은 저장소에 기록된다. 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다.
+이 명령은 저장소 안에 `.venv`를 만들고, 패키지를 editable로 설치하고, `mcp`, `fitz`, `PIL`, `rich`, `markdown_it`, `paddle`, `paddleocr`, `pdf_study` import를 확인한다. 검증이 끝나면 Claude Code, Codex CLI, Antigravity CLI의 **전역** MCP 설정을 자동 적용한다. 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다.
 
-기존 MCP 설정이 손상된 JSON이거나 예상한 객체 구조가 아니면 기존 파일을 덮어쓰지 않고 설치를 중단한다. 기존 설정을 변경할 때는 같은 위치의 `.pdf-study.bak` 백업을 만든 뒤 원자적으로 교체한다.
+Claude Code와 Antigravity CLI의 기존 JSON 설정이 손상됐거나 예상한 객체 구조가 아니면 기존 파일을 덮어쓰지 않고 설치를 중단한다. 이 두 설정은 같은 위치의 `.pdf-study.bak` 백업을 만든 뒤 원자적으로 교체한다. Codex CLI는 `codex mcp add`로 전역 등록한 뒤 `codex mcp get pdf-study`로 등록을 확인한다.
 
 기본 설치는 MCP 실행에 필요한 런타임 의존성만 설치한다. 테스트까지 실행할 개발 환경이 필요하면 다음 명령을 사용한다.
 
@@ -24,7 +24,7 @@
 
 `--dev`는 런타임 의존성에 pytest를 추가로 설치하고 개발 환경 검증까지 수행한다. 일반 사용자는 기본 설치만으로 별도 Python 패키지 설치 없이 MCP를 실행할 수 있다.
 
-특정 클라이언트만 갱신하려면 `--claude`, `--codex`, `--antigravity-cli` 중 필요한 옵션을 붙인다. 기본은 현재 프로젝트의 로컬 설정이며, 전역 설정에 적용하려면 `--global`을 붙인다.
+특정 클라이언트만 갱신하려면 `--claude`, `--codex`, `--antigravity-cli` 중 필요한 옵션을 붙인다. MCP 클라이언트 설정은 항상 전역에 적용하며, `--global`은 기존 호출과의 호환을 위해 허용한다. `--local`은 지원하지 않는다.
 
 설정만 다시 출력하려면 다음 명령을 쓴다.
 
@@ -61,7 +61,7 @@ MCP 서버 진입점은 다음 명령이다.
 목차 이미지 OCR이나 본문 OCR이 필요하면 먼저 다음 도구로 모델 준비 상태를 드러낸다.
 
 ```text
-prepare_ocr(work_id)
+prepare_ocr(work_id, ocr_language="korean" | "english")
 ```
 
 목차 후보 이미지를 읽을 때는 다음 도구를 호출한다.
@@ -70,7 +70,7 @@ prepare_ocr(work_id)
 scan_toc_with_ocr(work_id)
 ```
 
-모델 캐시가 없으면 `scan_toc_with_ocr`와 `set_chapters(..., extraction_mode="ocr")`는 OCR을 시작하지 않고 `prepare_ocr` 호출을 안내한다. 모델 캐시가 있으면 내부 모델 로드는 허용된다.
+OCR이 필요한 경우 `scan_pdf`가 반환한 한국어·영어 선택지를 그대로 사용자에게 보여주고, 선택값을 `prepare_ocr`에 전달한다. 모델 캐시가 없으면 `scan_toc_with_ocr`와 `set_chapters(..., extraction_mode="ocr")`는 OCR을 시작하지 않고 해당 언어의 `prepare_ocr` 호출을 안내한다. 모델 캐시가 있으면 내부 모델 로드는 허용된다.
 
 ## 검증
 

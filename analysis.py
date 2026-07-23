@@ -22,6 +22,25 @@ TOC_OCR_NOT_STARTED = "not_started"
 TOC_OCR_COMPLETED = "completed"
 TOC_OCR_FAILED = "failed"
 
+
+def _ocr_worker_for_language(ocr_language: str):
+    """기존 한국어 worker monkeypatch 호환을 유지하면서 언어별 worker를 얻는다."""
+    if ocr_language == "korean":
+        return ocr.get_ocr_worker()
+    return ocr.get_ocr_worker(ocr_language)
+
+
+def _ocr_models_cached_for_language(ocr_language: str) -> bool:
+    if ocr_language == "korean":
+        return ocr.models_cached()
+    return ocr.models_cached(ocr_language=ocr_language)
+
+
+def _ocr_cache_status_for_language(ocr_language: str) -> dict[str, Any]:
+    if ocr_language == "korean":
+        return ocr.model_cache_status()
+    return ocr.model_cache_status(ocr_language=ocr_language)
+
 # 모든 "선택지를 사용자에게 제시" 지점에 공통으로 붙이는 정책. 메인 에이전트가
 # MCP 선택지를 자기 말로 풀어쓰거나(요약/번역), '권장·기본값' 같은 표현을 임의로
 # 덧붙이는 드리프트를 막기 위함. server.py의 거부 메시지도 이걸 재사용한다.
@@ -177,7 +196,8 @@ def _with_offset_meta(
         reco["next_step_guidance"] = (
             "[목차 이미지 분석] 내장 목차가 없습니다. **PDF 텍스트레이어나 파이썬 "
             "스크립트로 목차를 추정하지 마세요 — 스캔본·글꼴 깨진 PDF에서 잘못된 "
-            "페이지가 나옵니다.** 먼저 prepare_ocr(work_id) 후 "
+            "페이지가 나옵니다.** scan_pdf가 준 OCR 언어를 골라 "
+            "prepare_ocr(work_id, ocr_language) 후 "
             "scan_toc_with_ocr(work_id)를 호출해 toc_page_images[].ocr_text를 얻고, "
             "① 최상위 챕터 항목만(하위 절 '1.1' 무시) 골라 각 항목의 원문 페이지번호를 "
             "읽고, ② toc_page_images[].path 이미지의 꼬리말 원문 번호와 PDF 페이지를 "
@@ -277,14 +297,17 @@ def _mark_toc_ocr_pending(toc_page_images: list[dict[str, Any]]) -> list[dict[st
     return toc_page_images
 
 
-def _attach_toc_ocr(toc_page_images: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _attach_toc_ocr(
+    toc_page_images: list[dict[str, Any]],
+    ocr_language: str = "korean",
+) -> list[dict[str, Any]]:
     """렌더된 목차 페이지 이미지마다 PaddleOCR CPU 결과를 덧붙인다.
 
     OCR은 목차 경계의 보조 입력일 뿐 scan_pdf 전체 성공 여부를 결정하지 않는다.
     일부 페이지 실패는 해당 항목의 ocr_error에 남기고 나머지 페이지를 계속 처리한다.
     """
     try:
-        worker = ocr.get_ocr_worker()
+        worker = _ocr_worker_for_language(ocr_language)
     except Exception as exc:
         logger.warning("toc OCR worker initialization failed: %s", exc)
         for item in toc_page_images:
@@ -333,13 +356,18 @@ def _toc_ocr_summary(toc_page_images: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def prepare_ocr_impl(work_id: str) -> dict[str, Any]:
+def prepare_ocr_impl(work_id: str, ocr_language: str = "korean") -> dict[str, Any]:
     workspace.load_state(work_id)  # validate work_id
-    return ocr.get_ocr_worker().prepare()
+    data = _ocr_worker_for_language(ocr_language).prepare()
+    workspace.update_state(work_id, ocr_language=ocr_language)
+    return data
 
 
 def scan_toc_with_ocr_impl(work_id: str) -> dict[str, Any]:
-    workspace.load_state(work_id)  # validate work_id
+    state = workspace.load_state(work_id)  # validate work_id
+    # 분석 내부 API와 기존 작업은 한국어 기본값을 유지한다. MCP 공개 경계는
+    # server.scan_toc_with_ocr에서 선택 누락을 먼저 거부한다.
+    ocr_language = state.get("ocr_language") or "korean"
     outline_data = workspace.load_outline(work_id)
     if not outline_data:
         raise RuntimeError("scan_pdf must be called before scan_toc_with_ocr.")
@@ -348,15 +376,15 @@ def scan_toc_with_ocr_impl(work_id: str) -> dict[str, Any]:
     if not toc_page_images:
         raise RuntimeError("No TOC page images are available. scan_pdf found an embedded outline or has not rendered TOC pages.")
 
-    if not ocr.models_cached():
+    if not _ocr_models_cached_for_language(ocr_language):
         return {
             "requires_prepare_ocr": True,
-            "ocr_cache": ocr.model_cache_status(),
+            "ocr_cache": _ocr_cache_status_for_language(ocr_language),
             "toc_page_images": toc_page_images,
             "toc_ocr": _toc_ocr_summary(toc_page_images),
         }
 
-    updated = _attach_toc_ocr(toc_page_images)
+    updated = _attach_toc_ocr(toc_page_images, ocr_language)
     summary = _toc_ocr_summary(updated)
     outline_data["toc_page_images"] = updated
     outline_data["toc_ocr"] = summary
@@ -365,7 +393,7 @@ def scan_toc_with_ocr_impl(work_id: str) -> dict[str, Any]:
 
     return {
         "requires_prepare_ocr": False,
-        "ocr_cache": ocr.model_cache_status(),
+        "ocr_cache": _ocr_cache_status_for_language(ocr_language),
         "toc_page_images": updated,
         "toc_ocr": summary,
         "recommendations": outline_data.get("recommendations", {}),
@@ -591,6 +619,7 @@ def _record_ocr_failure(
 def _cached_ocr_raw_for_chapter(
     work_id: str,
     ch_def: dict[str, Any],
+    ocr_language: str = "korean",
 ) -> dict[str, Any] | None:
     """이미 저장된 OCR raw가 현재 챕터 범위와 맞으면 재사용한다."""
     try:
@@ -599,6 +628,8 @@ def _cached_ocr_raw_for_chapter(
         return None
 
     if raw.get("extraction_mode") != "ocr":
+        return None
+    if raw.get("ocr_language", "korean") != ocr_language:
         return None
 
     text = raw.get("text")
@@ -618,6 +649,7 @@ def _cached_ocr_raw_for_chapter(
         "text": text,
         "char_count": char_count,
         "extraction_mode": "ocr",
+        "ocr_language": ocr_language,
     }
     if "source_pages" in ch_def:
         result["source_pages"] = ch_def["source_pages"]
@@ -627,10 +659,11 @@ def _cached_ocr_raw_for_chapter(
 def _ocr_chapter_pages(
     ch_def: dict[str, Any],
     page_images: list[dict[str, Any]],
+    ocr_language: str = "korean",
 ) -> dict[str, Any]:
     """챕터 하나의 페이지 이미지를 순서대로 OCR해 raw payload를 만든다."""
     cid = ch_def["chapter_id"]
-    worker = ocr.get_ocr_worker()
+    worker = _ocr_worker_for_language(ocr_language)
     page_texts: list[str] = []
     for page_image in page_images:
         image_path = page_image["path"]
@@ -656,6 +689,7 @@ def _ocr_chapter_pages(
         "text": text,
         "char_count": len(text),
         "extraction_mode": "ocr",
+        "ocr_language": ocr_language,
     }
     if "source_pages" in ch_def:
         result["source_pages"] = ch_def["source_pages"]
@@ -667,6 +701,7 @@ def _process_chapters(
     normalized: list[dict[str, Any]],
     pdf_path: str,
     extraction_mode: str,
+    ocr_language: str = "korean",
 ) -> dict[str, Any]:
     """확정된 챕터 설정에 따라 raw 본문을 추출하고 결과 요약을 반환한다."""
     ocr_mode = extraction_mode == "ocr"
@@ -683,7 +718,7 @@ def _process_chapters(
         for ch_def in normalized:
             if ch_def.get("skip"):
                 continue
-            cached = _cached_ocr_raw_for_chapter(work_id, ch_def)
+            cached = _cached_ocr_raw_for_chapter(work_id, ch_def, ocr_language)
             if cached is not None:
                 results[ch_def["chapter_id"]] = cached
             else:
@@ -713,6 +748,7 @@ def _process_chapters(
                 _ocr_chapter_pages,
                 ch_def,
                 page_images_by_chapter[ch_def["chapter_id"]],
+                ocr_language,
             ): ch_def
             for ch_def in normalized
             if not ch_def.get("skip")
@@ -851,6 +887,7 @@ def _set_chapters_impl_serialized(
     execution_mode: str,
     extraction_mode: str,
     book_info: dict[str, Any] | None = None,
+    ocr_language: str = "korean",
 ) -> dict[str, Any]:
     """챕터와 처리 모드를 검증·확정한 뒤 챕터별 raw 본문을 준비한다.
 
@@ -898,16 +935,26 @@ def _set_chapters_impl_serialized(
         normalized,
         execution_mode=execution_mode,
         extraction_mode=extraction_mode,
+        ocr_language=ocr_language if extraction_mode == "ocr" else None,
         book_info=book_info,
     )
 
     try:
-        result = _process_chapters(
-            work_id,
-            normalized,
-            pdf_path,
-            extraction_mode,
-        )
+        if extraction_mode == "ocr":
+            result = _process_chapters(
+                work_id,
+                normalized,
+                pdf_path,
+                extraction_mode,
+                ocr_language,
+            )
+        else:
+            result = _process_chapters(
+                work_id,
+                normalized,
+                pdf_path,
+                extraction_mode,
+            )
     except Exception:
         workspace.update_phase(work_id, "chapter_processing", "failed")
         raise
@@ -931,6 +978,7 @@ def set_chapters_impl(
     execution_mode: str,
     extraction_mode: str,
     book_info: dict[str, Any] | None = None,
+    ocr_language: str = "korean",
 ) -> dict[str, Any]:
     """같은 작업의 챕터 확정과 본문 준비를 직렬화해 실행한다."""
     with workspace.chapter_setup_session(work_id):
@@ -940,6 +988,7 @@ def set_chapters_impl(
             execution_mode,
             extraction_mode,
             book_info,
+            ocr_language,
         )
 
 

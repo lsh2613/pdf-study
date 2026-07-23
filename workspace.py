@@ -28,6 +28,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from . import question_contract
+
 logger = logging.getLogger(__name__)
 
 OUTPUT_MANIFEST_NAME = ".pdf-study-manifest.json"
@@ -462,6 +464,7 @@ def create_workspace(
         "user_context_confirmed": bool(user_context.strip()),
         "page_count": None,
         "text_quality": None,
+        "ocr_language": None,
         # current_phase 문자열만 소비된다(get_work_state 응답·에러 메시지). phases는
         # update_phase가 갱신하는 진행 텔레메트리이며 분기 로직엔 쓰지 않는다.
         "current_phase": "init",
@@ -663,6 +666,7 @@ def commit_chapter_setup(
     *,
     execution_mode: str,
     extraction_mode: str,
+    ocr_language: str | None = None,
     book_info: dict[str, Any],
 ) -> dict[str, Any]:
     """검증이 끝난 챕터 설정과 처리 시작 상태를 한 잠금 구간에서 확정한다.
@@ -678,6 +682,8 @@ def commit_chapter_setup(
             _atomic_write_json(info_path, book_info)
             state["execution_mode"] = execution_mode
             state["extraction_mode"] = extraction_mode
+            if extraction_mode == "ocr":
+                state["ocr_language"] = ocr_language
             state["chapters"] = _build_chapter_state(chapters)
             state["phases"]["chapter_setup"] = "completed"
             state["phases"]["chapter_processing"] = "in_progress"
@@ -793,6 +799,14 @@ def _restore_files(
             logger.warning("failed to restore result file after state save error: %s", path)
 
 
+def _saved_question_ids(path: Path) -> set[str]:
+    """같은 챕터에서 먼저 저장된 다른 결과의 문제 ID를 읽는다."""
+    if not path.exists():
+        return set()
+    data = _read_json(path)
+    return question_contract.question_ids(data.get("questions"))
+
+
 def save_chapter_result(
     work_id: str,
     chapter_id: str,
@@ -824,6 +838,13 @@ def save_chapter_result(
     with _get_lock(work_id):
         state = load_state(work_id)
         entry = _require_result_target(state, chapter_id)
+        duplicate_ids = question_contract.invalid_question_id_paths(
+            data.get("questions"),
+            question_contract.BASIC_QUESTION_TYPES,
+            existing_ids=_saved_question_ids(extension_quiz_dir(work_id) / f"{chapter_id}.json"),
+        )
+        if duplicate_ids:
+            raise question_contract.QuestionContractError(duplicate_ids)
         snapshot = _snapshot_files([out, quiz_out])
         try:
             _atomic_write_json(out, summary_part)
@@ -849,6 +870,13 @@ def save_extension_result(
     with _get_lock(work_id):
         state = load_state(work_id)
         entry = _require_result_target(state, chapter_id)
+        duplicate_ids = question_contract.invalid_question_id_paths(
+            data.get("questions"),
+            ("extension",),
+            existing_ids=_saved_question_ids(quiz_dir(work_id) / f"{chapter_id}.json"),
+        )
+        if duplicate_ids:
+            raise question_contract.QuestionContractError(duplicate_ids)
         snapshot = _snapshot_files([out])
         try:
             _atomic_write_json(out, data)

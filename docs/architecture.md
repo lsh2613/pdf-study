@@ -12,19 +12,19 @@ pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, �
 - `renderer/`는 저장된 중립 JSON을 HTML 사이트 또는 Markdown+TUI 폴더로 변환한다. 렌더러는 PDF를 다시 읽지 않는다.
 - `renderer/output_manager.py`는 렌더 staging, 학습 fingerprint, `.pdf-study-manifest.json`, 관리 경로 교체와 실패 rollback을 담당한다. 개별 렌더러는 비어 있는 staging 폴더에 한 세대만 만든다.
 - `templates/`는 최종 결과물에 복사되는 런처, 정적 자산, TUI 엔진을 담는다. HTML 런처는 렌더링한 프로젝트 환경의 Python으로 loopback 전용 `study_html.py`를 실행하며, `start_study.sh`와 `start_study.bat`은 포트 `0`으로 사용 가능한 포트를 자동 배정한다.
-- `scripts/setup_mcp.sh`는 저장소 안의 `.venv`를 만들고 검증한 뒤 Claude Code, Codex CLI, Antigravity CLI MCP 설정에 `.venv/bin/python` 절대 경로를 자동 적용한다.
+- `scripts/setup_mcp.sh`는 저장소 안의 `.venv`를 만들고 검증한 뒤 Claude Code, Codex CLI, Antigravity CLI의 전역 MCP 설정에 `.venv/bin/python` 절대 경로를 자동 적용한다.
 
 ## 대표 흐름
 
 사용자가 PDF 경로와 학습 자료 생성을 요청하면 클라이언트는 `init_work`로 작업 폴더와 `work_id`를 만든다. 기존 관리 작업이 없는 폴더에서는 서버가 PDF를 읽지 않고 상태 파일과 빈 저장소를 만든다. 기존 작업이 있으면 파일을 바꾸지 않고 이어가기·교체·새 폴더 선택지를 반환하며, 교체는 사용자의 명시적 선택과 새 입력 검증 뒤에만 수행한다. 단답형·주관식·확장형 생성 여부가 미정이면 구조화된 선택지와 선택적 학습자 정보 요청을 반환한다. 클라이언트는 사용자의 답을 `scan_pdf`에 전달하며, 선택이 빠지면 서버는 스캔하지 않는다.
 
-`scan_pdf`는 PDF 메타데이터, 텍스트 레이어 품질, 페이지 오프셋, 내장 목차를 확인한다. 내장 목차가 있으면 PDF 파일 범위 `pdf_pages`와 원문 표시 번호 `source_pages`가 담긴 챕터 후보를 반환한다. 챕터 구성 선택지는 구조화된 `user_choice_options`로, 이후 `set_chapters`의 처리 모드 선택은 `set_chapters_next_step`으로 함께 반환한다. 내장 목차가 없거나 재분석이 필요하면 목차 페이지를 JPEG로 렌더하되 OCR 모델을 준비하거나 실행하지 않는다. 클라이언트는 `prepare_ocr` 후 `scan_toc_with_ocr`로 목차 OCR 텍스트를 얻고, 그 텍스트와 이미지 및 구조화된 처리 모드 선택으로 챕터를 구성한다.
+`scan_pdf`는 PDF 메타데이터, 텍스트 레이어 품질, 페이지 오프셋, 내장 목차를 확인한다. 내장 목차가 있으면 PDF 파일 범위 `pdf_pages`와 원문 표시 번호 `source_pages`가 담긴 챕터 후보를 반환한다. 챕터 구성 선택지는 구조화된 `user_choice_options`로, 이후 `set_chapters`의 처리 모드 선택은 `set_chapters_next_step`으로 함께 반환한다. 내장 목차가 없거나 재분석이 필요하면 목차 페이지를 JPEG로 렌더하되 OCR 모델을 준비하거나 실행하지 않는다. OCR이 필요하면 한국어·영어 선택지를 함께 반환하고, 클라이언트는 고른 `ocr_language`로 `prepare_ocr` 후 `scan_toc_with_ocr`를 호출해 목차 OCR 텍스트를 얻고 챕터를 구성한다.
 
 클라이언트가 챕터와 처리 방식을 확정하면 `set_chapters`가 스캔 여부와 입력 전체를 먼저 검증한다. 실패하면 기존 작업을 바꾸지 않으며, 성공하면 모드·챕터와 처리 시작 phase를 하나의 잠금 구간에서 상태 파일에 등록한다. 같은 작업의 다른 `set_chapters` 호출은 앞선 호출의 본문 준비와 phase 종결 뒤에 시작한다. `pdf_pages`는 본문 추출 경계로 쓰고 `source_pages`는 상태·raw·응답에 보존하는 표시 메타로만 쓴다. text 모드에서는 이 시점에 본문 텍스트를 추출해 `chapters_raw`에 저장한다. OCR 모드에서는 이 시점에 본문 페이지 이미지를 렌더링하고 PaddleOCR CPU로 읽어 `chapters_raw`에 `text`와 `char_count`를 저장한다. 본문 준비가 끝나면 `chapter_processing`은 `completed`, 하나라도 실패하면 재시도 가능한 챕터별 오류와 함께 `failed`가 된다.
 
-`get_subagent_prompts`는 처리 모드와 학습자 정보에 맞는 한국어 프롬프트와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 돌려준다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이며, raw 본문 검증도 이 처리 대상 합집합에만 적용되어 이미 완료된 챕터의 예전 raw 상태가 재개를 막지 않는다. 각 챕터 처리자는 `get_chapter_content`로 입력을 한 번 받고, 해당 챕터가 요약 pending 목록에 있을 때만 요약·핵심 포인트·활성 기본 문제를 `save_chapter_result`로 저장한다. 확장 pending 목록에 있을 때만 같은 본문과 학습자 정보를 받은 확장 프롬프트가 외부 검색 없이 응용 문제를 만들고 `save_extension_result`가 저장한다. workflow와 `next_action`도 실제로 남은 결과 유형만 안내한다.
+`get_subagent_prompts`는 처리 모드와 학습자 정보에 맞는 한국어 프롬프트와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 돌려준다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이며, raw 본문 검증도 이 처리 대상 합집합에만 적용되어 이미 완료된 챕터의 예전 raw 상태가 재개를 막지 않는다. 각 챕터 처리자는 `get_chapter_content`로 입력을 한 번 받고, 해당 챕터가 요약 pending 목록에 있을 때만 요약·핵심 포인트·활성 기본 문제를 `save_chapter_result`로 저장한다. 확장 pending 목록에 있을 때만 같은 본문과 학습자 정보를 받은 확장 프롬프트가 외부 검색 없이 응용 문제를 만들고 `save_extension_result`가 저장한다. 두 저장 도구는 공통 문제 계약으로 ID 문자·챕터 내 유일성·본문 길이별 최대 개수를 검증하고, 저장 잠금 안에서도 다른 결과 유형과의 ID 충돌을 다시 확인한다. workflow와 `next_action`도 실제로 남은 결과 유형만 안내한다.
 
-`list_pending_chapters`가 남은 요약 또는 확장 문제를 확인한다. 남은 챕터가 있으면 `finalize_study`는 기본적으로 거부한다. 챕터 설정이 완료되고 모두 끝나면 `list_pending_chapters`는 `finalize_study`의 출력 형식 선택지를 다음 단계 계약으로 반환한다. 사용자의 명시 선택 뒤 `finalize_study`가 HTML 또는 Markdown+TUI 결과물을 같은 중립 JSON에서 staging에 만들고, 성공한 세대의 관리 경로만 최종 폴더에 설치한다. HTML 완료 응답은 플랫폼별 더블클릭 런처와 자동 포트 사용 여부를 제공하되, 직접 `study_html.py` 실행을 위한 기존 명령·인터프리터·고정 포트 URL도 호환 정보로 유지한다. 같은 형식과 같은 학습 fingerprint일 때만 기존 진도를 staging으로 복사한다. 완료 결과의 중간 데이터가 더 이상 필요 없으면 별도 `cleanup_work`가 렌더 계층을 거치지 않고 해당 `.work`만 제거한다.
+`list_pending_chapters`가 남은 요약 또는 확장 문제를 확인한다. 챕터 설정이 완료되고 모두 끝나면 `list_pending_chapters`는 `finalize_study`의 출력 형식 선택지를 다음 단계 계약으로 반환한다. 사용자의 명시 선택 뒤 `finalize_study`가 HTML 또는 Markdown+TUI 결과물을 같은 중립 JSON에서 staging에 만들고, 성공한 세대의 관리 경로만 최종 폴더에 설치한다. 미완료 결과가 있으면 렌더러는 완료분만 읽고, 성공 응답의 `omitted_chapters`와 안내 문구가 챕터별 미반영 결과의 상태·오류를 알린다. HTML 완료 응답은 플랫폼별 더블클릭 런처와 자동 포트 사용 여부를 제공하되, 직접 `study_html.py` 실행을 위한 기존 명령·인터프리터·고정 포트 URL도 호환 정보로 유지한다. 같은 형식과 같은 학습 fingerprint일 때만 기존 진도를 staging으로 복사한다. 완료 결과의 중간 데이터가 더 이상 필요 없으면 별도 `cleanup_work`가 렌더 계층을 거치지 않고 해당 `.work`만 제거한다.
 
 ## 흐름도
 

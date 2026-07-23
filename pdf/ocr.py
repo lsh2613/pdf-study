@@ -17,13 +17,19 @@ PADDLEOCR_CACHE_ENV = "PADDLEOCR_HOME"
 PADDLE_CACHE_ENVS = (PADDLEOCR_CACHE_ENV, "PADDLE_PDX_CACHE_HOME")
 PADDLE_SOURCE_CHECK_ENV = "PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"
 DET_MODEL_ENV = "PDF_STUDY_PADDLEOCR_DET_MODEL"
-REC_MODEL_ENV = "PDF_STUDY_PADDLEOCR_REC_MODEL"
 DET_LIMIT_SIDE_LEN_ENV = "PDF_STUDY_PADDLEOCR_DET_LIMIT_SIDE_LEN"
 CPU_THREADS_ENV = "PDF_STUDY_PADDLEOCR_CPU_THREADS"
 
+# pdf-study가 사용자에게 제공하는 OCR 언어는 두 가지로 한정한다. 환경변수로
+# 임의의 인식 모델을 주입하면 작업별 언어 선택 계약을 우회하므로 허용하지 않는다.
+OCR_LANGUAGE_MODELS = {
+    "korean": "korean_PP-OCRv5_mobile_rec",
+    "english": "en_PP-OCRv5_mobile_rec",
+}
+
 PaddleOCRFactory = Callable[..., Any]
 
-_worker: "OCRWorker | None" = None
+_workers: dict[str, "OCRWorker"] = {}
 _worker_lock = threading.Lock()
 _chapter_executor: concurrent.futures.ThreadPoolExecutor | None = None
 _chapter_executor_lock = threading.Lock()
@@ -50,18 +56,28 @@ def prepare_model_cache(cache_dir: str | os.PathLike[str] | None = None) -> Path
     return resolved
 
 
-def required_model_names() -> list[str]:
+def recognition_model_name(ocr_language: str) -> str:
+    try:
+        return OCR_LANGUAGE_MODELS[ocr_language]
+    except KeyError as exc:
+        raise ValueError(f"unsupported OCR language: {ocr_language!r}") from exc
+
+
+def required_model_names(ocr_language: str = "korean") -> list[str]:
     return [
         os.environ.get(DET_MODEL_ENV, "PP-OCRv5_mobile_det"),
-        os.environ.get(REC_MODEL_ENV, "korean_PP-OCRv5_mobile_rec"),
+        recognition_model_name(ocr_language),
     ]
 
 
-def model_cache_status(cache_dir: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+def model_cache_status(
+    cache_dir: str | os.PathLike[str] | None = None,
+    ocr_language: str = "korean",
+) -> dict[str, Any]:
     resolved = resolve_model_cache_dir(cache_dir)
     models = []
     all_cached = True
-    for name in required_model_names():
+    for name in required_model_names(ocr_language):
         model_dir = resolved / "official_models" / name
         cached = (
             (model_dir / "inference.json").exists()
@@ -75,13 +91,17 @@ def model_cache_status(cache_dir: str | os.PathLike[str] | None = None) -> dict[
         })
     return {
         "cache_dir": str(resolved),
+        "ocr_language": ocr_language,
         "models": models,
         "all_cached": all_cached,
     }
 
 
-def models_cached(cache_dir: str | os.PathLike[str] | None = None) -> bool:
-    return bool(model_cache_status(cache_dir)["all_cached"])
+def models_cached(
+    cache_dir: str | os.PathLike[str] | None = None,
+    ocr_language: str = "korean",
+) -> bool:
+    return bool(model_cache_status(cache_dir, ocr_language)["all_cached"])
 
 
 def calculate_ocr_worker_limit(cpu_count: int | None | object = _AUTO_CPU_COUNT) -> int:
@@ -102,7 +122,7 @@ def _load_paddleocr_factory() -> PaddleOCRFactory:
     return PaddleOCR
 
 
-def _paddleocr_kwargs(factory: PaddleOCRFactory) -> dict[str, Any]:
+def _paddleocr_kwargs(factory: PaddleOCRFactory, ocr_language: str = "korean") -> dict[str, Any]:
     desired_kwargs: dict[str, Any] = {
         "device": "cpu",
         # PaddleOCR 3.x enables document orientation/unwarping helpers by
@@ -114,9 +134,7 @@ def _paddleocr_kwargs(factory: PaddleOCRFactory) -> dict[str, Any]:
         "text_detection_model_name": os.environ.get(
             DET_MODEL_ENV, "PP-OCRv5_mobile_det"
         ),
-        "text_recognition_model_name": os.environ.get(
-            REC_MODEL_ENV, "korean_PP-OCRv5_mobile_rec"
-        ),
+        "text_recognition_model_name": recognition_model_name(ocr_language),
         "text_recognition_batch_size": 1,
         "text_det_limit_side_len": int(
             os.environ.get(DET_LIMIT_SIDE_LEN_ENV, "960")
@@ -213,10 +231,13 @@ class OCRWorker:
     def __init__(
         self,
         *,
+        ocr_language: str = "korean",
         ocr_factory: PaddleOCRFactory | None = None,
         cache_dir: str | os.PathLike[str] | None = None,
         max_workers: int | None = None,
     ) -> None:
+        recognition_model_name(ocr_language)
+        self.ocr_language = ocr_language
         self._ocr_factory = ocr_factory
         self._cache_dir = cache_dir
         self._factory: PaddleOCRFactory | None = None
@@ -235,7 +256,7 @@ class OCRWorker:
             prepare_model_cache(self._cache_dir)
             if self._factory is None:
                 self._factory = self._ocr_factory or _load_paddleocr_factory()
-            ocr = self._factory(**_paddleocr_kwargs(self._factory))
+            ocr = self._factory(**_paddleocr_kwargs(self._factory, self.ocr_language))
 
         self._thread_state.ocr = ocr
         return ocr
@@ -245,12 +266,12 @@ class OCRWorker:
         return future.result()
 
     def prepare(self) -> dict[str, Any]:
-        before = model_cache_status(self._cache_dir)
+        before = model_cache_status(self._cache_dir, self.ocr_language)
         started = time.perf_counter()
         future = self.executor.submit(self._get_ocr)
         future.result()
         elapsed = time.perf_counter() - started
-        after = model_cache_status(self._cache_dir)
+        after = model_cache_status(self._cache_dir, self.ocr_language)
         return {
             "cache_dir": after["cache_dir"],
             "models": after["models"],
@@ -269,10 +290,11 @@ class OCRWorker:
         return "\n".join(extract_rec_texts(prediction))
 
 
-def get_ocr_worker() -> OCRWorker:
-    global _worker
-    if _worker is None:
-        with _worker_lock:
-            if _worker is None:
-                _worker = OCRWorker()
-    return _worker
+def get_ocr_worker(ocr_language: str = "korean") -> OCRWorker:
+    recognition_model_name(ocr_language)
+    with _worker_lock:
+        worker = _workers.get(ocr_language)
+        if worker is None:
+            worker = OCRWorker(ocr_language=ocr_language)
+            _workers[ocr_language] = worker
+        return worker

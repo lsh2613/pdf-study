@@ -183,3 +183,53 @@ def test_plain_mode_run_chapter_end_to_end(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda *a, **k: next(inputs))
     m.run_chapter(ch)  # 예외 없이 종료해야 함
     assert "본문내용" in capsys.readouterr().out
+
+
+def test_in_progress_chapter_resumes_without_showing_menu(tmp_path, monkeypatch):
+    """저장된 답안이 있으면 챕터 메뉴를 묻지 않고 문제 풀이를 바로 재개한다."""
+    m = _load_study_tui()
+    ch = tmp_path / "ch1"
+    ch.mkdir()
+    (ch / "quiz.json").write_text(
+        '{"title":"T","questions":{"multiple_choice":['
+        '{"id":"q1","question":"Q1","options":["a","b"],"answer_index":0},'
+        '{"id":"q2","question":"Q2","options":["a","b"],"answer_index":0}]}}',
+        encoding="utf-8",
+    )
+    (ch / "progress.json").write_text(
+        '{"answers":{"q1":{"selected":0,"correct":true}},"completed":false}',
+        encoding="utf-8",
+    )
+    resumed = []
+    monkeypatch.setattr(m, "_run_quiz", lambda chapter_dir, quiz, prog: resumed.append(prog))
+    monkeypatch.setattr(
+        m.Prompt,
+        "ask",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("menu must not be shown")),
+    )
+
+    m.run_chapter(ch)
+
+    assert resumed and resumed[0]["answers"] == {"q1": {"selected": 0, "correct": True}}
+
+
+def test_run_quiz_skips_answers_already_saved(tmp_path, monkeypatch):
+    """이어하기는 저장된 문제를 다시 묻지 않고 첫 미응답 문제부터 처리한다."""
+    m = _load_study_tui()
+    ch = tmp_path / "ch1"
+    ch.mkdir()
+    quiz = {
+        "questions": {
+            "multiple_choice": [
+                {"id": "q1", "question": "Q1", "options": ["a", "b"], "answer_index": 0},
+                {"id": "q2", "question": "Q2", "options": ["a", "b"], "answer_index": 0},
+            ],
+        },
+    }
+    asked = []
+    monkeypatch.setattr(m, "_ask_mc", lambda q: asked.append(q["id"]) or {"selected": 0, "correct": True})
+    monkeypatch.setattr(m.Confirm, "ask", lambda *args, **kwargs: False)
+
+    m._run_quiz(ch, quiz, {"answers": {"q1": {"selected": 0, "correct": True}}, "completed": False})
+
+    assert asked == ["q2"]

@@ -3,14 +3,13 @@ set -euo pipefail
 
 usage() {
   cat <<'INNER_EOF'
-Usage: scripts/setup_mcp.sh [--global|--local] [--print-config] [--check] [--dev] [--claude] [--codex] [--antigravity-cli] [--help]
+Usage: scripts/setup_mcp.sh [--global] [--print-config] [--check] [--dev] [--claude] [--codex] [--antigravity-cli] [--help]
 
 Create a project-local .venv for pdf-study, install this package into it,
 verify required runtime dependencies, and automatically apply MCP config to clients.
 
 Options:
-  --global         Install MCP configuration globally.
-  --local          Install MCP configuration locally in the current project root (default).
+  --global         Accepted for compatibility. MCP configuration is always global.
   
   --claude         Apply config to Claude Code.
   --codex          Apply config to Codex CLI.
@@ -126,7 +125,7 @@ PY
 }
 
 TARGETS=()
-SCOPE="local"
+SCOPE="global"
 DEV_MODE=0
 
 while [[ $# -gt 0 ]]; do
@@ -136,12 +135,11 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     --global)
-      SCOPE="global"
       shift
       ;;
     --local)
-      SCOPE="local"
-      shift
+      echo "Project-local MCP configuration is not supported; settings are always global." >&2
+      exit 2
       ;;
     --print-config)
       print_config

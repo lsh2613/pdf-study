@@ -8,6 +8,8 @@ import concurrent.futures
 import threading
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -61,6 +63,37 @@ def test_model_cache_status_tracks_required_models(monkeypatch, tmp_path):
     assert ocr.models_cached(cache_dir) is True
 
 
+def test_ocr_language_selects_only_korean_or_english_models(monkeypatch):
+    ocr = load_ocr_module(monkeypatch)
+
+    assert ocr.recognition_model_name("korean") == "korean_PP-OCRv5_mobile_rec"
+    assert ocr.recognition_model_name("english") == "en_PP-OCRv5_mobile_rec"
+    with pytest.raises(ValueError, match="unsupported OCR language"):
+        ocr.recognition_model_name("japanese")
+
+
+def test_english_worker_uses_english_recognition_model(monkeypatch, tmp_path):
+    ocr = load_ocr_module(monkeypatch)
+    calls: list[dict[str, object]] = []
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+        def predict(self, image_path):
+            return [{"rec_texts": ["English text"]}]
+
+    worker = ocr.OCRWorker(
+        ocr_language="english",
+        ocr_factory=FakePaddleOCR,
+        cache_dir=tmp_path / "models",
+        max_workers=1,
+    )
+
+    assert worker.process_image("page-1.jpg") == "English text"
+    assert calls[0]["text_recognition_model_name"] == "en_PP-OCRv5_mobile_rec"
+
+
 def test_worker_initializes_paddleocr_for_cpu_and_local_cache(monkeypatch, tmp_path):
     ocr = load_ocr_module(monkeypatch)
     calls: list[dict[str, object]] = []
@@ -97,7 +130,7 @@ def test_worker_initializes_paddleocr_for_cpu_and_local_cache(monkeypatch, tmp_p
     assert cache_dir.is_dir()
 
 
-def test_worker_allows_lightweight_model_overrides(monkeypatch, tmp_path):
+def test_worker_keeps_runtime_overrides_without_overriding_selected_language(monkeypatch, tmp_path):
     ocr = load_ocr_module(monkeypatch)
     monkeypatch.setenv("PDF_STUDY_PADDLEOCR_DET_MODEL", "PP-OCRv6_tiny_det")
     monkeypatch.setenv("PDF_STUDY_PADDLEOCR_REC_MODEL", "custom_rec")
@@ -120,7 +153,7 @@ def test_worker_allows_lightweight_model_overrides(monkeypatch, tmp_path):
 
     assert worker.process_image("page-1.jpg") == "ok"
     assert calls[0]["text_detection_model_name"] == "PP-OCRv6_tiny_det"
-    assert calls[0]["text_recognition_model_name"] == "custom_rec"
+    assert calls[0]["text_recognition_model_name"] == "korean_PP-OCRv5_mobile_rec"
     assert calls[0]["text_det_limit_side_len"] == 736
     assert calls[0]["cpu_threads"] == 1
 

@@ -17,7 +17,6 @@ tests/fixtures/.fixture-manifest.json
 .gemini/
 .mcp.json
 .claude.json
-.codex/mcp.json
 .agents/mcp_config.json
 *.pdf-study.bak
 result/

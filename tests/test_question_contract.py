@@ -1,3 +1,5 @@
+import copy
+
 from pdf_study import question_contract
 
 
@@ -55,3 +57,52 @@ def test_extension_contract_requires_nonempty_extension_items():
     assert question_contract.missing_extension_fields(data, "ch1") == [
         "questions.extension"
     ]
+
+
+def test_summary_contract_rejects_question_id_unsafe_for_renderers():
+    data = question_contract.summary_payload_example()
+    data["questions"]["multiple_choice"][0]["id"] = 'mc"1'
+
+    assert question_contract.missing_summary_fields(
+        data,
+        {"multiple_choice": True, "short_answer": True, "reflection": True},
+        "ch1",
+    ) == ["questions.multiple_choice[0].id"]
+
+
+def test_summary_contract_rejects_duplicate_question_ids_across_types():
+    data = question_contract.summary_payload_example()
+    data["questions"]["short_answer"][0]["id"] = "mc_1"
+
+    assert question_contract.missing_summary_fields(
+        data,
+        {"multiple_choice": True, "short_answer": True, "reflection": True},
+        "ch1",
+    ) == ["questions.short_answer[0].id"]
+
+
+def test_summary_contract_enforces_short_chapter_question_maximum():
+    data = question_contract.summary_payload_example()
+    question = data["questions"]["multiple_choice"][0]
+    data["questions"]["multiple_choice"] = [
+        {**copy.deepcopy(question), "id": f"mc_{index}"}
+        for index in range(4)
+    ]
+
+    assert question_contract.missing_summary_fields(
+        data,
+        {"multiple_choice": True, "short_answer": True, "reflection": True},
+        "ch1",
+        char_count=2_999,
+    ) == ["questions.multiple_choice"]
+
+
+def test_extension_contract_rejects_id_already_saved_for_chapter():
+    data = question_contract.extension_payload_example()
+    data["questions"]["extension"][0]["id"] = "mc_1"
+
+    assert question_contract.missing_extension_fields(
+        data,
+        "ch1",
+        existing_ids={"mc_1"},
+    ) == ["questions.extension[0].id"]

@@ -35,6 +35,19 @@ _OUTPUT_FORMAT_CHOICES = (
     },
 )
 
+_OCR_LANGUAGE_CHOICES = (
+    {
+        "value": "korean",
+        "label": "한국어",
+        "desc": "한국어 PDF를 한국어 OCR 모델로 읽습니다.",
+    },
+    {
+        "value": "english",
+        "label": "영어",
+        "desc": "영어 PDF를 영어 OCR 모델로 읽습니다.",
+    },
+)
+
 
 # ---------------------------------------------------------------------------
 # 응답 헬퍼
@@ -58,6 +71,22 @@ def _processing_mode_choices(text_quality: str | None) -> list[dict[str, str]]:
 
 def _set_chapters_next_step(text_quality: str | None) -> dict[str, Any]:
     return processing_mode_contract.set_chapters_next_step(text_quality)
+
+
+def _ocr_language_setup() -> dict[str, Any]:
+    return {
+        "field": "ocr_language",
+        "question": "OCR로 읽을 PDF의 언어를 선택하세요.",
+        "choices": [dict(choice) for choice in _OCR_LANGUAGE_CHOICES],
+    }
+
+
+def _prepare_ocr_next_step() -> dict[str, Any]:
+    return {
+        "tool": "prepare_ocr",
+        "required_parameters": ["ocr_language"],
+        "choices": [dict(choice) for choice in _OCR_LANGUAGE_CHOICES],
+    }
 
 
 def _finalize_next_step() -> dict[str, Any]:
@@ -107,6 +136,46 @@ def _ready_to_finalize(state: dict[str, Any]) -> bool:
         and not pending["summary_pending"]
         and not pending["extension_pending"]
     )
+
+
+def _omitted_chapters(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """최종 자료에 들어가지 못한 챕터 결과를 상태 스냅샷에서 설명한다."""
+    pending = workspace.pending_chapters_from_state(state)
+    pending_summary = set(pending["summary_pending"])
+    pending_extension = set(pending["extension_pending"])
+    omitted: list[dict[str, Any]] = []
+    for chapter_id in sorted(pending_summary | pending_extension):
+        entry = state["chapters"][chapter_id]
+        results: list[dict[str, Any]] = []
+        if chapter_id in pending_summary:
+            results.append({
+                "type": "summary",
+                "status": entry.get("summary_status"),
+                "error": entry.get("error"),
+            })
+        if chapter_id in pending_extension:
+            results.append({
+                "type": "extension",
+                "status": entry.get("extension_status"),
+                "error": entry.get("error"),
+            })
+        omitted.append({"chapter_id": chapter_id, "results": results})
+    return omitted
+
+
+def _omitted_chapters_notice(omitted: list[dict[str, Any]]) -> str:
+    if not omitted:
+        return ""
+    lines = ["\n\n[미반영 챕터 결과] 아래 결과는 최종 자료에 포함되지 않았습니다."]
+    for chapter in omitted:
+        results = []
+        for result in chapter["results"]:
+            detail = f"{result['type']}={result['status']}"
+            if result["error"]:
+                detail += f" ({result['error']})"
+            results.append(detail)
+        lines.append(f"- {chapter['chapter_id']}: " + ", ".join(results))
+    return "\n".join(lines)
 
 
 def _pending_guidance(
@@ -594,11 +663,13 @@ def scan_pdf(
       - "from_outline": PDF 내장 목차(북마크)로 챕터를 구성. suggested_chapters에
         담겨 옵니다. **사용자에게 보여 확인**받고, 맞으면 그대로 set_chapters.
         **틀리면 scan_pdf(work_id, force_vision=True)로 재호출**하면 목차 페이지를
-        이미지로 렌더합니다. OCR은 prepare_ocr 후 scan_toc_with_ocr에서 수행합니다.
+        이미지로 렌더합니다. OCR은 사용자가 한국어·영어를 고른 뒤 prepare_ocr 후
+        scan_toc_with_ocr에서 수행합니다.
       - "analyze_toc_from_images": 내장 목차가 없음. 응답.data.toc_page_images
         (목차 페이지 JPEG 경로, ocr_status)를 확인한 뒤 prepare_ocr와
         scan_toc_with_ocr를 호출해 OCR 텍스트를 얻으세요.
-        **PDF 텍스트나 파이썬 스크립트로 목차를 추정하지 마세요.**
+        **PDF 텍스트나 파이썬 스크립트로 목차를 추정하지 마세요.** OCR 언어
+        선택지를 그대로 사용자에게 보여준 뒤 prepare_ocr에 전달하세요.
     force_vision은 외부 계약 호환용 legacy 이름이며, 현재 동작은 목차 페이지
     이미지 렌더입니다.
 
@@ -677,12 +748,22 @@ def scan_pdf(
     text_quality = data.get("text_quality") or workspace.load_state(work_id).get("text_quality")
     set_chapters_step = _set_chapters_next_step(text_quality)
     data["set_chapters_next_step"] = set_chapters_step
-    if rec.get("primary_mode") == "analyze_toc_from_images":
-        data["next_step"] = {"tool": "prepare_ocr", "required_parameters": []}
+    ocr_needed = (
+        rec.get("primary_mode") == "analyze_toc_from_images"
+        or text_quality in ("garbled", "no_text_layer")
+    )
+    if ocr_needed:
+        data["ocr_language_setup"] = _ocr_language_setup()
+        data["next_step"] = _prepare_ocr_next_step()
         next_action = (
-            f'prepare_ocr(work_id="{work_id}") 후 '
-            f'scan_toc_with_ocr(work_id="{work_id}")로 toc_page_images[].ocr_text를 '
-            "얻고, path 이미지와 함께 확인해 chapters를 구성하세요."
+            "ocr_language_setup.choices를 사용자에게 그대로 보여주고 고른 값을 "
+            f'prepare_ocr(work_id="{work_id}", ocr_language=<사용자 선택>)에 전달하세요. '
+            + (
+                f'그 후 scan_toc_with_ocr(work_id="{work_id}")로 toc_page_images[].ocr_text를 '
+                "얻고, path 이미지와 함께 확인해 chapters를 구성하세요."
+                if rec.get("primary_mode") == "analyze_toc_from_images"
+                else "OCR 모델 준비 뒤 set_chapters의 OCR 처리 모드를 선택하세요."
+            )
         )
     else:
         data["next_step"] = set_chapters_step
@@ -699,14 +780,21 @@ def scan_pdf(
 
 @mcp.tool()
 @_safe("prepare_ocr")
-def prepare_ocr(work_id: str) -> dict[str, Any]:
+def prepare_ocr(work_id: str, ocr_language: str = "") -> dict[str, Any]:
     """PaddleOCR CPU 모델을 준비합니다.
 
-    첫 실행에서 모델 파일 다운로드와 모델 로드가 오래 걸릴 수 있으므로, OCR이
+    `ocr_language`는 `korean` 또는 `english` 중 사용자가 선택한 값이다. 첫 실행에서 모델 파일 다운로드와 모델 로드가 오래 걸릴 수 있으므로, OCR이
     필요한 흐름에서는 이 도구를 별도로 호출해 사용자에게 지연 이유를 드러냅니다.
     다음 단계: scan_toc_with_ocr(work_id) 또는 set_chapters(..., extraction_mode="ocr")
     """
-    data = analysis.prepare_ocr_impl(work_id)
+    if ocr_language not in analysis.ocr.OCR_LANGUAGE_MODELS:
+        return _err(
+            "지원하지 않는 OCR 언어입니다. 서버가 제공한 한국어·영어 선택지 중 하나를 "
+            "사용자에게 그대로 보여준 뒤 선택값을 전달하세요.",
+            data={"ocr_language_setup": _ocr_language_setup()},
+        )
+    data = analysis.prepare_ocr_impl(work_id, ocr_language)
+    data["ocr_language"] = ocr_language
     return _ok(data, next_action=(
         f'scan_toc_with_ocr(work_id="{work_id}") 또는 '
         f'set_chapters(work_id="{work_id}", ..., extraction_mode="ocr")'
@@ -722,14 +810,23 @@ def scan_toc_with_ocr(work_id: str) -> dict[str, Any]:
     path 이미지를 확인해 chapters를 구성한 뒤, data.next_step.choices에서 고른
     처리 모드와 함께 set_chapters를 호출하세요.
     """
+    if workspace.load_state(work_id).get("ocr_language") not in analysis.ocr.OCR_LANGUAGE_MODELS:
+        return _err(
+            "목차 OCR 전에 OCR 언어를 선택해야 합니다.",
+            data={"ocr_language_setup": _ocr_language_setup()},
+            next_action=f'prepare_ocr(work_id="{work_id}", ocr_language=<사용자 선택>)',
+        )
     data = analysis.scan_toc_with_ocr_impl(work_id)
     if data.get("requires_prepare_ocr"):
+        ocr_language = workspace.load_state(work_id).get("ocr_language")
         return _err(
             "OCR 모델 캐시가 없어 목차 OCR을 시작하지 않았습니다. "
-            "prepare_ocr(work_id)를 먼저 호출해 모델 다운로드/로드를 사용자가 볼 수 "
+            "prepare_ocr(work_id, ocr_language)를 먼저 호출해 모델 다운로드/로드를 사용자가 볼 수 "
             "있는 단계에서 수행하세요.",
             data=data,
-            next_action=f'prepare_ocr(work_id="{work_id}")',
+            next_action=(
+                f'prepare_ocr(work_id="{work_id}", ocr_language="{ocr_language}")'
+            ),
         )
     data["next_step"] = _set_chapters_next_step(
         workspace.load_state(work_id).get("text_quality")
@@ -752,6 +849,7 @@ def set_chapters(
     chapters: list[dict[str, Any]],
     execution_mode: str = "",
     extraction_mode: str = "",
+    ocr_language: str = "",
     book_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """챕터 구조 + 처리 모드를 확정하고 챕터별 본문을 추출합니다.
@@ -780,6 +878,9 @@ def set_chapters(
       ※ 물을 땐 클라이언트의 구조화 선택 도구(예: Claude Code의 AskUserQuestion)로
         data.choices를 그대로 옵션화하세요. label·설명을 요약·변형하거나 MCP에 없는
         '추천·기본값' 표현을 임의로 덧붙이지 마세요.
+    - ocr_language("korean"|"english"): OCR 모드에서 `prepare_ocr`로 이미 선택한
+      언어를 사용합니다. 아직 준비하지 않은 OCR 모드 호출에는 이 값을 명시해야 하며,
+      다른 값은 거부됩니다.
     - 각 chapter에 optional "skip": true 를 주면 그 챕터는 본문 추출과
       sub-agent 디스패치, 렌더링 모두에서 제외됩니다. **찾아보기·색인·
       판권·저자 소개 같은 비본문 페이지가 섞여 들어왔을 때 사용**하세요.
@@ -829,21 +930,38 @@ def set_chapters(
                     "execution_mode": execution_mode,
                 },
             )
-    elif extraction_mode == "ocr" and not analysis.ocr.models_cached():
-        return _err(
-            "OCR 모델 캐시가 없어 본문 OCR 선계산을 시작하지 않았습니다. "
-            "prepare_ocr(work_id)를 먼저 호출해 모델 다운로드/로드를 사용자가 볼 수 "
-            "있는 단계에서 수행하세요.",
-            data={
-                "ocr_cache": analysis.ocr.model_cache_status(),
-                "forced_next_step": "prepare_ocr",
-            },
-            next_action=f'prepare_ocr(work_id="{work_id}")',
-        )
+    elif extraction_mode == "ocr":
+        selected_language = ocr_language or workspace.load_state(work_id).get("ocr_language")
+        if selected_language not in analysis.ocr.OCR_LANGUAGE_MODELS:
+            return _err(
+                "OCR 본문을 처리하려면 한국어 또는 영어 OCR 언어를 먼저 선택해야 합니다.",
+                data={
+                    "ocr_language_setup": _ocr_language_setup(),
+                    "execution_mode": execution_mode,
+                    "extraction_mode": "ocr",
+                },
+                next_action=(
+                    f'prepare_ocr(work_id="{work_id}", ocr_language=<사용자 선택>) 후 '
+                    "같은 set_chapters 호출을 다시 실행하세요."
+                ),
+            )
+        if not analysis._ocr_models_cached_for_language(selected_language):
+            return _err(
+                "OCR 모델 캐시가 없어 본문 OCR 선계산을 시작하지 않았습니다. "
+                "prepare_ocr(work_id, ocr_language)를 먼저 호출해 모델 다운로드/로드를 사용자가 볼 수 "
+                "있는 단계에서 수행하세요.",
+                data={
+                    "ocr_cache": analysis._ocr_cache_status_for_language(selected_language),
+                    "forced_next_step": "prepare_ocr",
+                    "ocr_language": selected_language,
+                },
+                next_action=f'prepare_ocr(work_id="{work_id}", ocr_language="{selected_language}")',
+            )
 
     data = analysis.set_chapters_impl(
         work_id, chapters, execution_mode, extraction_mode,
         book_info=book_info,
+        ocr_language=(ocr_language or workspace.load_state(work_id).get("ocr_language") or "korean"),
     )
     failed_chapters = data.get("failed_chapters") or []
     if extraction_mode == "ocr" and failed_chapters:
@@ -983,7 +1101,10 @@ def save_chapter_result(
     if isinstance(data_to_save, dict):
         data_to_save.pop("body_text", None)
 
-    missing = question_contract.missing_summary_fields(data_to_save, options, chapter_id)
+    char_count = state["chapters"][chapter_id].get("char_count")
+    missing = question_contract.missing_summary_fields(
+        data_to_save, options, chapter_id, char_count=char_count,
+    )
     if missing:
         return _err(
             f"챕터 결과에 필수 값이 비었거나 누락됐습니다: {missing}. "
@@ -995,6 +1116,11 @@ def save_chapter_result(
         )
     try:
         path = workspace.save_chapter_result(work_id, chapter_id, data_to_save)
+    except question_contract.QuestionContractError as e:
+        return _err(
+            f"챕터 결과의 문제 ID 또는 개수가 유효하지 않습니다: {e.missing}.",
+            data={"missing": e.missing, "chapter_id": chapter_id},
+        )
     except (KeyError, ValueError, RuntimeError, OSError) as e:
         return _save_target_error(e, chapter_id)
     saved_state = workspace.load_state(work_id)
@@ -1038,7 +1164,10 @@ def save_extension_result(
     if isinstance(data_to_save, dict):
         data_to_save.pop("body_text", None)
 
-    missing = question_contract.missing_extension_fields(data_to_save, chapter_id)
+    char_count = state["chapters"][chapter_id].get("char_count")
+    missing = question_contract.missing_extension_fields(
+        data_to_save, chapter_id, char_count=char_count,
+    )
     if missing:
         return _err(
             "확장 결과에 questions.extension(비어있지 않은 배열)이 필요합니다. "
@@ -1057,6 +1186,11 @@ def save_extension_result(
     }
     try:
         path = workspace.save_extension_result(work_id, chapter_id, data_to_save)
+    except question_contract.QuestionContractError as e:
+        return _err(
+            f"확장 문제의 ID 또는 개수가 유효하지 않습니다: {e.missing}.",
+            data={"missing": e.missing, "chapter_id": chapter_id},
+        )
     except (KeyError, ValueError, RuntimeError, OSError) as e:
         return _save_target_error(e, chapter_id)
     saved_state = workspace.load_state(work_id)
@@ -1124,7 +1258,6 @@ def finalize_study(
     work_id: str,
     output_format: str = "",
     keep_work_dir: bool = True,
-    force: bool = False,
 ) -> dict[str, Any]:
     """학습 자료를 output_dir에 렌더링합니다.
 
@@ -1135,11 +1268,6 @@ def finalize_study(
         - html: 정적 사이트 (브라우저로 열람)
         - md_tui: 챕터별 폴더 + summary.md + 학습 TUI
     - keep_work_dir: False면 .work/ 폴더 삭제
-    - force: 아직 처리되지 않은 챕터가 남아 있어도 강제로 렌더링.
-      기본값 False면 pending 챕터가 있을 때 거부하고 목록을 돌려줍니다
-      (조용한 부분 렌더링 방지). 일부 챕터가 끝내 실패해 부분 결과라도
-      만들고 싶을 때만 force=True를 사용하세요.
-
     응답의 next_action에 학습 자료 실행 방법이 포함됩니다.
     - html: 생성된 폴더에서 macOS/Linux는 `start_study.sh`, Windows는
       `start_study.bat`을 더블클릭합니다. 런처가 사용 가능한 포트를 선택해 진도
@@ -1164,21 +1292,8 @@ def finalize_study(
         )
 
     state = workspace.load_state(work_id)
-
-    # 완료 가드: pending 챕터가 남아 있으면 거부 (force로 우회 가능)
-    pending = workspace.pending_chapters_from_state(state)
-    ext_pending = pending["extension_pending"]
-    blocking = sorted(set(pending["summary_pending"]) | set(ext_pending))
-    if blocking and not force:
-        return _err(
-            f"아직 처리되지 않은 챕터가 있습니다: {blocking}. "
-            "먼저 완료하거나, 부분 결과로 강제 렌더링하려면 force=True로 "
-            "호출하세요.",
-            data={
-                "summary_pending": pending["summary_pending"],
-                "extension_pending": ext_pending,
-            },
-        )
+    omitted_chapters = _omitted_chapters(state)
+    omitted_notice = _omitted_chapters_notice(omitted_chapters)
 
     output_dir = Path(state["output_dir"])
 
@@ -1229,6 +1344,8 @@ def finalize_study(
         }
         if keep_work_dir:
             data["cleanup_work"] = cleanup_action
+        if omitted_chapters:
+            data["omitted_chapters"] = omitted_chapters
         next_action = (
             f"학습 자료(Markdown + 터미널 TUI)가 {output_dir}에 만들어졌습니다.\n"
             f"\n[학습 시작] 다음 명령을 실행하세요:\n"
@@ -1241,6 +1358,7 @@ def finalize_study(
             f"실행됩니다.\n"
             f"진도(답안·완료·객관식 점수)는 각 챕터 폴더의 progress.json에 자동 "
             f"저장되어, 다시 실행하면 이어서 풀 수 있습니다(서버 불필요)."
+            + omitted_notice
             + work_cleanup
         )
         return _ok(data, next_action=next_action)
@@ -1249,8 +1367,7 @@ def finalize_study(
     # python으로도 동작하지만, 일관성을 위해 같은 인터프리터를 안내한다.
     launch_cmd = f"cd {output_dir} && {py} study_html.py"
     entry = "index.html" if (output_dir / "index.html").exists() else "main.html"
-    return _ok(
-        {
+    data = {
             "output_dir": str(output_dir),
             "format": output_format,
             "work_dir_kept": keep_work_dir,
@@ -1264,7 +1381,11 @@ def finalize_study(
             },
             "auto_port_on_script_launch": True,
             **({"cleanup_work": cleanup_action} if keep_work_dir else {}),
-        },
+    }
+    if omitted_chapters:
+        data["omitted_chapters"] = omitted_chapters
+    return _ok(
+        data,
         next_action=(
             f"학습 자료가 {output_dir}에 만들어졌습니다.\n"
             f"\n[학습 시작] 결과 폴더에서 macOS/Linux는 `start_study.sh`, "
@@ -1272,6 +1393,7 @@ def finalize_study(
             f"포트를 자동으로 선택하고 브라우저를 엽니다.\n"
             f"\n[서버 종료] 스크립트가 연 서버 창을 닫거나 그 창에서 Ctrl+C 를 "
             f"누르세요. 브라우저 탭/창을 닫는 것만으로는 서버가 꺼지지 않습니다."
+            + omitted_notice
             + work_cleanup
         ),
     )

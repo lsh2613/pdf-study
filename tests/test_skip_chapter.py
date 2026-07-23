@@ -106,8 +106,8 @@ def test_skip_chapter_not_rendered(tmp_path, ko_with_toc):
             "summary": "x", "key_points": [],
             "questions": {"multiple_choice": [], "short_answer": [], "reflection": []},
         })
-    # extension 미완료 상태로 의도적으로 렌더 → force로 완료 가드 우회
-    fin = server.finalize_study(wid, "html", force=True)
+    # extension 미완료 상태여도 완료분만 렌더하고 누락을 응답으로 알린다.
+    fin = server.finalize_study(wid, "html")
     assert fin["ok"], fin
 
     # 멀티 챕터로 렌더 (skip 제외 후에도 2개 남음)

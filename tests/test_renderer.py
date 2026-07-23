@@ -237,7 +237,7 @@ def test_force_ignores_stale_results_for_pending_chapter(ko_short, tmp_path):
         encoding="utf-8",
     )
 
-    rendered = server.finalize_study(wid, "html", force=True)
+    rendered = server.finalize_study(wid, "html")
 
     assert rendered["ok"], rendered
     html = (out / "main.html").read_text(encoding="utf-8")

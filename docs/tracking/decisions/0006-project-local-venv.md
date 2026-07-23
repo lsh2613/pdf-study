@@ -6,7 +6,7 @@ MCP 클라이언트 설정에는 실행할 Python 경로가 들어간다. 전역
 
 ## 결정
 
-설치 스크립트는 저장소 안 `.venv`를 만들고, MCP 클라이언트 설정에는 `.venv/bin/python`의 절대 경로를 등록한다. 기본 실행은 `.venv` 생성, 패키지 설치, import 검증 뒤 Claude Code, Codex CLI, Antigravity CLI 설정을 자동 적용한다. 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다. 환경 검증은 이 Python에서 런타임 의존성과 `pdf_study` import를 확인한다.
+설치 스크립트는 저장소 안 `.venv`를 만들고, MCP 클라이언트의 전역 설정에는 `.venv/bin/python`의 절대 경로를 등록한다. 기본 실행은 `.venv` 생성, 패키지 설치, import 검증 뒤 Claude Code, Codex CLI, Antigravity CLI 설정을 자동 적용한다. 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다. 환경 검증은 이 Python에서 런타임 의존성과 `pdf_study` import를 확인한다.
 
 ## 대안
 

@@ -240,26 +240,29 @@ def _ask_text(q: dict, qtype: str) -> dict:
 
 def _run_quiz(chapter_dir: Path, quiz: dict, prog: dict) -> None:
     questions = quiz.get("questions") or {}
-    mc_correct = mc_total = 0
+    answers = prog["answers"]
     for qtype in _TYPE_ORDER:
         items = questions.get(qtype) or []
         if not items:
             continue
+        pending = [q for q in items if not q.get("id") or q["id"] not in answers]
+        if not pending:
+            continue
         console.rule(_TYPE_LABELS.get(qtype, qtype))
-        for q in items:
+        for q in pending:
             qid = q.get("id") or ""
             if qtype == "multiple_choice":
                 res = _ask_mc(q)
-                mc_total += 1
-                mc_correct += int(res["correct"])
             else:
                 res = _ask_text(q, qtype)
-            prog["answers"][qid] = res
+            answers[qid] = res
             _save_progress(chapter_dir, prog)
             console.print()
-    if mc_total:
-        prog["mc_score"] = {"correct": mc_correct, "total": mc_total}
-        console.print(f"[bold]객관식 결과: {mc_correct} / {mc_total}[/bold]")
+    mc_items = questions.get("multiple_choice") or []
+    if mc_items and all(q.get("id") in answers for q in mc_items):
+        mc_correct = sum(bool(answers[q.get("id")].get("correct")) for q in mc_items)
+        prog["mc_score"] = {"correct": mc_correct, "total": len(mc_items)}
+        console.print(f"[bold]객관식 결과: {mc_correct} / {len(mc_items)}[/bold]")
     if Confirm.ask("이 챕터를 완료로 표시할까요?", default=bool(prog.get("completed"))):
         prog["completed"] = True
     _save_progress(chapter_dir, prog)
@@ -275,6 +278,12 @@ def run_chapter(chapter_dir) -> None:
     summary_path = chapter_dir / "summary.md"
     title = quiz.get("title") or chapter_dir.name
     has_quiz = any((quiz.get("questions") or {}).values())
+
+    prog = _load_progress(chapter_dir)
+    if has_quiz and prog["answers"] and not prog["completed"]:
+        console.print("[dim]저장된 풀이가 있어 첫 미응답 문제부터 이어갑니다.[/dim]")
+        _run_quiz(chapter_dir, quiz, prog)
+        return
 
     while True:
         console.rule(f"[bold]{title}[/bold]")

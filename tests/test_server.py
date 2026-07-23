@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import sys
 
 import pytest
@@ -29,12 +30,12 @@ def stub_scan_toc_ocr(monkeypatch):
                 "elapsed_sec": 0.0,
             }
 
-    monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda: StubWorker())
-    monkeypatch.setattr(server.analysis.ocr, "models_cached", lambda: True)
+    monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", lambda *args, **kwargs: StubWorker())
+    monkeypatch.setattr(server.analysis.ocr, "models_cached", lambda *args, **kwargs: True)
     monkeypatch.setattr(
         server.analysis.ocr,
         "model_cache_status",
-        lambda: {"cache_dir": "fake", "models": [], "all_cached": True},
+        lambda *args, **kwargs: {"cache_dir": "fake", "models": [], "all_cached": True},
     )
 
 
@@ -98,7 +99,7 @@ def test_save_chapter_result_uses_question_contract(monkeypatch, ko_short, tmp_p
     monkeypatch.setattr(
         question_contract,
         "missing_summary_fields",
-        lambda data, options, chapter_id: ["contract_probe"],
+        lambda data, options, chapter_id, **kwargs: ["contract_probe"],
     )
 
     response = server.save_chapter_result(wid, "ch1", _result())
@@ -106,6 +107,50 @@ def test_save_chapter_result_uses_question_contract(monkeypatch, ko_short, tmp_p
     assert response["ok"] is False
     assert response["data"]["missing"] == ["contract_probe"]
     assert response["data"]["chapter_id"] == "ch1"
+
+
+def test_save_chapter_result_rejects_question_id_saved_by_extension(
+    tmp_path, ko_short,
+):
+    """동시에 처리 가능한 두 결과도 챕터 안에서는 같은 문제 ID를 쓸 수 없다."""
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+
+    extension = _ext()
+    extension["questions"]["extension"][0]["id"] = "shared"
+    assert server.save_extension_result(wid, "ch1", extension)["ok"] is True
+
+    summary = _result()
+    summary["questions"]["multiple_choice"][0]["id"] = "shared"
+    response = server.save_chapter_result(wid, "ch1", summary)
+
+    assert response["ok"] is False
+    assert response["data"]["missing"] == ["questions.multiple_choice[0].id"]
+    assert not (workspace.summaries_dir(wid) / "ch1.json").exists()
+    assert not (workspace.quiz_dir(wid) / "ch1.json").exists()
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
+
+
+def test_save_chapter_result_enforces_question_maximum_from_chapter_text(
+    tmp_path, ko_short,
+):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out_maximum"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    workspace.update_chapter_status(wid, "ch1", char_count=2_999)
+
+    summary = _result()
+    multiple_choice = summary["questions"]["multiple_choice"][0]
+    summary["questions"]["multiple_choice"] = [
+        {**copy.deepcopy(multiple_choice), "id": f"mc{index}"}
+        for index in range(4)
+    ]
+    response = server.save_chapter_result(wid, "ch1", summary)
+
+    assert response["ok"] is False
+    assert response["data"]["missing"] == ["questions.multiple_choice"]
+    _assert_no_chapter_result_files(wid, "ch1")
 
 
 def _assert_no_chapter_result_files(wid: str, chapter_id: str) -> None:
@@ -492,6 +537,43 @@ def test_mode_choices_narrowed_to_ocr_when_no_text_layer(tmp_path, scanned_empty
     assert "AskUserQuestion" in r["error"]
 
 
+def test_scan_pdf_requires_korean_or_english_before_forced_ocr(tmp_path, scanned_empty):
+    """텍스트 레이어가 없는 PDF는 OCR 준비 전에 지원 언어를 명시적으로 고른다."""
+    wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
+
+    scanned = _scan(wid)
+
+    assert scanned["ok"] is True
+    setup = scanned["data"]["ocr_language_setup"]
+    assert setup["field"] == "ocr_language"
+    assert [choice["value"] for choice in setup["choices"]] == ["korean", "english"]
+    assert scanned["data"]["next_step"]["tool"] == "prepare_ocr"
+    assert scanned["data"]["next_step"]["required_parameters"] == ["ocr_language"]
+
+
+def test_prepare_ocr_persists_selected_language(tmp_path, scanned_empty, monkeypatch):
+    """선택한 OCR 언어는 모델 준비가 성공한 뒤 작업 상태에 보존된다."""
+    wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
+    _scan(wid)
+    captured: list[str] = []
+
+    class Worker:
+        def prepare(self):
+            return {"models": [], "all_cached": True}
+
+    def fake_worker(ocr_language="korean"):
+        captured.append(ocr_language)
+        return Worker()
+
+    monkeypatch.setattr(server.analysis.ocr, "get_ocr_worker", fake_worker)
+
+    prepared = server.prepare_ocr(wid, ocr_language="english")
+
+    assert prepared["ok"] is True, prepared
+    assert captured == ["english"]
+    assert workspace.load_state(wid)["ocr_language"] == "english"
+
+
 def test_mode_choices_narrowed_to_ocr_when_garbled(tmp_path, ko_short):
     """garbled(mojibake)면 모드 미지정 거부 시 OCR 조합만 제시한다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
@@ -581,6 +663,7 @@ def test_get_chapter_content_ocr_returns_precomputed_text_without_lazy_ocr(
         [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 2]}],
         execution_mode="sequential",
         extraction_mode="ocr",
+        ocr_language="korean",
     )
     assert r["ok"]
     assert len(calls) == 2
@@ -627,6 +710,7 @@ def test_set_chapters_ocr_failure_returns_failed_chapters(
         [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 2]}],
         execution_mode="parallel",
         extraction_mode="ocr",
+        ocr_language="korean",
     )
 
     _check_envelope(r)
@@ -659,12 +743,13 @@ def test_set_chapters_ocr_requires_prepare_when_cache_missing(
         [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 1]}],
         execution_mode="sequential",
         extraction_mode="ocr",
+        ocr_language="korean",
     )
 
     _check_envelope(r)
     assert r["ok"] is False
     assert r["data"]["forced_next_step"] == "prepare_ocr"
-    assert r["next_action"] == f'prepare_ocr(work_id="{wid}")'
+    assert r["next_action"] == f'prepare_ocr(work_id="{wid}", ocr_language="korean")'
 
 
 def test_save_chapter_result_accepts_without_body_text(tmp_path, ko_short):
@@ -696,6 +781,7 @@ def test_save_chapter_result_body_text_does_not_overwrite_ocr_raw(
         [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 1]}],
         execution_mode="sequential",
         extraction_mode="ocr",
+        ocr_language="korean",
     )
     assert r["ok"], r
     raw0 = workspace.get_chapter_raw(wid, "ch1")
@@ -884,6 +970,7 @@ def test_get_subagent_prompts_rejects_invalid_ocr_raw(
         [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 1]}],
         execution_mode="sequential",
         extraction_mode="ocr",
+        ocr_language="korean",
     )
     assert r["ok"], r
 
@@ -1060,6 +1147,7 @@ def test_get_chapter_content_rejects_invalid_raw(
         [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 1]}],
         execution_mode="sequential",
         extraction_mode="ocr",
+        ocr_language="korean",
     )
     assert r["ok"], r
 
@@ -1325,6 +1413,8 @@ def test_scan_pdf_scanned_renders_toc_images_without_ocr(tmp_path, scanned_empty
 def test_scan_toc_with_ocr_returns_ocr_text(tmp_path, scanned_empty):
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
     _scan(wid)
+    prepared = server.prepare_ocr(wid, ocr_language="korean")
+    assert prepared["ok"], prepared
 
     r = server.scan_toc_with_ocr(wid)
 
@@ -1344,27 +1434,28 @@ def test_scan_toc_with_ocr_returns_ocr_text(tmp_path, scanned_empty):
 def test_scan_toc_with_ocr_requires_prepare_when_cache_missing(
     tmp_path, scanned_empty, monkeypatch
 ):
-    monkeypatch.setattr(server.analysis.ocr, "models_cached", lambda: False)
+    monkeypatch.setattr(server.analysis.ocr, "models_cached", lambda *args, **kwargs: False)
     monkeypatch.setattr(
         server.analysis.ocr,
         "model_cache_status",
-        lambda: {"cache_dir": "fake", "models": [], "all_cached": False},
+        lambda *args, **kwargs: {"cache_dir": "fake", "models": [], "all_cached": False},
     )
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
     _scan(wid)
+    workspace.update_state(wid, ocr_language="korean")
 
     r = server.scan_toc_with_ocr(wid)
 
     _check_envelope(r)
     assert r["ok"] is False
     assert r["data"]["requires_prepare_ocr"] is True
-    assert r["next_action"] == f'prepare_ocr(work_id="{wid}")'
+    assert r["next_action"] == f'prepare_ocr(work_id="{wid}", ocr_language="korean")'
 
 
 def test_prepare_ocr_returns_model_diagnostics(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
 
-    r = server.prepare_ocr(wid)
+    r = server.prepare_ocr(wid, ocr_language="korean")
 
     _check_envelope(r)
     assert r["ok"] is True, r
@@ -1721,7 +1812,7 @@ def test_md_tui_renderer_finalizes_ok(tmp_path, ko_short):
     _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
     server.save_chapter_result(wid, "ch1", _result())
-    r = server.finalize_study(wid, output_format="md_tui", force=True)
+    r = server.finalize_study(wid, output_format="md_tui")
     _check_envelope(r)
     assert r["ok"] is True, r
     out = tmp_path / "out"
@@ -1735,9 +1826,8 @@ def test_md_tui_renderer_finalizes_ok(tmp_path, ko_short):
     assert r["data"]["entry_script"] == "study_tui.py"
 
 
-def test_finalize_blocks_on_pending_then_force(tmp_path, ko_short):
-    """pending 챕터가 있으면 finalize는 ok=False로 거부하고 목록을 돌려준다.
-    force=True면 부분 결과로 강제 렌더링한다."""
+def test_finalize_renders_completed_chapters_and_reports_failed_results(tmp_path, ko_short):
+    """실패 결과는 빠진 이유를 알리고 완료분만 최종 자료로 만든다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"),
                            enable_extension=False)["data"]["work_id"]
     _scan(wid)
@@ -1746,17 +1836,28 @@ def test_finalize_blocks_on_pending_then_force(tmp_path, ko_short):
         {"chapter_id": "ch2", "title": "B", "pdf_pages": [7, 12]},
     ])
     server.save_chapter_result(wid, "ch1", _result())
+    workspace.update_chapter_status(
+        wid, "ch2", summary_status="failed", error="요약 저장이 실패했습니다.",
+    )
 
-    blocked = server.finalize_study(wid, "html")
-    _check_envelope(blocked)
-    assert blocked["ok"] is False
-    assert "ch2" in blocked["error"]
-    assert blocked["data"]["summary_pending"] == ["ch2"]
-    assert not (tmp_path / "out" / "index.html").exists()
+    rendered = server.finalize_study(wid, "html")
 
-    forced = server.finalize_study(wid, "html", force=True)
-    _check_envelope(forced); assert forced["ok"], forced
+    _check_envelope(rendered); assert rendered["ok"], rendered
+    assert rendered["data"]["omitted_chapters"] == [{
+        "chapter_id": "ch2",
+        "results": [{
+            "type": "summary",
+            "status": "failed",
+            "error": "요약 저장이 실패했습니다.",
+        }],
+    }]
+    assert "ch2" in rendered["next_action"]
+    assert "failed" in rendered["next_action"]
     assert (tmp_path / "out" / "index.html").exists()
+
+
+def test_finalize_study_no_longer_accepts_force_argument():
+    assert "force" not in inspect.signature(server.finalize_study).parameters
 
 
 def test_resume_work_restores_registry_after_restart(tmp_path, ko_short):
