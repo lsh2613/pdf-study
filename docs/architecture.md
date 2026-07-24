@@ -4,7 +4,11 @@ pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, �
 
 ## 구성
 
-- `server.py`는 FastMCP 도구를 등록한다. 모든 도구는 같은 응답 봉투를 반환하고, 복구 가능한 예외는 `ok=false` 응답으로 바꾼다. MCP 전용 비동기 래퍼는 요청 workspace로 출력 경로를 정규화하고, 지원 세션의 필수 사용자 선택을 form elicitation으로 받은 뒤 기존 sync 구현을 호출한다.
+- `server.py`는 FastMCP 도구를 등록한다. 모든 도구는 같은 응답 봉투를 반환하고,
+  복구 가능한 예외는 `ok=false` 응답으로 바꾼다. MCP 전용 비동기 래퍼는 요청의
+  단일 workspace로 고정 출력 경로를 계산하고, 필수 사용자 선택을 form
+  elicitation으로 받은 뒤 미등록 sync 구현을 호출한다. 공개 스키마에는 선택
+  파라미터가 없으며 Elicitation 미지원 세션은 fail-closed한다.
 - `analysis.py`는 작업 흐름의 결정 지점을 묶는다. PDF 스캔 결과를 챕터 후보와 사용자 선택지로 바꾸고, 확정된 챕터를 실제 본문 입력으로 만든다.
 - `workspace.py`는 `<output_dir>/.work/`의 상태·원문·요약·문제 파일을 관리한다. 같은 작업의 상태 갱신은 작업별 잠금과 원자적 JSON 저장을 거친다.
 - `pdf/`는 PDF 파일을 여는 경계다. 외부로 보이는 페이지 번호는 1부터 시작하며, 내부 라이브러리의 0부터 시작하는 페이지 번호는 이 모듈 안에서만 쓴다.
@@ -16,57 +20,54 @@ pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, �
 
 ## 대표 흐름
 
-사용자가 PDF 경로와 학습 자료 생성을 요청하면 클라이언트는 `init_work`로 작업 폴더와 `work_id`를 만든다. 빈 `output_dir`은 요청의 단일 agent workspace 아래 `result/<pdf-name>`으로 계산하며 MCP 서버 cwd는 사용하지 않는다. workspace가 모호하면 절대 경로를 요구한다. 기존 관리 작업이 없는 폴더에서는 서버가 PDF를 읽지 않고 상태 파일과 빈 저장소를 만든다. 기존 작업이 있으면 파일을 바꾸지 않고 이어가기·교체·새 폴더 선택지를 반환하며, 교체는 사용자의 명시적 선택과 새 입력 검증 뒤에만 수행한다. 단답형·주관식·확장형 생성 여부가 미정이면 구조화된 선택지와 선택적 학습자 정보 요청을 반환한다. 지원 클라이언트에서는 `scan_pdf` 실행 직전에 서버 elicitation으로 답을 받아 호출 인자보다 우선하며, 선택이 없거나 거절되면 서버는 스캔하지 않는다.
+사용자가 PDF 경로와 학습 자료 생성을 요청하면 클라이언트는
+`init_work(pdf_path)`를 호출한다. 서버는 요청의 단일 agent workspace 아래
+`result/<pdf-name>`을 고정 출력 폴더로 계산하며 MCP 서버 cwd는 사용하지 않는다.
+workspace가 없거나 모호하면 파일을 만들지 않고 실패한다. 기존 관리 작업이 있으면
+같은 호출 안에서 이어가기·교체 Elicitation을 열고, 관리되지 않은 파일이 있으면
+덮어쓰지 않는다. 새 작업은 단답형·주관식·확장형 생성 여부와 선택적 학습자 정보를
+하나의 Elicitation으로 받은 뒤에만 만든다.
 
-`scan_pdf`는 PDF 메타데이터, 텍스트 레이어 품질, 페이지 오프셋, 내장 목차를 확인한다. 내장 목차가 있으면 PDF 파일 범위 `pdf_pages`와 원문 표시 번호 `source_pages`가 담긴 챕터 후보를 반환한다. 챕터 구성 선택지는 구조화된 `user_choice_options`로, 이후 `set_chapters`의 처리 모드 선택은 `set_chapters_next_step`으로 함께 반환한다. 내장 목차가 없거나 재분석이 필요하면 목차 페이지를 JPEG로 렌더하되 OCR 모델을 준비하거나 실행하지 않는다. OCR이 필요하면 한국어·영어 선택지를 함께 반환하고, 클라이언트는 고른 `ocr_language`로 `prepare_ocr` 후 `scan_toc_with_ocr`를 호출해 목차 OCR 텍스트를 얻고 챕터를 구성한다.
+`scan_pdf(work_id, scan_size, force_vision)`는 PDF 메타데이터, 텍스트 레이어
+품질, 페이지 오프셋, 내장 목차를 확인한다. 내장 목차가 있으면 PDF 파일 범위
+`pdf_pages`와 원문 표시 번호 `source_pages`가 담긴 챕터 후보를 반환한다. 내장
+목차가 없거나 재분석이 필요하면 목차 페이지를 JPEG로 렌더하되 OCR 모델을 준비하거나
+실행하지 않는다. OCR이 필요하면 `prepare_ocr(work_id)`가 한국어·영어
+Elicitation을 열고, 이어서 `scan_toc_with_ocr`가 목차 OCR 텍스트를 반환한다.
 
-클라이언트가 챕터와 처리 방식을 확정하면 `set_chapters`가 스캔 여부와 입력 전체를 먼저 검증한다. 지원 클라이언트에서는 그 전에 서버가 한 도구 호출 안에서 챕터 구성·범위 확인, text/OCR 본문 추출 방식, sequential/parallel 실행 방식을 세 번의 독립된 elicitation으로 순서대로 요청한다. 어느 단계든 거절·취소되면 뒤 요청과 sync 구현을 실행하지 않으며, 모두 승인된 응답만 호출 인자보다 우선한다. 그 뒤 기존 sync 구현이 실패하면 작업을 바꾸지 않으며, 성공하면 모드·챕터와 처리 시작 phase를 하나의 잠금 구간에서 상태 파일에 등록한다. 같은 작업의 다른 `set_chapters` 호출은 앞선 호출의 본문 준비와 phase 종결 뒤에 시작한다. `pdf_pages`는 본문 추출 경계로 쓰고 `source_pages`는 상태·raw·응답에 보존하는 표시 메타로만 쓴다. text 모드에서는 이 시점에 본문 텍스트를 추출해 `chapters_raw`에 저장한다. OCR 모드에서는 이 시점에 본문 페이지 이미지를 렌더링하고 PaddleOCR CPU로 읽어 `chapters_raw`에 `text`와 `char_count`를 저장한다. 본문 준비가 끝나면 `chapter_processing`은 `completed`, 하나라도 실패하면 재시도 가능한 챕터별 오류와 함께 `failed`가 된다.
+클라이언트가 `set_chapters(work_id, chapters, book_info)`를 호출하면 서버가 한
+도구 호출 안에서 챕터 구성·범위 확인, text/OCR 본문 추출 방식,
+sequential/parallel 실행 방식을 세 번의 독립된 elicitation으로 순서대로 요청한다.
+어느 단계든 거절·취소되면 뒤 요청과 sync 구현을 실행하지 않는다. 모두 승인된 뒤
+스캔 여부와 입력 전체를 검증하고, 성공하면 모드·챕터와 처리 시작 phase를 하나의
+잠금 구간에서 상태 파일에 등록한다. 같은 작업의 다른 `set_chapters` 호출은 앞선
+호출의 본문 준비와 phase 종결 뒤에 시작한다. `pdf_pages`는 본문 추출 경계로 쓰고
+`source_pages`는 표시 메타로만 보존한다. text 모드는 본문 텍스트를 추출하고 OCR
+모드는 PaddleOCR CPU로 읽어 `chapters_raw`의 `text`와 `char_count`를 만든다.
 
 `get_subagent_prompts`는 처리 모드와 학습자 정보에 맞는 한국어 프롬프트와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 돌려준다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이며, raw 본문 검증도 이 처리 대상 합집합에만 적용되어 이미 완료된 챕터의 예전 raw 상태가 재개를 막지 않는다. 각 챕터 처리자는 `get_chapter_content`로 입력을 한 번 받고, 해당 챕터가 요약 pending 목록에 있을 때만 요약·핵심 포인트·활성 기본 문제를 `save_chapter_result`로 저장한다. 확장 pending 목록에 있을 때만 같은 본문과 학습자 정보를 받은 확장 프롬프트가 외부 검색 없이 응용 문제를 만들고 `save_extension_result`가 저장한다. 두 저장 도구는 공통 문제 계약으로 ID 문자·챕터 내 유일성·본문 길이별 최대 개수를 검증하고, 저장 잠금 안에서도 다른 결과 유형과의 ID 충돌을 다시 확인한다. workflow와 `next_action`도 실제로 남은 결과 유형만 안내한다.
 
-`list_pending_chapters`가 남은 요약 또는 확장 문제를 확인한다. 챕터 설정이 완료되고 모두 끝나면 `list_pending_chapters`는 `finalize_study`의 출력 형식 선택지를 다음 단계 계약으로 반환한다. 사용자의 명시 선택 뒤 `finalize_study`가 HTML 또는 Markdown+TUI 결과물을 같은 중립 JSON에서 staging에 만들고, 성공한 세대의 관리 경로만 최종 폴더에 설치한다. 미완료 결과가 있으면 렌더러는 완료분만 읽고, 성공 응답의 `omitted_chapters`와 안내 문구가 챕터별 미반영 결과의 상태·오류를 알린다. HTML 완료 응답은 플랫폼별 더블클릭 런처와 자동 포트 사용 여부를 제공하되, 직접 `study_html.py` 실행을 위한 기존 명령·인터프리터·고정 포트 URL도 호환 정보로 유지한다. 같은 형식과 같은 학습 fingerprint일 때만 기존 진도를 staging으로 복사한다. 완료 결과의 중간 데이터가 더 이상 필요 없으면 별도 `cleanup_work`가 렌더 계층을 거치지 않고 해당 `.work`만 제거한다.
+`list_pending_chapters`가 남은 요약 또는 확장 문제를 확인한다. 챕터 설정이 완료되고
+모두 끝나면 선택 파라미터 없는 `finalize_study`를 다음 단계로 반환한다.
+`finalize_study(work_id)`는 출력 형식 Elicitation을 연 뒤 HTML 또는
+Markdown+TUI 결과물을 staging에 만들고 성공한 세대만 설치한다. 완료 결과의 중간
+데이터가 더 이상 필요 없으면 `cleanup_work(work_id)`가 삭제 Elicitation 승인 뒤
+렌더 계층을 거치지 않고 해당 `.work`만 제거한다.
 
 ## 흐름도
 
 ```mermaid
 flowchart TD
-    A["init_work"] --> A0{"기존 출력 작업 있음?"}
-    A0 -->|예| A00["resume / replace / new_output_dir 선택"]
-    A00 -->|resume| A01["resume_work"]
-    A00 -->|replace / 새 폴더| A
-    A0 -->|아니오| A1{"문제 유형 선택 완료?"}
-    A1 -->|아니오| A2["단답형·주관식·확장형 선택 + 학습자 정보 입력"]
-    A2 --> B["scan_pdf에 선택 전달"]
-    A1 -->|예| B
-
-    B --> C{"텍스트 품질 정상?"}
-    B --> D{"내장 목차 있음?"}
-
-    D -->|아니오| E{"OCR 모델 캐시 있음?"}
-    E -->|아니오| F["prepare_ocr"]
-    E -->|예| G["scan_toc_with_ocr"]
-    F --> G
-    G --> H["목차 OCR 결과로 chapters 구성"]
-
-    D -->|예| I["내장 목차로 chapters 구성"]
-
-    I --> J{"본문 추출 모드 선택"}
-    H --> J
-
-    C -->|garbled / no_text_layer| K["OCR 모드만 선택"]
-    C -->|정상| J
-
-    J -->|text 선택| L["set_chapters(extraction_mode=text)"]
-    J -->|ocr 선택| M{"OCR 모델 캐시 있음?"}
-
-    K --> M
-
-    M -->|아니오| N["prepare_ocr"]
-    M -->|예| O["set_chapters(extraction_mode=ocr)"]
-    N --> O
-
-    L --> P["get_subagent_prompts"]
-    O --> P
+    A["init_work(pdf_path)"] --> A0["기존 작업 action + 문제 유형 + 선택적 context Elicitation"]
+    A0 --> B["scan_pdf(work_id)"]
+    B --> C{"목차/OCR 필요?"}
+    C -->|예| D["prepare_ocr(work_id): 언어 Elicitation"]
+    D --> E["scan_toc_with_ocr(work_id)"]
+    C -->|아니오| F["chapters 구성"]
+    E --> F
+    F --> G["set_chapters(work_id, chapters, book_info)"]
+    G --> G0["챕터 범위 → text/OCR → 순차/병렬 Elicitation"]
+    G0 --> P["get_subagent_prompts"]
 
     P --> Q["chapter_ids = 두 pending 목록의 합집합"]
     Q --> R["get_chapter_content"]
@@ -82,7 +83,8 @@ flowchart TD
 
     V --> W{"남은 챕터 있음?"}
     W -->|예| Q
-    W -->|아니오| X["finalize_study → staging → manifest 관리 경로 교체"]
+    W -->|아니오| X["finalize_study(work_id): 형식 Elicitation → 렌더"]
+    X --> Y["cleanup_work(work_id): 삭제 Elicitation"]
 ```
 
 ## 경계

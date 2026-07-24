@@ -24,28 +24,32 @@
 
 대응: `scan_pdf`에서는 PaddleOCR 모델 다운로드, 모델 로드, OCR 실행을 하지 않는다. 첫 모델 다운로드는 `prepare_ocr`에서만 수행하고, 목차 이미지 OCR은 `scan_toc_with_ocr`에서 수행한다. 모델 캐시가 이미 있으면 `scan_toc_with_ocr`와 `set_chapters(extraction_mode="ocr")`의 내부 모델 로드는 허용한다.
 
-## 선택지 문구 변형
+## Elicitation 선택지 경계
 
-증상: 클라이언트가 서버 선택지를 “추천 기본값”처럼 바꾸거나 몇 가지를 합쳐 사용자에게 보여준다.
+증상: 선택 파라미터나 구조화 fallback이 공개 계약에 남으면 에이전트가 form을 열지
+않는 경로를 시도할 수 있다.
 
-원인: 선택지의 label과 설명은 서버가 의도한 안전장치다. 특히 text가 금지된 PDF에서는 사용자가 text 조합을 고르면 안 된다.
+원인: 응답 지시나 일반 도구 인자는 실제 사람의 답에서 왔는지 서버가 검증할 수 없다.
 
-대응: `init_work`의 단답형·주관식·확장형 선택은 `question_setup`으로 제공한다. 다음 호출에 사용자 선택이 필요한 정상 응답은 `next_step`의 도구명·필수 파라미터·구조화된 `choices`를 함께 제공한다. `scan_pdf`는 챕터 구성 선택지와 `set_chapters` 처리 모드를, 챕터 설정까지 완료된 `list_pending_chapters`와 `resume_work`는 `finalize_study` 출력 형식을 앞서 제공한다. 선택이 필요한 오류 응답의 `data.choices`는 잘못된 호출을 고치는 fallback이다. `scan_pdf`는 미정 문제 유형 선택이 남아 있으면 실제 스캔 전에 거부한다. 테스트는 선택지 값뿐 아니라 선택 안내, 상태 미변경, 사용자의 답이 잠금 보호 헬퍼를 거쳐 한 번만 확정되는지도 확인한다.
+대응: 선택값은 MCP 비동기 wrapper가 여는 form Elicitation에서만 받는다. 공개
+스키마에서 선택 파라미터를 제거하고, 공개 응답에서도 `choices`,
+`user_choice_required`, `user_choice_instruction`, `question_setup`,
+`ocr_language_setup` 같은 fallback을 제거한다. 선택 정의는 Elicitation 메시지를
+구성하는 private helper 안에만 둔다.
 
 ## 에이전트가 필수 선택을 대신 결정
 
-증상: 응답에 `user_choice_required=true`와 필수 파라미터를 넣었는데도 에이전트가
-간헐적으로 사용자에게 묻지 않고 임의 값을 다음 도구에 전달한다.
+증상: 에이전트가 간헐적으로 사용자에게 묻지 않고 임의 값을 다음 도구에 전달한다.
 
 원인: 응답 문구는 에이전트 행동 지침일 뿐, 일반 도구 인자가 실제 사람의 답에서
 왔는지 서버가 검증할 수 없다.
 
-대응: MCP form elicitation을 지원하는 세션에서는 MCP 전용 비동기 도구 래퍼가
+대응: MCP 전용 비동기 도구 래퍼가
 문제 유형, OCR 언어, 챕터 구성·범위와 처리 방식, 출력 형식, 기존 작업 재개·교체와
-`.work` 정리를 실행 직전에 다시 묻는다. 인자로 먼저 들어온 선택값은 무시하고
-elicitation 응답을 sync 구현에 전달한다. 거절·취소하면 sync 구현을 호출하지 않는다.
-새 작업 생성 form에는 해석된 절대 출력 폴더도 넣어 사용자가 위치를 확인하게 한다.
-미지원 클라이언트에서는 기존 구조화 선택 응답과 입력 검증을 유지한다.
+`.work` 정리를 실행 직전에 묻는다. 선택 파라미터 자체가 공개 입력에 없으며
+elicitation 응답만 sync 구현에 전달한다. 거절·취소 또는 미지원 세션이면 sync
+구현을 호출하지 않는다. 새 작업 form에는 계산된 절대 출력 폴더를 안내하되 별도
+확인 boolean은 요구하지 않는다.
 
 `set_chapters`는 `[챕터 구성과 범위]`, `[본문 추출 방식]`, `[실행 방식]`의 세 form을
 순서대로 연다. 앞선 form의 승인값은 메모리에만 두고 세 form이 모두 승인된 뒤에만
@@ -63,10 +67,10 @@ sync 구현을 한 번 호출한다. 따라서 두 번째나 세 번째 form에�
 간헐적으로 절대 `output_dir`을 넣을 때만 원하는 경로가 사용되어 결과가 흔들린다.
 
 대응: MCP 래퍼는 요청 메타의 단일 Codex workspace를 우선 사용하고, 없으면 단일
-MCP root를 사용한다. 빈 경로는 그 아래 `result/<pdf-name>`으로, 상대 경로는 그
-workspace 기준으로 정규화한다. workspace가 없거나 여러 개라 모호하면 서버 cwd로
-폴백하지 않고 절대 `output_dir`을 요구한다. sync 구현도 호출자 workspace를
-명시적으로 주입받지 않은 빈·상대 경로를 거부한다.
+MCP root를 사용한다. 공개 `output_dir` 없이 그 아래 `result/<pdf-name>`을 계산한다.
+workspace가 없거나 여러 개라 모호하면 서버 cwd로 폴백하지 않고 상태 변경 없이
+실패한다. sync 구현도 호출자 workspace를 명시적으로 주입받지 않은 빈·상대 경로를
+거부한다.
 
 ## 챕터 설정 검증과 처리 상태
 
@@ -114,7 +118,12 @@ workspace 기준으로 정규화한다. workspace가 없거나 여러 개라 모
 
 원인: `state.json`과 현재 필요한 파일만 덮어쓰고, 이전 세대에서 생성했지만 이번 세대에는 없는 파일의 소유권과 제거 범위를 기록하지 않으면 안전하게 정리할 수 없다. 파일 존재만 보고 렌더 데이터를 읽으면 부분 렌더링이 pending 챕터의 예전 JSON을 정상 결과로 오해할 수도 있다.
 
-대응: `init_work`는 기존 관리 작업을 발견하면 상태를 바꾸기 전에 `resume`, `replace`, `new_output_dir` 선택을 요구한다. 명시적 replace도 새 입력을 먼저 검증하고 `.work`만 제거하며 이전 렌더 결과는 다음 렌더 성공까지 둔다. 렌더는 staging에서 끝까지 만든 뒤 `.pdf-study-manifest.json`의 관리 경로만 rollback 가능한 순서로 교체한다. manifest 밖의 파일은 제거하거나 덮어쓰지 않는다. 중립 데이터 로더는 현재 상태가 `completed`인 결과 파일만 읽는다.
+대응: `init_work`는 고정 출력 폴더의 기존 관리 작업을 발견하면 상태를 바꾸기 전에
+`resume`, `replace` Elicitation을 연다. 관리되지 않은 파일은 실패한다. 명시적
+replace도 새 입력을 먼저 검증하고 `.work`만 제거하며 이전 렌더 결과는 다음 렌더
+성공까지 둔다. 렌더는 staging에서 끝까지 만든 뒤 `.pdf-study-manifest.json`의
+관리 경로만 rollback 가능한 순서로 교체한다. manifest 밖의 파일은 제거하거나
+덮어쓰지 않는다.
 
 완료 결과 뒤 `.work`만 정리할 때는 `cleanup_work`가 작업 잠금 안에서 rendering 완료 상태를 확인하고 해당 디렉터리만 삭제한다. 이 경로는 렌더러나 manifest 교체를 호출하지 않으며, 결과 파일·진도·사용자 파일을 보존한다.
 

@@ -61,7 +61,7 @@ MCP 서버 진입점은 다음 명령이다.
 목차 이미지 OCR이나 본문 OCR이 필요하면 먼저 다음 도구로 모델 준비 상태를 드러낸다.
 
 ```text
-prepare_ocr(work_id, ocr_language="korean" | "english")
+prepare_ocr(work_id)
 ```
 
 목차 후보 이미지를 읽을 때는 다음 도구를 호출한다.
@@ -70,7 +70,10 @@ prepare_ocr(work_id, ocr_language="korean" | "english")
 scan_toc_with_ocr(work_id)
 ```
 
-OCR이 필요한 경우 `scan_pdf`가 반환한 한국어·영어 선택지를 그대로 사용자에게 보여주고, 선택값을 `prepare_ocr`에 전달한다. 모델 캐시가 없으면 `scan_toc_with_ocr`와 `set_chapters(..., extraction_mode="ocr")`는 OCR을 시작하지 않고 해당 언어의 `prepare_ocr` 호출을 안내한다. 모델 캐시가 있으면 내부 모델 로드는 허용된다.
+`prepare_ocr`가 한국어·영어 form elicitation을 직접 열고 승인된 언어를 상태에
+보존한다. 모델 캐시가 없으면 `scan_toc_with_ocr`와 OCR 본문 준비는 OCR을 시작하지
+않고 `prepare_ocr(work_id)` 호출을 안내한다. 모델 캐시가 있으면 내부 모델 로드는
+허용된다.
 
 ## 검증
 
@@ -95,17 +98,19 @@ fixture 생성기·입력 폰트·PDF 파일 해시가 현재 manifest와 다르
 
 ## 결과물 실행
 
-`output_dir`을 비우면 MCP 요청에서 단일 agent workspace를 확인할 수 있는
-클라이언트는 그 아래 `result/<pdf-name>`을 사용한다. 상대 경로도 같은 workspace
-기준이다. workspace가 없거나 여러 개라 모호하면 서버는 MCP 프로세스 cwd를 쓰지
-않고 절대 `output_dir`을 요구한다.
+`init_work(pdf_path)`와 `resume_work(pdf_path)`는 MCP 요청의 단일 Codex workspace
+또는 단일 MCP file root 아래 `result/<pdf-name>`만 사용한다. 공개 `output_dir`
+입력은 없다. workspace가 없거나 여러 개라 모호하면 서버는 MCP 프로세스 cwd를
+쓰지 않고 상태 변경 없이 실패한다.
 
-MCP form elicitation을 지원하는 클라이언트에서는 필수 선택을 사용하는 도구가 실행
-직전에 선택 UI를 다시 연다. 이 응답이 에이전트가 도구 인자에 먼저 넣은 값보다
-우선하며, 거절하거나 취소하면 상태를 바꾸지 않는다. 미지원 클라이언트는 응답의
-구조화된 선택지를 그대로 사용자에게 보여준 뒤 기존 방식으로 전달한다.
+필수 선택을 사용하는 도구는 실행 직전에 MCP form elicitation을 연다. 공개 도구
+스키마에는 선택 파라미터가 없고 구조화 fallback도 없다. 거절·취소 또는
+Elicitation 미지원 세션은 상태를 바꾸지 않고 실패한다.
 
-같은 출력 폴더에 기존 작업이나 완료 결과가 있으면 `init_work`는 자동 덮어쓰지 않는다. 응답의 `resume`, `replace`, `new_output_dir` 선택지를 그대로 보여주고 사용자의 답에 따라 `resume_work`, `init_work(..., replace_existing=true)`, 또는 다른 `output_dir`의 `init_work`를 호출한다. `replace`는 기존 `.work`를 새 작업으로 바꾸지만, 이전 렌더 결과는 새 렌더가 성공할 때까지 유지한다.
+고정 출력 폴더에 기존 관리 작업이나 완료 결과가 있으면 `init_work`는 같은 호출
+안에서 `resume`/`replace` Elicitation을 연다. `replace`는 기존 `.work`를 새
+작업으로 바꾸지만 이전 렌더 결과는 새 렌더가 성공할 때까지 유지한다. 관리되지 않은
+파일이 있으면 덮어쓰지 않고 실패한다.
 
 HTML 결과물은 결과 폴더에서 macOS/Linux의 `start_study.sh` 또는 Windows의
 `start_study.bat`을 더블클릭해 연다. 두 스크립트는 이 자료를 만든 같은 컴퓨터의

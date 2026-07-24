@@ -13,66 +13,76 @@
 }
 ```
 
-성공이면 `ok=true`, 실패면 `ok=false`다. 실패 응답도 `data`에 복구용 선택지나 누락 목록을 담을 수 있다. 클라이언트는 예외 대신 이 봉투를 보고 다음 단계를 정해야 한다.
+성공이면 `ok=true`, 실패면 `ok=false`다. 실패 응답의 `data`는 진단값이나 누락된
+에이전트 입력을 담을 수 있지만 사용자 선택 fallback은 담지 않는다. 클라이언트는
+예외 대신 이 봉투를 보고 다음 단계를 정해야 한다.
 
-성공 응답에서 다음 도구에 사용자 선택이 필요하면 `data.next_step`은 `tool`,
-`required_parameters`, `choices`, `user_choice_required=true`, `user_choice_instruction`을
-담는다. 클라이언트는 `user_choice_instruction`에 따라 `choices`의 서버 제공 항목과
-설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 선택값만 다음 도구에 전달한다.
-`next_step`과 아래의 별도 선택지 컨테이너가 모두 없는 성공 응답은 새 사용자 선택이
-필요 없다는 뜻이다. 실패 응답의 `data.choices`는 누락·오류 호출을 고치기 위한 같은
-선택지의 fallback이며, 같은 `user_choice_required`와 `user_choice_instruction`을 담는다.
-정상 선택지 조회를 위해 일부러 실패 호출을 할 필요는 없다.
+사용자 선택값은 선택을 소비하는 도구가 실행 중에 여는 MCP form elicitation
+응답으로만 받는다. 공개 입력 스키마에는 선택 파라미터가 없고, 공개 성공·실패
+응답에도 `choices`, `user_choice_required`, `user_choice_instruction` 같은 구조화
+fallback이 없다. Elicitation을 지원하지 않는 세션은
+`data.required_capability="elicitation.form"`으로 상태 변경 없이 실패한다.
+거절·취소도 sync 구현을 호출하지 않는다.
 
-`question_setup.questions`, `recommendations.user_choice_options`, 기존 출력 폴더 충돌의
-`data.choices`, 그리고 선택적 `cleanup_work` 액션도 각각의 선택지 컨테이너에
-`user_choice_required`와 `user_choice_instruction`을 담는다. 클라이언트는 같은 규칙으로
-사용자에게 선택지를 제시하고, 명시적으로 받은 값 또는 요청에만 따라야 한다.
+선택을 포함하는 공개 MCP 스키마는 다음과 같다.
 
-클라이언트가 MCP form elicitation을 지원하면 서버는 문제 유형, OCR 언어, 챕터 구성과
-처리 모드, 최종 출력 형식, 기존 작업 재개·교체, 중간 작업 정리를 실제 실행 직전에 다시
-요청한다. 이 경우 도구 호출 인자로 먼저 들어온 선택값보다 elicitation 응답이
-canonical이며, 사용자가 거절하거나 취소하면 상태를 바꾸지 않는다. `set_chapters`의
-form elicitation은 한 도구 호출 안에서 세 번 실행한다. 첫 번째는
-`recommendations.user_choice_options`와 제출된 챕터 제목·PDF 범위를 확인하고,
-두 번째는 text/OCR 본문 추출 방식을 선택하며, 세 번째는 sequential/parallel 실행
-방식을 선택한다. 앞 단계가 거절·취소되면 뒤 요청과 상태 변경을 실행하지 않는다.
-새 작업을 만드는 `init_work` elicitation은 해석된 절대 `output_dir`도 함께 보여주고
-확인받는다.
-elicitation을 지원하지 않는 클라이언트는 기존 네 처리 조합을 포함한 구조화 선택
-계약을 따른다.
+```text
+init_work(pdf_path)
+resume_work(pdf_path)
+scan_pdf(work_id, scan_size=30, force_vision=false)
+prepare_ocr(work_id)
+set_chapters(work_id, chapters, book_info=null)
+finalize_study(work_id)
+cleanup_work(work_id)
+```
+
+`data.next_step.required_parameters`에는 에이전트가 생성하거나 전달해야 하는 값만
+들어간다. `set_chapters`는 `chapters`, `prepare_ocr`와 `finalize_study`는 빈 배열을
+사용한다.
 
 ## 도구 흐름
 
-`init_work(pdf_path, output_dir, enable_multiple_choice, enable_short_answer, enable_reflection, enable_extension, user_context, replace_existing)`는 작업 폴더를 만든다. 객관식은 기존 호환을 위해 기본 활성이다. 단답형·주관식·확장형은 기본값이 없으며, 사용자가 이미 명시하지 않은 값은 `null`로 저장한다. 입력 PDF가 없거나 모든 문제 유형을 명시적으로 끄면 실패한다. 성공 응답은 `work_id`, `.work` 경로, 실제 출력 경로, 현재 `question_options`, `question_setup`을 담는다. `output_dir`이 비어 있으면 MCP 요청 메타의 단일 Codex workspace 또는 MCP root를 현재 agent cwd로 보고 그 아래 `result/<pdf_basename>`을 쓴다. 상대 `output_dir`도 이 cwd를 기준으로 해석한다. 현재 agent cwd를 하나로 식별할 수 없으면 `ok=false`, `data.required_parameters=["output_dir"]`로 절대 경로를 요구하며 MCP 서버 프로세스 cwd로 폴백하지 않는다. `resume_work`의 pdf_path 기반 경로 추론도 같은 규칙을 쓴다.
+`init_work(pdf_path)`는 요청 메타의 단일 Codex workspace 또는 단일 MCP file root
+아래 `result/<pdf_basename>`을 고정 출력 폴더로 계산한다. 공개 `output_dir`은 없다.
+workspace가 없거나 여러 개면 MCP 서버 cwd로 폴백하지 않고 실패한다. 기존 관리
+작업은 `resume`/`replace` Elicitation으로 처리하고, 관리되지 않은 파일이 있으면
+덮어쓰지 않는다. 새 작업은 단답형·주관식·확장형과 선택적 `user_context` form을
+승인한 뒤 만든다. 빈 context도 유효한 확정값이다.
 
-같은 `output_dir`에 기존 pdf-study 작업이 있으면 `init_work`는 상태나 파일을 바꾸지 않고 `ok=false`와 `data.existing_work`, `data.choices`를 반환한다. 재개 가능한 `.work/state.json`이 있으면 선택지는 다음 세 항목이다. 항목과 설명은 클라이언트가 바꾸거나 합치거나 추천을 붙이지 않고 그대로 보여줘야 한다.
+`resume_work(pdf_path)`는 같은 고정 경로의 `.work/state.json`을
+`resume_confirmed` Elicitation 승인 뒤 다시 등록한다.
 
-- `resume` / `기존 작업 이어가기`: `resume_work(output_dir=...)`로 기존 상태를 등록한다.
-- `replace` / `기존 작업 교체`: 같은 인자로 `init_work(..., replace_existing=true)`를 다시 호출한다.
-- `new_output_dir` / `새 출력 폴더 사용`: 사용자가 정한 다른 `output_dir`로 `init_work`를 호출한다.
+`scan_pdf(work_id, scan_size, force_vision)`는 PDF 메타, 텍스트 품질, 페이지
+오프셋, 챕터 경계 추천을 반환한다. 내장 목차가 없거나 `force_vision=true`이면
+목차 후보 JPEG만 렌더하며 OCR 모델 준비·로드·실행은 하지 않는다. 공개 응답의
+추천과 next step에는 사용자 선택 fallback이 없고, `set_chapters` next step은
+`required_parameters=["chapters"]`만 담는다.
 
-`.work`가 없는 완료 결과나 손상된 작업은 재개할 수 없으므로 `replace`, `new_output_dir`만 반환한다. pdf-study 관리 흔적이 없는 비어 있지 않은 폴더는 사용자 파일을 보호하기 위해 `new_output_dir`만 반환한다. `replace_existing=true`는 새 입력의 PDF 경로·문제 유형·학습자 정보 검증이 모두 끝난 뒤 기존 `.work`만 제거한다. 이전 렌더 결과와 manifest는 새 렌더가 성공할 때까지 유지한다.
+`prepare_ocr(work_id)`는 한국어/영어 Elicitation을 열고 승인된 PaddleOCR CPU
+모델을 준비해 언어를 상태에 보존한다. 성공 응답은 캐시 경로, 모델별 캐시 여부,
+다운로드 필요 여부, 모델 로드 여부, 소요 시간을 담는다.
 
-`question_setup.questions`는 미정인 문제 유형마다 `field`, `question`, `choices`를 담는다. 각 선택지는 `value`, `label`, `desc`를 가지며 클라이언트는 이를 바꾸거나 합치거나 추천을 붙이지 않고 그대로 보여줘야 한다. `question_setup.user_context_request`는 선택 입력인 학습 목적, 배경지식, 관심 분야, 현재 수준을 안내한다. 이미 학습자 정보가 있으면 이 값은 `null`이다. 클라이언트는 선택과 학습자 응답을 받은 뒤 `scan_pdf`에 전달한다.
+`scan_toc_with_ocr(work_id)`는 목차 페이지 JPEG를 준비된 OCR 언어로 읽어
+`ocr_text`, `ocr_error`, `ocr_status`를 갱신한다. 언어나 모델 캐시가 없으면
+`prepare_ocr(work_id)`를 안내한다. 성공 next step은 `chapters`만 요구하는
+`set_chapters` 계약이다.
 
-`resume_work(output_dir, pdf_path)`는 서버 재시작 후 디스크의 `.work/state.json`을 다시 등록한다. `output_dir`과 `pdf_path`가 모두 없거나, 대상 폴더에 상태 파일이 없으면 실패한다. 문제 유형 선택이 아직 미정이면 성공 응답에 `question_setup`을 담아 사용자 선택부터 이어가게 한다. 선택이 끝난 작업은 남은 요약·확장 챕터 목록을 담으며, 챕터 설정이 완료되고 두 목록이 비었을 때만 `data.next_step`에 `finalize_study`의 출력 형식 선택지를 넣는다.
+`set_chapters(work_id, chapters, book_info)`는 챕터 구성·범위, text/OCR,
+sequential/parallel을 세 개의 순차 Elicitation으로 확인하고 모두 승인된 뒤에만
+sync 구현을 호출한다. text 품질이 신뢰 불가면 추출 form은 OCR만 허용한다.
+`pdf_pages=[start,end]`는 필수 1-based inclusive 범위이고 `source_pages`는 선택적
+표시 메타다. 입력 전체를 무부작용으로 검증한 뒤 모드·챕터·phase를 한 잠금 구간에서
+확정한다. OCR은 `prepare_ocr`에 저장된 언어를 사용하며 모델 캐시가 없으면
+`prepare_ocr(work_id)`를 안내한다. 본문 실패는 새 설정과 챕터별 오류를 유지한다.
 
-`scan_pdf(work_id, scan_size, force_vision, enable_short_answer, enable_reflection, enable_extension, user_context)`는 미정인 문제 유형 선택을 먼저 확정한 뒤 PDF 메타, 텍스트 품질, 페이지 오프셋, 챕터 경계 추천을 반환한다. 미정인 선택이 하나라도 전달되지 않았거나 boolean이 아니면 상태를 바꾸거나 PDF를 스캔하지 않고 `ok=false`와 같은 `question_setup`을 반환한다. 선택적 `user_context`는 앞뒤 공백을 제거해 상태에 저장한다. 한번 확정된 문제 유형을 이후 재스캔에서 다른 값으로 조용히 바꿀 수 없다. 내장 목차가 있으면 `recommendations.suggested_chapters`의 각 챕터에 PDF 범위 `pdf_pages`와 선택적 원문 번호 `source_pages`가 들어간다. 정상 텍스트 레이어에서는 반복 footer로 확인된 high 신뢰도 오프셋만 `page_offset`으로 사용한다. 텍스트가 깨졌거나 없으면 이 단계에서 오프셋을 계산하지 않으며, 목차 이미지 OCR 뒤에 다시 판단한다. low 후보는 `page_offset_candidate` 진단값으로만 노출하고 원문 페이지·범위 계산에는 쓰지 않는다. 전체 범위 메타는 `pdf_pages_available`과 `source_pages_available`이다. 챕터 구성 선택지는 `recommendations.user_choice_options`의 `{value,label,desc}` 배열이 canonical이며, 기존 문자열 배열 `user_choices`는 읽기 호환용으로 유지한다. `data.set_chapters_next_step`은 이후 `set_chapters`에 필요한 `chapters`, `execution_mode`, `extraction_mode`와 유효한 처리 모드 조합을 항상 제공한다. 내장 목차 흐름에서는 같은 객체가 즉시 `data.next_step`에도 들어가며, 목차 이미지 흐름의 즉시 `next_step`은 `prepare_ocr`이고 처리 모드 정보는 OCR 뒤까지 `set_chapters_next_step`에 보존된다. 텍스트 레이어가 없거나 깨진 PDF에서는 이 조합에 OCR 두 가지밖에 들어가지 않는다. 내장 목차가 없거나 `force_vision=true`이면 `toc_page_images`를 반환한다. 각 항목은 목차 페이지 JPEG 경로와 `ocr_status="not_started"`, 빈 `ocr_text`, `ocr_error=null`을 담는다. `scan_pdf`는 PaddleOCR 모델 다운로드, 모델 로드, OCR 실행을 하지 않는다. `force_vision`은 외부 계약 호환을 위한 기존 파라미터명이다. 알 수 없는 `work_id`나 손상된 PDF는 실패한다.
-
-OCR이 필요한 목차 이미지 흐름 또는 텍스트 레이어가 없거나 깨진 PDF에서는 성공 응답에 `ocr_language_setup={field,question,choices}`가 들어가며 choices는 `korean`, `english` 두 항목뿐이다. 이때 `data.next_step`은 `prepare_ocr`와 필수 `ocr_language`를 반환한다. 클라이언트는 선택지를 바꾸지 않고 사용자 선택값을 전달해야 한다.
-
-`prepare_ocr(work_id, ocr_language)`는 사용자가 고른 `korean` 또는 `english` PaddleOCR CPU 모델을 준비하고 성공 시 작업 상태에 보존한다. 다른 값은 거부하고 같은 선택지를 반환한다. 모델 캐시가 없으면 이 단계에서 다운로드와 로드가 발생할 수 있다. 성공 응답은 캐시 경로, 모델별 캐시 여부, 다운로드 필요 여부, 모델 로드 여부, 소요 시간을 담는다. 이 도구는 PDF 본문이나 목차 이미지를 OCR하지 않는다.
-
-`scan_toc_with_ocr(work_id)`는 `scan_pdf`가 렌더한 목차 페이지 JPEG를 작업에 보존된 한국어 또는 영어 PaddleOCR CPU 모델로 읽어 `toc_page_images[].ocr_text`, `ocr_error`, `ocr_status`를 갱신해 반환한다. 언어를 고르지 않았거나 모델 캐시가 없으면 OCR을 시작하지 않고 `ok=false`, `next_action=prepare_ocr(...)`로 복구 방법을 안내한다. 모델 캐시가 있으면 내부 모델 로드는 허용한다. 일부 목차 페이지 OCR 실패는 도구 전체 실패가 아니라 해당 항목의 `ocr_error`로 표현된다. 완료된 OCR 텍스트의 반복 footer 번호가 같은 high 신뢰도 오프셋을 지지하면 이 도구가 `page_offset`과 추천의 `source_pages`를 갱신한다. low 후보는 `page_offset_candidate`로만 반환한다. 성공 응답의 `data.next_step`은 사용자가 구성한 `chapters`와 처리 모드 조합을 받는 `set_chapters` 계약이다. 클라이언트는 서버가 제공한 OCR 텍스트와 필요 시 이미지를 확인해 챕터를 구성해야 한다.
-
-`set_chapters(work_id, chapters, execution_mode, extraction_mode, book_info)`는 챕터와 처리 모드를 확정한다. 각 챕터의 `pdf_pages=[start,end]`는 필수이며 PDF 파일의 1-based inclusive 범위다. `source_pages=[start,end]` 또는 명시적 `null`은 선택적 표시 메타로 상태, raw, 성공 응답에 그대로 보존된다. 구형 클라이언트와 기존 `.work`의 `page_range`·`printed_range`는 입력과 읽기에서만 각각 새 키로 정규화하며, 새 응답과 저장에는 구형 키를 쓰지 않는다. `execution_mode`는 `sequential` 또는 `parallel`, `extraction_mode`는 `text` 또는 `ocr`만 허용한다. 둘 중 하나가 빠지면 실패 응답의 `data.choices`를 사용자에게 그대로 보여줘야 한다. 스캔이 끝나지 않았거나 `pdf_pages`가 문서 밖이거나 챕터 ID가 중복되는 등 입력 검증이 실패하면 모드, 기존 챕터 진행 상태와 책 정보를 바꾸지 않는다. 검증된 모드와 챕터는 `chapter_setup=completed`, `chapter_processing=in_progress`와 함께 한 번에 확정한다. 이후 본문 준비가 모두 성공하면 처리 phase는 `completed`, 추출이나 OCR 실패가 있으면 `failed`가 되며 새 챕터 설정과 챕터별 오류는 재시도를 위해 유지한다. 같은 `work_id`의 `set_chapters` 호출은 setup 확정부터 본문 준비와 phase 종결까지 직렬화된다. state 저장 실패 뒤 책 정보 복원이 실패하면 성공이나 원래 입력 오류로 가장하지 않고 transaction 오류를 반환한다. OCR 모드에서 모델 캐시가 없으면 본문 OCR을 시작하지 않고 `ok=false`, `next_action=prepare_ocr(...)`로 복구 방법을 안내한다. 모델 캐시가 있으면 내부 모델 로드는 허용한다. OCR 모드 본문 선처리 중 실패한 챕터가 있으면 `ok=false`, `next_action=null`이며, `data.failed_chapters`에 `{chapter_id, failed_pages, error}`를 담는다. 이미 같은 `pdf_pages`의 유효한 OCR `chapters_raw`가 있으면 재OCR하지 않고 저장된 `text`와 `char_count`를 재사용한다. OCR 선처리 병렬 상한은 서버 프로세스 전역으로 공유된다.
-
-`set_chapters`의 OCR 모드는 선택한 `ocr_language` 또는 `prepare_ocr`가 상태에 보존한 언어를 사용한다. 둘 다 없으면 상태를 바꾸지 않고 한국어·영어 선택지를 반환한다. OCR raw에는 사용 언어를 함께 기록하므로 다른 언어로 다시 설정하면 기존 raw를 재사용하지 않는다.
-
-처리 모드 선택은 `scan_pdf` 또는 `scan_toc_with_ocr`의 `data.next_step.choices`에서 먼저 받는다. 각 선택지는 `execution_mode`, `extraction_mode`, `label`, `desc`를 담는다. 이 네 조합은 elicitation 미지원 클라이언트와 누락·오류 fallback의 호환 계약이다. form elicitation 지원 클라이언트에서는 같은 허용 범위를 text/OCR과 sequential/parallel의 두 독립된 요청으로 나누며, 그 전에 챕터 구성·범위를 별도 요청으로 확인한다. 누락·오류로 `set_chapters`가 실패하면 기존 조합 선택지가 `data.choices`에 fallback으로 들어간다. 텍스트 레이어가 없거나 깨진 PDF에서는 `forced_extraction_mode="ocr"`가 함께 오고, 구조화 선택지는 OCR 조합만, 추출 방식 form은 OCR만 남는다. 클라이언트는 빠진 text 선택지를 다시 만들어 사용자에게 보여주면 안 된다.
-
-`get_subagent_prompts(work_id)`는 챕터 설정이 완료된 작업에서만 요약자 프롬프트, 확장 문제 프롬프트, 처리 순서와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 반환한다. 챕터 설정 전 호출은 실패하며 `data.chapter_setup`과 이전 스캔의 챕터·처리 방식 선택 정보를 돌려 `set_chapters`로 복구하게 한다. 두 pending 목록은 각각 아직 저장할 요약·기본 문제와 확장 문제가 남은 챕터 ID를 자연 정렬해 담는다. 기존 클라이언트용 `chapter_ids`는 두 pending 목록의 자연 정렬 합집합이며 완료된 챕터는 포함하지 않는다. skip 챕터는 모든 처리 목록에서 제외되고 `skipped_chapter_ids`에 따로 들어간다. workflow와 성공 `next_action`은 각 목록에 실제로 남은 결과 유형만 생성·저장하도록 안내한다. 두 pending 목록이 모두 비면 이 도구는 `list_pending_chapters`를 먼저 호출하게 하며, 그 응답의 구조화된 출력 형식 선택 뒤에만 렌더링으로 진행한다. raw 본문 파일, 비어 있지 않은 `text`, 실제 길이와 같은 `char_count` 검증은 두 pending 목록의 합집합에만 적용하므로 완료 챕터의 raw 손상은 재개를 막지 않는다. pending raw가 유효하지 않으면 실패하고 `data.invalid_chapters`에 챕터별 사유를 담으며, 그중 남아 있는 OCR 실패는 `data.failed_chapters`에도 같은 `{chapter_id, failed_pages, error}` 형태로 노출한다.
+`get_subagent_prompts(work_id)`는 챕터 설정이 완료된 작업에서만 요약자 프롬프트,
+확장 문제 프롬프트, 처리 순서와 함께 `summary_pending_chapter_ids`,
+`extension_pending_chapter_ids`를 반환한다. 두 pending 목록은 각각 아직 저장할
+요약·기본 문제와 확장 문제가 남은 챕터 ID를 자연 정렬해 담는다. 호환용
+`chapter_ids`는 두 목록의 자연 정렬 합집합이며 완료·skip 챕터는 제외한다.
+workflow와 `next_action`은 실제 pending 결과 유형만 안내한다. 두 목록이 모두 비면
+`list_pending_chapters`를 호출한 뒤 `finalize_study(work_id)`로 진행한다. raw
+검증은 pending 합집합에만 적용한다.
 
 pending 판정의 정확한 상태 매핑은 다음과 같다.
 
@@ -88,15 +98,19 @@ pending 판정의 정확한 상태 매핑은 다음과 같다.
 
 `get_work_state(work_id)`는 상태 파일 전체를 반환한다. 알 수 없는 작업은 실패한다.
 
-`list_pending_chapters(work_id)`는 완료되지 않은 요약과 확장 챕터 ID를 반환한다. save 도구의 검증을 통과해 completed가 된 챕터와 skip 챕터만 남은 작업에서 제외된다. 챕터 설정이 완료되고 두 pending 목록이 모두 비면 `data.next_step`에 `finalize_study`와 필수 `output_format`, `html`·`md_tui`의 구조화된 선택지가 들어간다.
+`list_pending_chapters(work_id)`는 완료되지 않은 요약과 확장 챕터 ID를 반환한다.
+챕터 설정이 완료되고 두 pending 목록이 모두 비면
+`data.next_step={"tool":"finalize_study","required_parameters":[]}`를 반환한다.
 
-`finalize_study(work_id, output_format, keep_work_dir)`는 최종 결과물을 만든다. `force` 파라미터는 없다. `output_format`은 `html` 또는 `md_tui`만 허용한다. 정상 흐름에서는 완료된 `list_pending_chapters` 또는 `resume_work`의 `data.next_step.choices`를 사용자에게 그대로 보여준다. 값이 없으면 같은 선택지가 실패 응답의 `data.choices`에 fallback으로 들어간다. 미완료 결과가 있어도 완료분만 렌더하며, 현재 상태가 `completed`가 아닌 챕터의 예전 요약·문제 JSON은 읽지 않는다. 이 경우 성공 응답의 `data.omitted_chapters`는 각 미반영 챕터의 `{chapter_id, results:[{type, status, error}]}`를 담고, `next_action`도 같은 누락을 사용자에게 알린다. `keep_work_dir=false`면 최초 렌더가 성공한 뒤 `.work`를 함께 지우며, 보존된 작업은 성공 응답의 `data.cleanup_work` 계약으로 나중에 렌더 없이 정리할 수 있다.
+`finalize_study(work_id)`는 HTML/Markdown+TUI Elicitation을 열고 승인된 형식으로
+최종 결과물을 만든다. `.work`는 항상 보존한다. 미완료 결과가 있어도 완료분만
+렌더하며 `data.omitted_chapters`와 `next_action`이 미반영 결과를 알린다.
 
-`cleanup_work(work_id)`는 `finalize_study`로 rendering phase가 완료된 작업의 정확한 `.work`만 삭제한다. 결과 파일, manifest, 진도, 사용자 파일은 건드리지 않고 렌더링도 다시 실행하지 않는다. 최종 렌더가 끝나지 않은 작업은 재개 데이터를 보호하기 위해 실패한다. 성공하면 해당 work_id의 메모리 등록도 제거하므로 같은 서버 프로세스에서 다시 작업하려면 새 작업을 시작해야 한다.
+`cleanup_work(work_id)`는 삭제 Elicitation 승인 뒤 rendering phase가 완료된 작업의
+정확한 `.work`만 삭제한다. 결과 파일, manifest, 진도, 사용자 파일은 건드리지 않고
+렌더링도 다시 실행하지 않는다.
 
 렌더러는 임시 staging 폴더에 완전한 새 세대를 만든 뒤 이전 manifest의 관리 경로만 교체한다. 렌더 또는 설치가 실패하면 이전 결과와 manifest를 복원하고 partial 파일을 최종 폴더에 남기지 않는다. manifest가 관리하지 않는 기존 경로와 새 렌더 경로가 충돌하면 사용자 파일을 덮어쓰지 않고 실패한다.
-
-출력 형식 선택 실패 응답의 선택지는 `value`, `label`, `desc`를 담는다. 클라이언트는 `html`과 `md_tui` 외의 값을 만들어 제시하면 안 된다.
 
 ## 출력물 계약
 

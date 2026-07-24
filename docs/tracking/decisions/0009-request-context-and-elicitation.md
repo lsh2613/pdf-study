@@ -6,21 +6,25 @@
 
 ## 결정
 
-- 빈 `output_dir`과 상대 경로는 MCP 요청에서 확인한 단일 Codex workspace를
-  기준으로 해석한다. Codex 메타가 없으면 단일 MCP root를 사용한다.
-- 현재 agent workspace를 하나로 식별할 수 없으면 절대 `output_dir`을 요구하고,
-  MCP 서버 프로세스의 `Path.cwd()`로 폴백하지 않는다.
-- MCP form elicitation을 지원하는 클라이언트에서는 문제 유형, OCR 언어, 챕터
+- 공개 MCP에서 `output_dir`을 제거한다. MCP 요청에서 확인한 단일 Codex
+  workspace를 기준으로 `result/<pdf-name>`을 계산하고, Codex 메타가 없으면 단일
+  MCP root를 사용한다.
+- 현재 agent workspace를 하나로 식별할 수 없으면 상태 변경 없이 실패하고 MCP 서버
+  프로세스의 `Path.cwd()`로 폴백하지 않는다.
+- MCP form elicitation으로 문제 유형, 선택적 학습자 정보, OCR 언어, 챕터
   구성·범위와 처리 모드, 출력 형식, 기존 작업 재개·교체, `.work` 정리를 실행 직전에
   서버가 직접 요청한다.
 - `set_chapters`는 챕터 구성·범위 확인, text/OCR 본문 추출 방식,
   sequential/parallel 실행 방식을 이 순서의 독립된 세 form으로 요청하고, 모두
   승인된 뒤에만 기존 sync 구현을 호출한다.
-- elicitation 응답은 에이전트가 도구 호출에 먼저 채운 선택 인자보다 우선한다.
-  거절·취소 시 기존 sync 구현을 호출하지 않아 상태와 파일을 바꾸지 않는다.
-- 새 작업 생성 elicitation은 해석된 절대 `output_dir`을 함께 보여주고 확인받는다.
-- elicitation 미지원 클라이언트에는 기존 `user_choice_required`,
-  `user_choice_instruction`, 구조화된 `choices`와 입력 검증 계약을 유지한다.
+- 공개 MCP 입력에서 사용자 선택 파라미터를 제거한다. elicitation 응답만 기존
+  sync 구현으로 전달하며 거절·취소 시 sync 구현을 호출하지 않는다.
+- 새 작업 생성 elicitation은 계산된 절대 출력 경로를 안내하고, 선택적
+  `user_context`는 생략하거나 빈 값으로 승인할 수 있다.
+- 공개 응답에서 `choices`, `user_choice_required`, `user_choice_instruction`,
+  `question_setup`, `ocr_language_setup` 같은 구조화 fallback을 제거한다.
+- Elicitation 미지원 클라이언트는 `required_capability="elicitation.form"`으로
+  fail-closed한다.
 
 ## 이유
 
@@ -39,5 +43,5 @@
   누락을 서버가 막을 수 없다.
 - `user_confirmed=true` 같은 boolean이나 opaque token을 추가: 에이전트가 그대로
   채울 수 있어 사람의 선택을 증명하지 못한다.
-- 모든 클라이언트에서 elicitation을 필수화: 미지원 MCP 클라이언트의 기존 흐름을
-  즉시 깨므로 구조화 선택 fallback을 유지한다.
+- 미지원 클라이언트에 구조화 fallback 유지: 에이전트가 Elicitation을 피하고
+  일반 도구 인자로 임의 선택할 경로가 남으므로 채택하지 않는다.

@@ -22,25 +22,24 @@ PDF 텍스트 레이어로 목차를 추정하면 안 된다. 스캔본, 깨진 
 
 text 모드는 PDF 텍스트 레이어를 신뢰할 수 있을 때만 쓴다. 텍스트 레이어가 없거나 모지바케로 깨진 PDF에서 text 모드를 쓰면 의미 없는 본문이 저장되므로 서버는 OCR 모드 선택을 요구해야 한다.
 
-OCR이 필요한 목차 이미지 흐름 또는 텍스트 레이어가 없거나 깨진 PDF에서는 `scan_pdf`가 한국어·영어 OCR 언어 선택지를 반환한다. 클라이언트는 선택지를 그대로 사용자에게 보여준 뒤 `prepare_ocr(work_id, ocr_language)`에 전달한다. 서버는 한국어와 영어만 OCR 대상으로 지원하며, 준비에 성공한 언어와 모델을 작업 상태에 보존한다.
+OCR이 필요한 목차 이미지 흐름 또는 텍스트 레이어가 없거나 깨진 PDF에서는
+`prepare_ocr(work_id)`가 한국어·영어 OCR 언어 form elicitation을 직접 연다.
+서버는 한국어와 영어만 OCR 대상으로 지원하며, 승인된 언어와 준비된 모델을 작업
+상태에 보존한다.
 
 `set_chapters`는 스캔 완료 여부, 처리 모드, 챕터 정의·범위·중복과 책 정보 fallback 준비를 상태 변경 없이 먼저 끝내야 한다. 이 검증이 실패하면 기존 모드, 챕터 진행 상태와 책 정보를 그대로 유지한다. 검증이 끝난 설정은 하나의 잠금 구간에서 `chapter_setup=completed`, `chapter_processing=in_progress`와 함께 확정한다. 그 뒤 본문 추출이 실패하면 설정을 되돌리지 않고 `chapter_processing=failed`와 챕터별 오류를 남겨 재시도 입력으로 사용한다. 모든 본문 챕터가 준비되면 처리 phase는 `completed`다. 같은 `work_id`의 다른 `set_chapters`는 setup부터 본문 준비와 phase 종결까지 앞선 호출이 끝난 뒤 시작해야 한다. state 저장 실패 뒤 책 정보 복원까지 실패하면 이를 숨기지 않고 transaction 실패로 드러낸다.
 
 OCR 모드에서는 `set_chapters` 시점에 서버가 본문 챕터의 페이지 이미지를 PaddleOCR CPU로 읽어 `chapters_raw/chN.json`에 `text`와 `char_count`로 저장한다. 모델 캐시가 없으면 `set_chapters`는 본문 OCR을 시작하지 않고 `prepare_ocr`를 먼저 호출하게 해야 한다. 모델 캐시가 있으면 내부 모델 로드는 허용한다. skip 챕터는 OCR과 저장 대상에서 제외된다. 같은 `pdf_pages`의 유효한 OCR raw 본문이 이미 있으면 재OCR하지 않고 저장된 값을 재사용한다. OCR 선처리 병렬 상한은 서버 프로세스 전역으로 공유되며, 여러 호출이 겹쳐도 동시에 OCR되는 챕터 수는 최대 2개(CPU 1코어면 1개)를 넘지 않는다. 페이지 OCR 예외가 발생하거나 챕터 전체 OCR 결과가 공백이면 해당 챕터는 실패로 표시하고 partial raw 본문은 저장하지 않는다. 이 실패는 `set_chapters`와 `get_subagent_prompts`의 `failed_chapters`로 드러나며, 정상 sub-agent 흐름으로 넘어가면 안 된다. `get_subagent_prompts`와 `get_chapter_content`는 raw `text`와 `char_count`가 준비되지 않은 챕터를 거부한다. 요약 저장 payload에 `body_text`가 들어와도 raw 본문을 덮어쓰지 않는다.
 
-처리 모드는 목차 분석 방식이 아니라 본문 입력과 챕터 처리 방식만 결정한다. 사용자가 text/OCR과 순차/병렬 조합을 고르기 전에는 서버가 기본값을 임의로 적용하면 안 된다.
+처리 모드는 목차 분석 방식이 아니라 본문 입력과 챕터 처리 방식만 결정한다. 사용자가
+text/OCR과 순차/병렬을 각각 고르기 전에는 서버가 기본값을 임의로 적용하면 안 된다.
 
-사용자 선택이 다음 도구 호출에 필요하면 앞선 성공 응답이 해당 도구명, 필수 파라미터,
-구조화된 선택지를 함께 제공해야 한다. 도구 설명은 고정 계약의 보조 정보이고, 실제
-PDF 품질·작업 완료 상태에 따라 달라지는 선택지는 응답이 canonical이다. 누락·오류
-호출의 실패 응답은 같은 선택지를 fallback으로 제공하되, 선택지 조회를 위해 일부러
-실패 호출을 정상 흐름에 넣으면 안 된다.
-
-MCP form elicitation을 지원하는 클라이언트에서는 필수 선택을 사용하는 도구가 실행
-직전에 서버 주도 사용자 입력을 받아야 한다. 에이전트가 도구 인자에 미리 채운 값은
-사용자 응답의 증거가 아니며, elicitation 응답으로 덮어쓴다. 사용자가 거절하거나
-취소하면 작업 상태와 출력 파일을 바꾸지 않는다. 미지원 클라이언트만 기존
-`user_choice_required` 지시 계약으로 폴백한다.
+사용자 선택값은 선택을 소비하는 도구가 실행 직전에 여는 MCP form elicitation
+응답으로만 받는다. 공개 MCP 스키마에 선택 파라미터를 두거나 성공·실패 응답에
+`choices`, `user_choice_required`, `user_choice_instruction` 같은 구조화 fallback을
+제공하면 안 된다. 에이전트가 사용자를 대신해 선택값을 채울 수 있는 별도 경로도
+두지 않는다. Elicitation 미지원 세션과 거절·취소는 상태와 출력 파일을 바꾸지 않고
+실패해야 한다.
 
 `set_chapters`의 사용자 확인은 챕터 구성·범위, text/OCR 본문 추출 방식,
 sequential/parallel 실행 방식의 세 elicitation으로 분리한다. 두 처리 축은 독립된
@@ -48,14 +47,18 @@ sequential/parallel 실행 방식의 세 elicitation으로 분리한다. 두 처
 앞선 요청이 거절·취소되면 뒤 요청과 상태 변경을 실행하지 않는다. 텍스트가 깨졌거나
 없는 PDF의 추출 방식 폼은 OCR만 허용한다.
 
-빈 `output_dir`과 상대 경로는 MCP 서버 프로세스의 cwd로 해석하지 않는다. 요청에서
-현재 agent workspace를 하나로 식별할 수 있을 때만 그 경로를 기준으로
-`result/<pdf_basename>` 또는 상대 경로를 계산한다. 식별할 수 없거나 여러 workspace가
-있어 모호하면 절대 `output_dir`을 요구한다.
+출력 폴더는 요청에서 단일 Codex workspace 또는 단일 MCP file root를 식별할 수 있을
+때만 그 아래 `result/<pdf_basename>`으로 계산한다. 공개 MCP 도구는 `output_dir`을
+받지 않으며, workspace가 없거나 여러 개라 모호하면 MCP 서버 프로세스 cwd로
+폴백하지 않고 상태 변경 없이 실패한다.
 
 ## 문제 생성
 
-요약과 핵심 포인트는 모든 본문 챕터에 필요하다. 객관식은 기존 호환을 위해 기본 활성이다. 단답형, 주관식, 확장형은 기본값을 두지 않고 `init_work` 응답에서 사용자의 생성 여부 선택을 받은 뒤 `scan_pdf`가 확정한다. 서버가 반환한 선택지의 항목과 설명은 그대로 보여줘야 한다. 작업 시작 때 켜진 유형만 요구하며 활성화된 기본 문제 유형이 비어 있으면 해당 챕터는 완료로 볼 수 없다.
+요약과 핵심 포인트는 모든 본문 챕터에 필요하다. 객관식은 기존 호환을 위해 기본
+활성이다. 단답형, 주관식, 확장형은 기본값을 두지 않고 `init_work`가 여는 form
+elicitation에서 사용자의 생성 여부를 받아 작업 생성 전에 확정한다. 작업 시작 때
+켜진 유형만 요구하며 활성화된 기본 문제 유형이 비어 있으면 해당 챕터는 완료로 볼
+수 없다.
 
 `init_work`는 문제 유형 선택과 함께 학습 목적, 배경지식, 관심 분야, 현재 수준 같은 학습자 정보를 선택적으로 입력하도록 안내한다. 사용자가 정보를 주지 않아도 진행할 수 있지만, 제공된 정보는 요약과 문제의 난이도, 표현 수준, 예시, 관점을 조정하는 데 사용한다. 학습자 정보가 본문 근거 제한보다 우선할 수는 없다.
 
@@ -96,8 +99,8 @@ sequential/parallel 실행 방식의 세 elicitation으로 분리한다. 두 처
 재개 시 `get_subagent_prompts`는 챕터 설정이 완료된 작업에서만 완료되지 않은 결과를 `summary_pending_chapter_ids`와 `extension_pending_chapter_ids`로 나눠 반환한다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이며, 완료 챕터는 이 목록과 raw 검증 대상에서 제외한다. workflow와 `next_action`은 각 챕터에 실제로 남은 요약 또는 확장 결과만 생성·저장하도록 안내해야 한다. 두 목록이 모두 비면 이 도구는 `finalize_study`를 직접 안내하지 않고 `list_pending_chapters`를 먼저 호출하게 해야 한다.
 
 챕터 설정이 완료되고 두 pending 목록이 비면 `list_pending_chapters`와 `resume_work`는
-다음 도구 `finalize_study`의 `output_format` 선택지를 구조화해 반환한다. 사용자는
-`html` 또는 `md_tui`를 명시적으로 고르며 서버가 출력 형식을 기본 적용하면 안 된다.
+선택 파라미터 없는 `finalize_study`를 다음 도구로 반환한다. 해당 도구가
+`html`/`md_tui` form elicitation을 직접 열며 서버가 출력 형식을 기본 적용하면 안 된다.
 
 최종 렌더가 완료된 뒤 중간 데이터 제거를 원하면 `cleanup_work`가 그 작업의 `.work`만
 삭제한다. 이 동작은 렌더·진도 설치를 다시 수행하지 않으며, 렌더가 완료되지 않은

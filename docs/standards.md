@@ -6,21 +6,19 @@
 
 복구 가능한 입력 오류는 예외를 밖으로 던지지 않고 `ok=false`로 바꿔야 한다. 손상 PDF, 없는 파일, 잘못된 챕터 ID, 미지정 선택지는 사용자에게 고칠 수 있는 오류이므로 `error`와 `next_action`에 복구 방법이 있어야 한다.
 
-사용자 선택이 필요한 곳은 서버가 준 선택지의 label과 설명을 그대로 전달해야 한다. 선택지를 요약하거나 합치거나 추천을 임의로 붙이는 변경은 사용자 결정 계약을 깨는 것이다.
+사용자 선택은 선택을 소비하는 도구가 실행 직전에 여는 MCP form elicitation으로만
+받아야 한다. 선택 파라미터와 `choices`, `user_choice_required`,
+`user_choice_instruction` 같은 구조화 fallback을 공개 MCP 계약에 추가하면 안 된다.
+선택 정의의 label과 설명은 private Elicitation 메시지 안에서 그대로 유지하고,
+추천을 임의로 붙이거나 여러 선택을 합치면 안 된다.
 
-정상 흐름에서 다음 도구의 사용자 선택이 필요하면 앞선 성공 응답의 `data.next_step`에
-도구명, 필수 파라미터, 구조화된 선택지를 넣어야 한다. 다음 도구의 설명이나 실패
-응답을 읽어야만 선택지를 얻는 흐름을 새로 만들면 안 된다. 실패 응답의 `data.choices`는
-누락·오류 호출을 위한 fallback으로만 사용한다.
+Elicitation 거절·취소 또는 미지원 세션은 sync 구현을 호출하지 않고 상태를 바꾸지
+않아야 한다. `data.next_step.required_parameters`에는 에이전트가 생성할 값만 넣고
+사용자 선택값은 넣지 않는다.
 
-MCP form elicitation 지원 클라이언트에서는 선택을 소비하는 도구가 실행 직전에
-사용자 입력을 직접 받아야 한다. 호출 인자에 먼저 들어온 값을 사용자 선택으로
-간주하면 안 되며, 거절·취소 시 상태를 바꾸지 않아야 한다. 미지원 클라이언트의
-구조화 선택 fallback은 유지한다.
-
-빈 또는 상대 `output_dir`을 `Path.cwd()`로 해석하면 안 된다. 단일 요청 workspace나
-MCP root가 있을 때만 이를 기준으로 경로를 계산하고, 없거나 모호하면 절대 경로를
-요구해야 한다.
+출력 경로는 단일 요청 workspace나 MCP root 아래 `result/<pdf-name>`으로만
+계산해야 한다. 공개 `output_dir`을 다시 추가하거나 `Path.cwd()`로 폴백하거나,
+없거나 모호한 workspace 중 하나를 임의 선택하면 안 된다.
 
 `get_subagent_prompts`는 요약과 확장 결과의 실제 pending 챕터 목록을 분리해 반환해야 한다. `completed`·`skipped`는 done, `pending`·`failed`·`in_progress`는 pending으로 판정하고, 확장 문제가 비활성이면 `extension_pending_chapter_ids`는 항상 빈 목록이어야 한다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합만 담고, raw 검증과 workflow·`next_action`은 완료 챕터를 제외한 이 처리 대상과 실제 pending 결과 유형에만 적용해야 한다.
 
