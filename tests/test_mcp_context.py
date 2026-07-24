@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from mcp import types
 from mcp.shared.memory import create_connected_server_and_client_session
+import pytest
 
 from pdf_study import server, workspace
 
@@ -34,8 +35,12 @@ class _ElicitationContext:
 
     async def elicit(self, message, schema):
         self.messages.append(message)
-        data = schema(**self._responses.pop(0))
-        return SimpleNamespace(action="accept", data=data)
+        response = dict(self._responses.pop(0))
+        action = response.pop("_action", "accept")
+        if action != "accept":
+            return SimpleNamespace(action=action, data=None)
+        data = schema(**response)
+        return SimpleNamespace(action=action, data=data)
 
 
 def test_sync_init_work_never_falls_back_to_mcp_server_cwd(
@@ -242,11 +247,14 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
     scanned = server.scan_pdf(work_id)
     assert scanned["ok"] is True, scanned
     ctx = _ElicitationContext(
-        responses=[{
-            "chapter_strategy": "proceed",
-            "processing_mode": "parallel:text",
-            "chapters_confirmed": True,
-        }],
+        responses=[
+            {
+                "chapter_strategy": "proceed",
+                "chapters_confirmed": True,
+            },
+            {"extraction_mode": "text"},
+            {"execution_mode": "parallel"},
+        ],
     )
 
     response = asyncio.run(
@@ -260,7 +268,7 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
                 },
             ],
             execution_mode="sequential",
-            extraction_mode="text",
+            extraction_mode="ocr",
             ctx=ctx,
         )
     )
@@ -269,9 +277,93 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
     state = workspace.load_state(work_id)
     assert state["execution_mode"] == "parallel"
     assert state["extraction_mode"] == "text"
+    assert len(ctx.messages) == 3
     assert "사용자 확인 대상" in ctx.messages[0]
-    assert "Sequential + Text" in ctx.messages[0]
-    assert "Parallel + Text" in ctx.messages[0]
+    assert "[챕터 구성과 범위]" in ctx.messages[0]
+    assert "[본문 추출 방식]" not in ctx.messages[0]
+    assert "[본문 추출 방식]" in ctx.messages[1]
+    assert "Text" in ctx.messages[1]
+    assert "OCR" in ctx.messages[1]
+    assert "Sequential" not in ctx.messages[1]
+    assert "[실행 방식]" in ctx.messages[2]
+    assert "Sequential" in ctx.messages[2]
+    assert "Parallel" in ctx.messages[2]
+    assert "OCR" not in ctx.messages[2]
+
+
+@pytest.mark.parametrize(
+    ("responses", "message_count"),
+    [
+        ([{"_action": "cancel"}], 1),
+        (
+            [
+                {"chapter_strategy": "proceed", "chapters_confirmed": True},
+                {"_action": "decline"},
+            ],
+            2,
+        ),
+        (
+            [
+                {"chapter_strategy": "proceed", "chapters_confirmed": True},
+                {"extraction_mode": "text"},
+                {"_action": "cancel"},
+            ],
+            3,
+        ),
+    ],
+)
+def test_mcp_set_chapters_cancellation_never_changes_state(
+    responses, message_count, tmp_path, ko_short,
+):
+    initialized = server.init_work(
+        str(ko_short),
+        str(tmp_path / "out"),
+        enable_short_answer=False,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    work_id = initialized["data"]["work_id"]
+    scanned = server.scan_pdf(work_id)
+    ctx = _ElicitationContext(responses=responses)
+
+    response = asyncio.run(
+        server._mcp_set_chapters_tool(
+            work_id=work_id,
+            chapters=scanned["data"]["recommendations"]["suggested_chapters"],
+            execution_mode="parallel",
+            extraction_mode="text",
+            ctx=ctx,
+        )
+    )
+
+    assert response["ok"] is False
+    assert len(ctx.messages) == message_count
+    assert workspace.load_state(work_id)["phases"]["chapter_setup"] != "completed"
+
+
+def test_mcp_extraction_elicitation_forces_ocr_for_garbled_text(
+    tmp_path, ko_short,
+):
+    initialized = server.init_work(
+        str(ko_short),
+        str(tmp_path / "ocr-only"),
+        enable_short_answer=False,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    work_id = initialized["data"]["work_id"]
+    workspace.update_state(work_id, text_quality="garbled")
+    ctx = _ElicitationContext(responses=[{"extraction_mode": "ocr"}])
+
+    selected = asyncio.run(server._elicit_extraction_mode(ctx, work_id))
+
+    assert selected == "ocr"
+    assert "OCR" in ctx.messages[0]
+    assert "PDF 텍스트 레이어를 사용" not in ctx.messages[0]
+
+    invalid_ctx = _ElicitationContext(responses=[{"extraction_mode": "text"}])
+    with pytest.raises(ValueError):
+        asyncio.run(server._elicit_extraction_mode(invalid_ctx, work_id))
 
 
 def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
@@ -291,7 +383,6 @@ def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
     ctx = _ElicitationContext(
         responses=[{
             "chapter_strategy": "reanalyze_with_vision",
-            "processing_mode": "sequential:text",
             "chapters_confirmed": False,
         }],
     )
@@ -314,6 +405,7 @@ def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
         "목차 페이지를 렌더한 뒤 OCR 텍스트와 이미지로 챕터를 다시 구성합니다."
         in ctx.messages[0]
     )
+    assert len(ctx.messages) == 1
 
 
 def test_mcp_finalize_uses_elicited_format_not_agent_argument(monkeypatch):

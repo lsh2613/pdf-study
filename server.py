@@ -634,26 +634,15 @@ async def _elicit_question_setup(
     return result.data.model_dump()
 
 
-async def _elicit_processing_setup(
+async def _elicit_chapter_setup(
     ctx: Context,
     work_id: str,
     chapters: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    text_quality = workspace.load_state(work_id).get("text_quality")
-    mode_choices = _processing_mode_choices(text_quality)
-    mode_values = tuple(
-        f"{choice['execution_mode']}:{choice['extraction_mode']}"
-        for choice in mode_choices
-    )
-    mode_type = Literal.__getitem__(mode_values)
     outline = workspace.load_outline(work_id) or {}
     recommendations = outline.get("recommendations") or {}
     chapter_choices = recommendations.get("user_choice_options") or []
     fields: dict[str, tuple[Any, Any]] = {
-        "processing_mode": (
-            mode_type,
-            Field(description="사용자가 선택한 챕터 처리 방식"),
-        ),
         "chapters_confirmed": (
             bool,
             Field(description="표시된 챕터 제목과 PDF 페이지 범위를 이대로 사용할지 여부"),
@@ -665,7 +654,7 @@ async def _elicit_processing_setup(
             Literal.__getitem__(chapter_values),
             Field(description="사용자가 선택한 챕터 구성 방식"),
         )
-    schema = create_model("PdfStudyChapterProcessingSelection", **fields)
+    schema = create_model("PdfStudyChapterSetupSelection", **fields)
     chapter_lines = []
     for chapter in chapters:
         pages = chapter.get("pdf_pages", chapter.get("page_range"))
@@ -673,7 +662,8 @@ async def _elicit_processing_setup(
             f"- {chapter.get('chapter_id')}: {chapter.get('title')} / PDF {pages}"
         )
     message = (
-        "챕터 범위와 처리 방식은 사용자가 직접 확인해야 합니다.\n\n"
+        "[챕터 구성과 범위]\n"
+        "챕터 구성 방식과 제목·PDF 페이지 범위를 사용자가 직접 확인해야 합니다.\n\n"
         + (
             "[챕터 구성 방식]\n"
             + _choice_lines(chapter_choices)
@@ -682,21 +672,50 @@ async def _elicit_processing_setup(
         )
         + "[챕터]\n"
         + "\n".join(chapter_lines)
-        + "\n\n[처리 방식]\n"
-        + "\n".join(
-            f"- {choice['label']} "
-            f"({choice['execution_mode']}:{choice['extraction_mode']}): {choice['desc']}"
-            for choice in mode_choices
-        )
     )
     result = await ctx.elicit(message=message, schema=schema)
     if result.action != "accept" or result.data is None:
         return None
-    selected = result.data.model_dump()
-    execution_mode, extraction_mode = selected.pop("processing_mode").split(":", 1)
-    selected["execution_mode"] = execution_mode
-    selected["extraction_mode"] = extraction_mode
-    return selected
+    return result.data.model_dump()
+
+
+async def _elicit_extraction_mode(ctx: Context, work_id: str) -> str | None:
+    text_quality = workspace.load_state(work_id).get("text_quality")
+    choices = processing_mode_contract.extraction_choices(text_quality)
+    mode_type = Literal.__getitem__(tuple(choice["value"] for choice in choices))
+    schema = create_model(
+        "PdfStudyExtractionModeSelection",
+        extraction_mode=(
+            mode_type,
+            Field(description="사용자가 선택한 본문 추출 방식"),
+        ),
+    )
+    message = (
+        "[본문 추출 방식]\n"
+        + _choice_lines(choices)
+        + "\nOCR 본문 선처리는 실행 방식과 별개의 서버 내부 상한으로 제한됩니다."
+    )
+    result = await ctx.elicit(message=message, schema=schema)
+    if result.action != "accept" or result.data is None:
+        return None
+    return str(result.data.extraction_mode)
+
+
+async def _elicit_execution_mode(ctx: Context) -> str | None:
+    choices = processing_mode_contract.execution_choices()
+    mode_type = Literal.__getitem__(tuple(choice["value"] for choice in choices))
+    schema = create_model(
+        "PdfStudyExecutionModeSelection",
+        execution_mode=(
+            mode_type,
+            Field(description="사용자가 선택한 챕터 실행 방식"),
+        ),
+    )
+    message = "[실행 방식]\n" + _choice_lines(choices)
+    result = await ctx.elicit(message=message, schema=schema)
+    if result.action != "accept" or result.data is None:
+        return None
+    return str(result.data.execution_mode)
 
 
 def _safe(label: str):
@@ -1525,17 +1544,17 @@ async def _mcp_set_chapters_tool(
     ocr_language: str = "",
     book_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """챕터 범위와 처리 모드를 MCP elicitation으로 확인한 뒤 확정한다."""
+    """챕터, 추출 방식, 실행 방식을 각각 elicitation으로 확인한 뒤 확정한다."""
     if _client_supports_elicitation(ctx):
-        selected = await _elicit_processing_setup(ctx, work_id, chapters)
-        if selected is None:
+        chapter_selection = await _elicit_chapter_setup(ctx, work_id, chapters)
+        if chapter_selection is None:
             return _elicitation_cancelled({
                 "chapters": chapters,
                 "next_step": _set_chapters_next_step(
                     workspace.load_state(work_id).get("text_quality"),
                 ),
             })
-        if selected.get("chapter_strategy") == "reanalyze_with_vision":
+        if chapter_selection.get("chapter_strategy") == "reanalyze_with_vision":
             return _err(
                 "사용자가 목차 이미지 재분석을 선택해 챕터를 확정하지 않았습니다.",
                 data={"selected_chapter_strategy": "reanalyze_with_vision"},
@@ -1544,15 +1563,31 @@ async def _mcp_set_chapters_tool(
                     "prepare_ocr → scan_toc_with_ocr 순서로 다시 구성하세요."
                 ),
             )
-        if not selected["chapters_confirmed"]:
+        if not chapter_selection["chapters_confirmed"]:
             return _elicitation_cancelled({
                 "chapters": chapters,
                 "next_step": _set_chapters_next_step(
                     workspace.load_state(work_id).get("text_quality"),
                 ),
             })
-        execution_mode = selected["execution_mode"]
-        extraction_mode = selected["extraction_mode"]
+        selected_extraction_mode = await _elicit_extraction_mode(ctx, work_id)
+        if selected_extraction_mode is None:
+            return _elicitation_cancelled({
+                "chapters": chapters,
+                "next_step": _set_chapters_next_step(
+                    workspace.load_state(work_id).get("text_quality"),
+                ),
+            })
+        selected_execution_mode = await _elicit_execution_mode(ctx)
+        if selected_execution_mode is None:
+            return _elicitation_cancelled({
+                "chapters": chapters,
+                "next_step": _set_chapters_next_step(
+                    workspace.load_state(work_id).get("text_quality"),
+                ),
+            })
+        extraction_mode = selected_extraction_mode
+        execution_mode = selected_execution_mode
     return set_chapters(
         work_id=work_id,
         chapters=chapters,
