@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 import inspect
+import json
 import sys
 
 import pytest
@@ -107,6 +108,66 @@ def test_save_chapter_result_uses_question_contract(monkeypatch, ko_short, tmp_p
     assert response["ok"] is False
     assert response["data"]["missing"] == ["contract_probe"]
     assert response["data"]["chapter_id"] == "ch1"
+
+
+def test_save_chapter_result_materializes_agent_choices_once(tmp_path, ko_short, monkeypatch):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    result = _result()
+    item = result["questions"]["multiple_choice"][0]
+    item.pop("options")
+    item.pop("answer_index")
+    item.update(correct_answer="정답", incorrect_answers=["오답 A", "오답 B"])
+    monkeypatch.setattr(
+        question_contract,
+        "_shuffle_choices",
+        lambda values: values.reverse(),
+    )
+
+    assert server.save_chapter_result(wid, "ch1", result)["ok"] is True
+    saved = json.loads((workspace.quiz_dir(wid) / "ch1.json").read_text(encoding="utf-8"))
+    saved_item = saved["questions"]["multiple_choice"][0]
+    assert saved_item["options"] == ["오답 B", "오답 A", "정답"]
+    assert saved_item["answer_index"] == 2
+    assert "correct_answer" not in saved_item
+    assert "incorrect_answers" not in saved_item
+
+
+def test_save_chapter_result_rejects_invalid_agent_choice_payload_without_files(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    result = _result()
+    item = result["questions"]["multiple_choice"][0]
+    item.pop("options")
+    item.pop("answer_index")
+    item["correct_answer"] = "정답"
+    item["incorrect_answers"] = ["정답"]
+
+    response = server.save_chapter_result(wid, "ch1", result)
+
+    assert response["ok"] is False
+    assert response["data"]["missing"] == ["questions.multiple_choice[0].incorrect_answers"]
+    _assert_no_chapter_result_files(wid, "ch1")
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "pending"
+
+
+def test_save_chapter_result_preserves_legacy_choice_payload_order(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    result = _result()
+    result["questions"]["multiple_choice"][0].update(
+        options=["첫 번째", "두 번째", "세 번째"],
+        answer_index=1,
+    )
+
+    assert server.save_chapter_result(wid, "ch1", result)["ok"] is True
+    saved = json.loads((workspace.quiz_dir(wid) / "ch1.json").read_text(encoding="utf-8"))
+    saved_item = saved["questions"]["multiple_choice"][0]
+    assert saved_item["options"] == ["첫 번째", "두 번째", "세 번째"]
+    assert saved_item["answer_index"] == 1
 
 
 def test_save_chapter_result_rejects_question_id_saved_by_extension(

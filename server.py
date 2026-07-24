@@ -1166,6 +1166,17 @@ def save_chapter_result(
     if isinstance(data_to_save, dict):
         data_to_save.pop("body_text", None)
 
+    data_to_save, materialization_missing = (
+        question_contract.materialize_multiple_choice_options(data_to_save)
+    )
+    if materialization_missing:
+        return _err(
+            f"챕터 결과에 필수 값이 비었거나 누락됐습니다: {materialization_missing}. "
+            f'save_chapter_result(work_id="{work_id}", chapter_id="{chapter_id}", '
+            "data=...)로 다시 저장하세요.",
+            data={"missing": materialization_missing, "chapter_id": chapter_id},
+        )
+
     char_count = state["chapters"][chapter_id].get("char_count")
     missing = question_contract.missing_summary_fields(
         data_to_save, options, chapter_id, char_count=char_count,
