@@ -97,15 +97,18 @@ def test_mcp_init_work_uses_single_codex_workspace_as_agent_cwd(
     agent_cwd.mkdir()
     server_cwd.mkdir()
     monkeypatch.chdir(server_cwd)
-    ctx = _ElicitationContext(cwd=agent_cwd, elicitation_supported=False)
+    ctx = _ElicitationContext(
+        cwd=agent_cwd,
+        responses=[{
+            "enable_short_answer": False,
+            "enable_reflection": False,
+            "enable_extension": False,
+        }],
+    )
 
     response = asyncio.run(
         server._mcp_init_work_tool(
             pdf_path=str(ko_short),
-            output_dir="",
-            enable_short_answer=False,
-            enable_reflection=False,
-            enable_extension=False,
             ctx=ctx,
         )
     )
@@ -117,13 +120,12 @@ def test_mcp_init_work_uses_single_codex_workspace_as_agent_cwd(
     assert not (server_cwd / "result").exists()
 
 
-def test_mcp_init_work_uses_elicited_question_choices_not_agent_arguments(
+def test_mcp_init_work_uses_elicited_question_choices(
     tmp_path, ko_short,
 ):
     ctx = _ElicitationContext(
         cwd=tmp_path,
         responses=[{
-            "output_dir_confirmed": True,
             "enable_short_answer": False,
             "enable_reflection": True,
             "enable_extension": False,
@@ -133,9 +135,6 @@ def test_mcp_init_work_uses_elicited_question_choices_not_agent_arguments(
     response = asyncio.run(
         server._mcp_init_work_tool(
             pdf_path=str(ko_short),
-            enable_short_answer=True,
-            enable_reflection=False,
-            enable_extension=True,
             ctx=ctx,
         )
     )
@@ -150,13 +149,12 @@ def test_mcp_init_work_uses_elicited_question_choices_not_agent_arguments(
     assert len(ctx.messages) == 1
 
 
-def test_mcp_init_work_requires_confirmation_of_resolved_output_dir(
+def test_mcp_init_work_allows_omitted_user_context(
     tmp_path, ko_short,
 ):
     ctx = _ElicitationContext(
         cwd=tmp_path,
         responses=[{
-            "output_dir_confirmed": False,
             "enable_short_answer": False,
             "enable_reflection": False,
             "enable_extension": False,
@@ -167,15 +165,37 @@ def test_mcp_init_work_requires_confirmation_of_resolved_output_dir(
         server._mcp_init_work_tool(pdf_path=str(ko_short), ctx=ctx)
     )
 
-    assert response["ok"] is False
-    assert not (tmp_path / "result" / "ko_short").exists()
+    assert response["ok"] is True
+    assert workspace.load_state(response["data"]["work_id"])["user_context"] == ""
     assert str(tmp_path / "result" / "ko_short") in ctx.messages[0]
 
 
-def test_mcp_init_work_does_not_replace_existing_work_without_elicited_confirmation(
+def test_mcp_init_work_uses_elicited_user_context(tmp_path, ko_short):
+    ctx = _ElicitationContext(
+        cwd=tmp_path,
+        responses=[{
+            "enable_short_answer": False,
+            "enable_reflection": False,
+            "enable_extension": False,
+            "user_context": "  입문자  ",
+        }],
+    )
+
+    response = asyncio.run(
+        server._mcp_init_work_tool(pdf_path=str(ko_short), ctx=ctx)
+    )
+
+    assert response["ok"] is True
+    assert (
+        workspace.load_state(response["data"]["work_id"])["user_context"]
+        == "입문자"
+    )
+
+
+def test_mcp_init_work_elicits_resume_for_existing_work(
     tmp_path, ko_short,
 ):
-    output_dir = tmp_path / "existing"
+    output_dir = tmp_path / "result" / ko_short.stem
     original = server.init_work(
         str(ko_short),
         str(output_dir),
@@ -184,30 +204,65 @@ def test_mcp_init_work_does_not_replace_existing_work_without_elicited_confirmat
         enable_extension=False,
     )
     original_work_id = original["data"]["work_id"]
-    ctx = _ElicitationContext(responses=[{"replace_existing": False}])
+    ctx = _ElicitationContext(
+        cwd=tmp_path,
+        responses=[{"action": "resume"}],
+    )
 
     response = asyncio.run(
         server._mcp_init_work_tool(
             pdf_path=str(ko_short),
-            output_dir=str(output_dir),
-            enable_short_answer=False,
-            enable_reflection=False,
-            enable_extension=False,
-            replace_existing=True,
             ctx=ctx,
         )
     )
 
-    assert response["ok"] is False
-    assert workspace.resume_workspace(output_dir)["work_id"] == original_work_id
+    assert response["ok"] is True
+    assert response["data"]["work_id"] == original_work_id
+    assert len(ctx.messages) == 1
+    assert "기존 작업 이어가기" in ctx.messages[0]
     assert "기존 작업 교체" in ctx.messages[0]
-    assert "이전 렌더 결과는 새 렌더가 성공할 때까지 유지됩니다." in ctx.messages[0]
+
+
+def test_mcp_init_work_elicits_replace_for_existing_work(tmp_path, ko_short):
+    output_dir = tmp_path / "result" / ko_short.stem
+    original = server.init_work(
+        str(ko_short),
+        str(output_dir),
+        enable_short_answer=False,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    assert original["ok"] is True
+    ctx = _ElicitationContext(
+        cwd=tmp_path,
+        responses=[
+            {"action": "replace"},
+            {
+                "enable_short_answer": False,
+                "enable_reflection": False,
+                "enable_extension": False,
+                "user_context": "교체된 작업",
+            },
+        ],
+    )
+
+    response = asyncio.run(
+        server._mcp_init_work_tool(pdf_path=str(ko_short), ctx=ctx)
+    )
+
+    assert response["ok"] is True
+    assert (
+        workspace.load_state(response["data"]["work_id"])["user_context"]
+        == "교체된 작업"
+    )
+    assert response["data"]["output_dir"] == str(output_dir)
+    assert len(ctx.messages) == 2
 
 
 def test_mcp_resume_work_requires_elicited_confirmation(
     tmp_path, ko_short, monkeypatch,
 ):
-    output_dir = tmp_path / "resume"
+    output_dir = tmp_path / "result" / ko_short.stem
     created = server.init_work(str(ko_short), str(output_dir))
     assert created["ok"] is True
     called = []
@@ -218,10 +273,13 @@ def test_mcp_resume_work_requires_elicited_confirmation(
         return original_resume(*args, **kwargs)
 
     monkeypatch.setattr(server, "resume_work", recording_resume)
-    ctx = _ElicitationContext(responses=[{"resume_confirmed": False}])
+    ctx = _ElicitationContext(
+        cwd=tmp_path,
+        responses=[{"resume_confirmed": False}],
+    )
 
     response = asyncio.run(
-        server._mcp_resume_work_tool(output_dir=str(output_dir), ctx=ctx)
+        server._mcp_resume_work_tool(pdf_path=str(ko_short), ctx=ctx)
     )
 
     assert response["ok"] is False

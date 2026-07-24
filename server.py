@@ -79,12 +79,6 @@ class _OcrLanguageSelection(BaseModel):
     )
 
 
-class _ReplaceExistingSelection(BaseModel):
-    replace_existing: bool = Field(
-        description="기존 pdf-study 작업을 같은 출력 폴더에서 교체할지 여부",
-    )
-
-
 class _ResumeSelection(BaseModel):
     resume_confirmed: bool = Field(
         description="기존 pdf-study 작업을 이어서 진행할지 여부",
@@ -615,12 +609,15 @@ async def _elicit_question_setup(
     *,
     output_dir: str | None = None,
 ) -> dict[str, Any] | None:
-    fields: dict[str, tuple[Any, Any]] = {}
-    if output_dir is not None:
-        fields["output_dir_confirmed"] = (
-            bool,
-            Field(description="표시된 절대 출력 폴더를 사용할지 여부"),
-        )
+    fields: dict[str, tuple[Any, Any]] = {
+        "user_context": (
+            str | None,
+            Field(
+                default=None,
+                description="선택 사항: 학습 목적, 배경지식, 관심 분야, 현재 수준",
+            ),
+        ),
+    }
     for question in setup["questions"]:
         choice_desc = " / ".join(
             f"{choice['label']}: {choice['desc']}" for choice in question["choices"]
@@ -632,7 +629,7 @@ async def _elicit_question_setup(
     schema = create_model("PdfStudyQuestionSetupSelection", **fields)
     message = (
         (
-            "다음 위치에 새 작업을 만듭니다. 출력 폴더를 확인해주세요.\n"
+            "다음 Codex workspace 기준 위치에 새 작업을 만듭니다.\n"
             f"- {output_dir}\n\n"
             if output_dir is not None else ""
         )
@@ -960,100 +957,95 @@ def init_work(
 async def _mcp_init_work_tool(
     pdf_path: str,
     ctx: Context,
-    output_dir: str = "",
-    enable_multiple_choice: bool = True,
-    enable_short_answer: bool | None = None,
-    enable_reflection: bool | None = None,
-    enable_extension: bool | None = None,
-    user_context: str = "",
-    replace_existing: bool = False,
 ) -> dict[str, Any]:
-    """MCP 요청 workspace를 sync 구현에 명시적으로 전달한다."""
+    """현재 Codex workspace에 Elicitation으로 확인한 새 작업을 만든다."""
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
     agent_cwd = await _agent_cwd(ctx)
     resolved_dir = _resolve_output_dir(
-        output_dir,
+        "",
         pdf_path,
         agent_cwd=agent_cwd,
     )
-    existing = (
-        workspace.inspect_output_dir(resolved_dir)
-        if resolved_dir is not None
-        else None
-    )
-    if replace_existing and resolved_dir is not None:
-        assert existing is not None
-        if (
-            existing["kind"] in {
-                "managed_work", "damaged_managed_work", "managed_output",
-            }
-            and _client_supports_elicitation(ctx)
-        ):
-            message = (
-                "기존 출력 폴더 처리 방식을 사용자가 직접 확인해야 합니다.\n"
-                "- 기존 작업 교체 (replace): 기존 중간 작업을 제거하고 같은 출력 폴더에서 "
-                "새로 시작합니다. 이전 렌더 결과는 새 렌더가 성공할 때까지 유지됩니다."
-            )
-            result = await ctx.elicit(
-                message=message,
-                schema=_ReplaceExistingSelection,
-            )
-            if (
-                result.action != "accept"
-                or result.data is None
-                or not result.data.replace_existing
-            ):
-                return _elicitation_cancelled({
-                    "output_dir": resolved_dir,
-                    "existing_work": existing,
-                    "selected_action": None,
-                })
-    will_create_workspace = (
-        existing is not None
-        and (
-            existing["kind"] == "available"
-            or (
-                replace_existing
-                and existing["kind"] in {
-                    "managed_work", "damaged_managed_work", "managed_output",
-                }
-            )
+    if resolved_dir is None:
+        return _missing_output_dir(pdf_path)
+
+    existing = workspace.inspect_output_dir(resolved_dir)
+    replace_existing = False
+    if existing["kind"] == "unmanaged_content":
+        return _err(
+            "고정 출력 폴더에 pdf-study가 관리하지 않는 파일이 있어 사용할 수 없습니다.",
+            data={"output_dir": resolved_dir, "existing_work": existing},
         )
-    )
-    if will_create_workspace and _client_supports_elicitation(ctx):
-        initial_setup = _question_setup_payload({
-            "question_options": {
-                "short_answer": None,
-                "reflection": None,
-                "extension": None,
-            },
-            "user_context": user_context,
-            "user_context_confirmed": bool(user_context.strip()),
-        })
-        selected = await _elicit_question_setup(
-            ctx,
-            initial_setup,
-            output_dir=resolved_dir,
+    if existing["kind"] != "available":
+        allowed_actions = (
+            ["resume", "replace"] if existing["can_resume"] else ["replace"]
         )
-        if selected is None:
-            return _elicitation_cancelled({"question_setup": initial_setup})
-        if not selected.pop("output_dir_confirmed"):
+        action_schema = create_model(
+            "PdfStudyExistingWorkActionSelection",
+            action=(
+                str,
+                Field(
+                    description="기존 출력 작업 처리 방식",
+                    json_schema_extra={"enum": allowed_actions},
+                ),
+            ),
+        )
+        action_lines = []
+        if existing["can_resume"]:
+            action_lines.append(
+                "- 기존 작업 이어가기 (resume): 기존 상태에서 남은 작업을 계속합니다."
+            )
+        action_lines.append(
+            "- 기존 작업 교체 (replace): 같은 고정 출력 폴더에서 새로 시작합니다."
+        )
+        action_result = await ctx.elicit(
+            message=(
+                "고정 출력 폴더에 기존 pdf-study 작업이 있습니다.\n"
+                + "\n".join(action_lines)
+            ),
+            schema=action_schema,
+        )
+        if action_result.action != "accept" or action_result.data is None:
             return _elicitation_cancelled({
                 "output_dir": resolved_dir,
-                "question_setup": initial_setup,
+                "existing_work": existing,
             })
-        enable_short_answer = selected["enable_short_answer"]
-        enable_reflection = selected["enable_reflection"]
-        enable_extension = selected["enable_extension"]
+        action = str(action_result.data.action)
+        if action not in allowed_actions:
+            raise ValueError("지원하지 않는 기존 작업 처리 방식입니다.")
+        if action == "resume":
+            return resume_work(
+                output_dir=resolved_dir,
+                _agent_cwd_path=agent_cwd,
+            )
+        replace_existing = True
+
+    initial_setup = _question_setup_payload({
+        "question_options": {
+            "short_answer": None,
+            "reflection": None,
+            "extension": None,
+        },
+        "user_context": "",
+        "user_context_confirmed": False,
+    })
+    selected = await _elicit_question_setup(
+        ctx,
+        initial_setup,
+        output_dir=resolved_dir,
+    )
+    if selected is None:
+        return _elicitation_cancelled({"output_dir": resolved_dir})
+    user_context = (selected.pop("user_context", None) or "").strip()
     return init_work(
         pdf_path=pdf_path,
-        output_dir=resolved_dir or output_dir,
-        enable_multiple_choice=enable_multiple_choice,
-        enable_short_answer=enable_short_answer,
-        enable_reflection=enable_reflection,
-        enable_extension=enable_extension,
+        output_dir=resolved_dir,
+        enable_multiple_choice=True,
+        enable_short_answer=selected["enable_short_answer"],
+        enable_reflection=selected["enable_reflection"],
+        enable_extension=selected["enable_extension"],
         user_context=user_context,
         replace_existing=replace_existing,
         _agent_cwd_path=agent_cwd,
@@ -1135,23 +1127,22 @@ def resume_work(
 @mcp.tool(name="resume_work", description=resume_work.__doc__)
 @_safe("resume_work")
 async def _mcp_resume_work_tool(
+    pdf_path: str,
     ctx: Context,
-    output_dir: str = "",
-    pdf_path: str = "",
 ) -> dict[str, Any]:
-    """MCP 요청 workspace를 sync 재개 구현에 명시적으로 전달한다."""
+    """현재 Codex workspace의 고정 출력 작업을 확인 후 재개한다."""
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
     agent_cwd = await _agent_cwd(ctx)
     resolved = _resolve_output_dir(
-        output_dir,
+        "",
         pdf_path,
         agent_cwd=agent_cwd,
     )
     if resolved is not None:
         existing = workspace.inspect_output_dir(resolved)
-        if existing["can_resume"] and _client_supports_elicitation(ctx):
+        if existing["can_resume"]:
             message = (
                 "- 기존 작업 이어가기 (resume): 기존 .work/state.json을 등록해 "
                 "남은 챕터부터 계속합니다."
@@ -1168,7 +1159,7 @@ async def _mcp_resume_work_tool(
                     "selected_action": None,
                 })
     return resume_work(
-        output_dir=resolved or output_dir,
+        output_dir=resolved or "",
         pdf_path=pdf_path,
         _agent_cwd_path=agent_cwd,
     )

@@ -1,16 +1,33 @@
 """MCP client configuration safety tests."""
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from pdf_study import server
 from scripts import apply_mcp_config
 
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _mcp_input_properties() -> dict[str, set[str]]:
+    tools = asyncio.run(server.mcp.list_tools())
+    return {
+        tool.name: set(tool.inputSchema["properties"])
+        for tool in tools
+    }
+
+
+def test_init_and_resume_public_schemas_exclude_choice_and_path_parameters():
+    properties = _mcp_input_properties()
+
+    assert properties["init_work"] == {"pdf_path"}
+    assert properties["resume_work"] == {"pdf_path"}
 
 
 def test_global_config_uses_home_dir_not_project_dir(tmp_path: Path) -> None:
@@ -119,4 +136,3 @@ def test_global_codex_registration_uses_cli_and_verifies_result(
         ],
         ["codex", "mcp", "get", "pdf-study"],
     ]
-
