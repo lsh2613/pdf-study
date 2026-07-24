@@ -24,6 +24,11 @@ fallback이 없다. Elicitation을 지원하지 않는 세션은
 `data.required_capability="elicitation.form"`으로 상태 변경 없이 실패한다.
 거절·취소도 sync 구현을 호출하지 않는다.
 
+선택을 소비하는 동기 구현은 공개 Python API가 아니다. `pdf_study.server`는 아래
+MCP 도구 이름과 같은 직접 실행 속성을 노출하지 않으며, 클라이언트는 모듈을 import해
+내부 구현을 호출하는 대신 MCP 세션으로 도구를 호출해야 한다. 내부 구현 이름과
+시그니처는 외부 계약이나 호환 대상이 아니다.
+
 선택을 포함하는 공개 MCP 스키마는 다음과 같다.
 
 ```text

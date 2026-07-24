@@ -40,6 +40,21 @@ def test_choice_tools_expose_only_non_choice_public_parameters():
     assert properties["cleanup_work"] == {"work_id"}
 
 
+def test_choice_workflows_have_no_direct_python_entrypoints():
+    direct_entrypoints = {
+        "init_work",
+        "resume_work",
+        "scan_pdf",
+        "prepare_ocr",
+        "set_chapters",
+        "finalize_study",
+        "cleanup_work",
+    }
+
+    assert direct_entrypoints.isdisjoint(vars(server))
+    assert direct_entrypoints <= set(_mcp_input_properties())
+
+
 def test_global_config_uses_home_dir_not_project_dir(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     home_dir = tmp_path / "home"

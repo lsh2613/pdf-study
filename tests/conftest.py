@@ -47,7 +47,7 @@ def scanned_empty(fixtures_dir) -> Path:
 def scan_with_question_options(work_id: str) -> dict:
     """미정인 문제 유형을 활성화해 렌더 테스트용 스캔을 실행한다."""
     options = server.workspace.load_state(work_id)["question_options"]
-    return server.scan_pdf(
+    return server._scan_pdf_impl(
         work_id,
         enable_short_answer=True if options.get("short_answer") is None else None,
         enable_reflection=True if options.get("reflection") is None else None,
@@ -120,11 +120,11 @@ def build_rendered_study(
     summary_kwargs: dict | None = None,
 ) -> tuple[str, Path, list[dict]]:
     """실제 MCP 저장 흐름을 거쳐 지정한 형식의 렌더 결과를 만든다."""
-    result = server.init_work(str(pdf_path), str(tmp_path / "out"), **(options or {}))
+    result = server._init_work_impl(str(pdf_path), str(tmp_path / "out"), **(options or {}))
     work_id = result["data"]["work_id"]
     scanned = scan_with_question_options(work_id)
     chapter_defs = chapters or scanned["data"]["recommendations"]["suggested_chapters"]
-    configured = server.set_chapters(
+    configured = server._set_chapters_impl(
         work_id,
         chapter_defs,
         execution_mode="sequential",
@@ -149,6 +149,6 @@ def build_rendered_study(
                 ),
             )
             assert extension["ok"], extension
-    finalized = server.finalize_study(work_id, output_format)
+    finalized = server._finalize_study_impl(work_id, output_format)
     assert finalized["ok"], finalized
     return work_id, tmp_path / "out", chapter_defs

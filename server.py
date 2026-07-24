@@ -762,7 +762,7 @@ def _safe(label: str):
 # ---------------------------------------------------------------------------
 
 @_safe("init_work")
-def init_work(
+def _init_work_impl(
     pdf_path: str,
     output_dir: str = "",
     enable_multiple_choice: bool = True,
@@ -880,7 +880,7 @@ def init_work(
     )
 
 
-@mcp.tool(name="init_work", description=init_work.__doc__)
+@mcp.tool(name="init_work", description=_init_work_impl.__doc__)
 @_safe("init_work")
 async def _mcp_init_work_tool(
     pdf_path: str,
@@ -944,7 +944,7 @@ async def _mcp_init_work_tool(
         if action not in allowed_actions:
             raise ValueError("지원하지 않는 기존 작업 처리 방식입니다.")
         if action == "resume":
-            return _without_choice_fallback(resume_work(
+            return _without_choice_fallback(_resume_work_impl(
                 output_dir=resolved_dir,
                 _agent_cwd_path=agent_cwd,
             ))
@@ -967,7 +967,7 @@ async def _mcp_init_work_tool(
     if selected is None:
         return _elicitation_cancelled({"output_dir": resolved_dir})
     user_context = (selected.pop("user_context", None) or "").strip()
-    return _without_choice_fallback(init_work(
+    return _without_choice_fallback(_init_work_impl(
         pdf_path=pdf_path,
         output_dir=resolved_dir,
         enable_multiple_choice=True,
@@ -986,7 +986,7 @@ async def _mcp_init_work_tool(
 # ---------------------------------------------------------------------------
 
 @_safe("resume_work")
-def resume_work(
+def _resume_work_impl(
     output_dir: str = "",
     pdf_path: str = "",
     _agent_cwd_path: Path | None = None,
@@ -1051,7 +1051,7 @@ def resume_work(
     )
 
 
-@mcp.tool(name="resume_work", description=resume_work.__doc__)
+@mcp.tool(name="resume_work", description=_resume_work_impl.__doc__)
 @_safe("resume_work")
 async def _mcp_resume_work_tool(
     pdf_path: str,
@@ -1085,7 +1085,7 @@ async def _mcp_resume_work_tool(
                     "existing_work": existing,
                     "selected_action": None,
                 })
-    return _without_choice_fallback(resume_work(
+    return _without_choice_fallback(_resume_work_impl(
         output_dir=resolved or "",
         pdf_path=pdf_path,
         _agent_cwd_path=agent_cwd,
@@ -1097,7 +1097,7 @@ async def _mcp_resume_work_tool(
 # ---------------------------------------------------------------------------
 
 @_safe("scan_pdf")
-def scan_pdf(
+def _scan_pdf_impl(
     work_id: str,
     scan_size: int = 30,
     force_vision: bool = False,
@@ -1222,7 +1222,7 @@ def scan_pdf(
     return _ok(data, next_action=next_action)
 
 
-@mcp.tool(name="scan_pdf", description=scan_pdf.__doc__)
+@mcp.tool(name="scan_pdf", description=_scan_pdf_impl.__doc__)
 @_safe("scan_pdf")
 async def _mcp_scan_pdf_tool(
     work_id: str,
@@ -1240,7 +1240,7 @@ async def _mcp_scan_pdf_tool(
         selected = await _elicit_question_setup(ctx, setup)
         if selected is None:
             return _elicitation_cancelled({"question_setup": setup})
-    return _without_choice_fallback(scan_pdf(
+    return _without_choice_fallback(_scan_pdf_impl(
         work_id=work_id,
         scan_size=scan_size,
         force_vision=force_vision,
@@ -1256,7 +1256,7 @@ async def _mcp_scan_pdf_tool(
 # ---------------------------------------------------------------------------
 
 @_safe("prepare_ocr")
-def prepare_ocr(work_id: str, ocr_language: str = "") -> dict[str, Any]:
+def _prepare_ocr_impl(work_id: str, ocr_language: str = "") -> dict[str, Any]:
     """PaddleOCR CPU 모델을 준비합니다.
 
     공개 MCP 입력은 work_id뿐이며 서버가 한국어/영어를 form Elicitation으로
@@ -1276,7 +1276,7 @@ def prepare_ocr(work_id: str, ocr_language: str = "") -> dict[str, Any]:
     ))
 
 
-@mcp.tool(name="prepare_ocr", description=prepare_ocr.__doc__)
+@mcp.tool(name="prepare_ocr", description=_prepare_ocr_impl.__doc__)
 @_safe("prepare_ocr")
 async def _mcp_prepare_ocr_tool(
     work_id: str,
@@ -1301,7 +1301,7 @@ async def _mcp_prepare_ocr_tool(
     }:
         raise ValueError("지원하지 않는 OCR 언어입니다.")
     return _without_choice_fallback(
-        prepare_ocr(work_id=work_id, ocr_language=ocr_language),
+        _prepare_ocr_impl(work_id=work_id, ocr_language=ocr_language),
     )
 
 
@@ -1345,7 +1345,7 @@ def scan_toc_with_ocr(work_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @_safe("set_chapters")
-def set_chapters(
+def _set_chapters_impl(
     work_id: str,
     chapters: list[dict[str, Any]],
     execution_mode: str = "",
@@ -1466,7 +1466,7 @@ def set_chapters(
     ))
 
 
-@mcp.tool(name="set_chapters", description=set_chapters.__doc__)
+@mcp.tool(name="set_chapters", description=_set_chapters_impl.__doc__)
 @_safe("set_chapters")
 async def _mcp_set_chapters_tool(
     work_id: str,
@@ -1518,7 +1518,7 @@ async def _mcp_set_chapters_tool(
                 workspace.load_state(work_id).get("text_quality"),
             ),
         })
-    return _without_choice_fallback(set_chapters(
+    return _without_choice_fallback(_set_chapters_impl(
         work_id=work_id,
         chapters=chapters,
         execution_mode=execution_mode,
@@ -1826,7 +1826,7 @@ def list_pending_chapters(work_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @_safe("finalize_study")
-def finalize_study(
+def _finalize_study_impl(
     work_id: str,
     output_format: str = "",
     keep_work_dir: bool = True,
@@ -1964,7 +1964,7 @@ def finalize_study(
     )
 
 
-@mcp.tool(name="finalize_study", description=finalize_study.__doc__)
+@mcp.tool(name="finalize_study", description=_finalize_study_impl.__doc__)
 @_safe("finalize_study")
 async def _mcp_finalize_study_tool(
     work_id: str,
@@ -1986,7 +1986,7 @@ async def _mcp_finalize_study_tool(
         choice["value"] for choice in _OUTPUT_FORMAT_CHOICES
     }:
         raise ValueError("지원하지 않는 출력 형식입니다.")
-    return _without_choice_fallback(finalize_study(
+    return _without_choice_fallback(_finalize_study_impl(
         work_id=work_id,
         output_format=output_format,
         keep_work_dir=True,
@@ -1998,7 +1998,7 @@ async def _mcp_finalize_study_tool(
 # ---------------------------------------------------------------------------
 
 @_safe("cleanup_work")
-def cleanup_work(work_id: str) -> dict[str, Any]:
+def _cleanup_work_impl(work_id: str) -> dict[str, Any]:
     """완료된 학습 결과는 유지하고 해당 작업의 `.work` 중간 데이터만 삭제합니다.
 
     `finalize_study`가 성공해 렌더링이 완료된 작업에만 사용할 수 있습니다. 결과 파일,
@@ -2014,7 +2014,7 @@ def cleanup_work(work_id: str) -> dict[str, Any]:
     )
 
 
-@mcp.tool(name="cleanup_work", description=cleanup_work.__doc__)
+@mcp.tool(name="cleanup_work", description=_cleanup_work_impl.__doc__)
 @_safe("cleanup_work")
 async def _mcp_cleanup_work_tool(
     work_id: str,
@@ -2038,7 +2038,7 @@ async def _mcp_cleanup_work_tool(
             "work_id": work_id,
             "cleanup_confirmed": False,
         })
-    return _without_choice_fallback(cleanup_work(work_id=work_id))
+    return _without_choice_fallback(_cleanup_work_impl(work_id=work_id))
 
 
 # ---------------------------------------------------------------------------

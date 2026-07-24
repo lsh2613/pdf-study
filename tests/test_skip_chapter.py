@@ -17,12 +17,12 @@ from pdf_study import analysis
 
 
 def _setup(tmp_path, pdf):
-    r = server.init_work(str(pdf), str(tmp_path / "out"))
+    r = server._init_work_impl(str(pdf), str(tmp_path / "out"))
     return r["data"]["work_id"], tmp_path / "out"
 
 
 def _scan(wid):
-    return server.scan_pdf(
+    return server._scan_pdf_impl(
         wid,
         enable_short_answer=True,
         enable_reflection=True,
@@ -32,7 +32,7 @@ def _scan(wid):
 
 def _sc(wid, chapters):
     """set_chapters 호출 — 모드는 본문 처리용 기본값으로 고정."""
-    return server.set_chapters(wid, chapters,
+    return server._set_chapters_impl(wid, chapters,
                                execution_mode="sequential", extraction_mode="text")
 
 
@@ -107,7 +107,7 @@ def test_skip_chapter_not_rendered(tmp_path, ko_with_toc):
             "questions": {"multiple_choice": [], "short_answer": [], "reflection": []},
         })
     # extension 미완료 상태여도 완료분만 렌더하고 누락을 응답으로 알린다.
-    fin = server.finalize_study(wid, "html")
+    fin = server._finalize_study_impl(wid, "html")
     assert fin["ok"], fin
 
     # 멀티 챕터로 렌더 (skip 제외 후에도 2개 남음)

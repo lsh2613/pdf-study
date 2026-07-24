@@ -101,7 +101,7 @@ def test_sync_init_work_never_falls_back_to_mcp_server_cwd(
     server_cwd.mkdir()
     monkeypatch.chdir(server_cwd)
 
-    response = server.init_work(str(ko_short), "")
+    response = server._init_work_impl(str(ko_short), "")
 
     assert response["ok"] is False
     assert response["data"]["required_parameters"] == ["output_dir"]
@@ -216,7 +216,7 @@ def test_mcp_init_work_elicits_resume_for_existing_work(
     tmp_path, ko_short,
 ):
     output_dir = tmp_path / "result" / ko_short.stem
-    original = server.init_work(
+    original = server._init_work_impl(
         str(ko_short),
         str(output_dir),
         enable_short_answer=False,
@@ -245,7 +245,7 @@ def test_mcp_init_work_elicits_resume_for_existing_work(
 
 def test_mcp_init_work_elicits_replace_for_existing_work(tmp_path, ko_short):
     output_dir = tmp_path / "result" / ko_short.stem
-    original = server.init_work(
+    original = server._init_work_impl(
         str(ko_short),
         str(output_dir),
         enable_short_answer=False,
@@ -283,16 +283,16 @@ def test_mcp_resume_work_requires_elicited_confirmation(
     tmp_path, ko_short, monkeypatch,
 ):
     output_dir = tmp_path / "result" / ko_short.stem
-    created = server.init_work(str(ko_short), str(output_dir))
+    created = server._init_work_impl(str(ko_short), str(output_dir))
     assert created["ok"] is True
     called = []
-    original_resume = server.resume_work
+    original_resume = server._resume_work_impl
 
     def recording_resume(*args, **kwargs):
         called.append((args, kwargs))
         return original_resume(*args, **kwargs)
 
-    monkeypatch.setattr(server, "resume_work", recording_resume)
+    monkeypatch.setattr(server, "_resume_work_impl", recording_resume)
     ctx = _ElicitationContext(
         cwd=tmp_path,
         responses=[{"resume_confirmed": False}],
@@ -311,7 +311,7 @@ def test_mcp_resume_work_requires_elicited_confirmation(
 def test_mcp_scan_pdf_uses_elicited_question_choices(
     tmp_path, ko_short,
 ):
-    initialized = server.init_work(str(ko_short), str(tmp_path / "out"))
+    initialized = server._init_work_impl(str(ko_short), str(tmp_path / "out"))
     work_id = initialized["data"]["work_id"]
     ctx = _ElicitationContext(
         responses=[{
@@ -344,7 +344,7 @@ def test_mcp_scan_pdf_uses_elicited_question_choices(
 def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
     tmp_path, ko_short,
 ):
-    initialized = server.init_work(
+    initialized = server._init_work_impl(
         str(ko_short),
         str(tmp_path / "out"),
         enable_short_answer=False,
@@ -352,7 +352,7 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
         enable_extension=False,
     )
     work_id = initialized["data"]["work_id"]
-    scanned = server.scan_pdf(work_id)
+    scanned = server._scan_pdf_impl(work_id)
     assert scanned["ok"] is True, scanned
     ctx = _ElicitationContext(
         responses=[
@@ -421,7 +421,7 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
 def test_mcp_set_chapters_cancellation_never_changes_state(
     responses, message_count, tmp_path, ko_short,
 ):
-    initialized = server.init_work(
+    initialized = server._init_work_impl(
         str(ko_short),
         str(tmp_path / "out"),
         enable_short_answer=False,
@@ -429,7 +429,7 @@ def test_mcp_set_chapters_cancellation_never_changes_state(
         enable_extension=False,
     )
     work_id = initialized["data"]["work_id"]
-    scanned = server.scan_pdf(work_id)
+    scanned = server._scan_pdf_impl(work_id)
     ctx = _ElicitationContext(responses=responses)
 
     response = asyncio.run(
@@ -449,7 +449,7 @@ def test_mcp_set_chapters_cancellation_never_changes_state(
 def test_mcp_extraction_elicitation_forces_ocr_for_garbled_text(
     tmp_path, ko_short,
 ):
-    initialized = server.init_work(
+    initialized = server._init_work_impl(
         str(ko_short),
         str(tmp_path / "ocr-only"),
         enable_short_answer=False,
@@ -474,7 +474,7 @@ def test_mcp_extraction_elicitation_forces_ocr_for_garbled_text(
 def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
     tmp_path, ko_with_toc,
 ):
-    initialized = server.init_work(
+    initialized = server._init_work_impl(
         str(ko_with_toc),
         str(tmp_path / "out-reanalyze"),
         enable_short_answer=False,
@@ -482,7 +482,7 @@ def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
         enable_extension=False,
     )
     work_id = initialized["data"]["work_id"]
-    scanned = server.scan_pdf(work_id)
+    scanned = server._scan_pdf_impl(work_id)
     assert scanned["ok"] is True, scanned
     assert scanned["data"]["recommendations"]["primary_mode"] == "from_outline"
     ctx = _ElicitationContext(
@@ -522,7 +522,7 @@ def test_mcp_finalize_uses_elicited_format(monkeypatch):
         )
         return server._ok({"format": output_format})
 
-    monkeypatch.setattr(server, "finalize_study", fake_finalize)
+    monkeypatch.setattr(server, "_finalize_study_impl", fake_finalize)
     ctx = _ElicitationContext(responses=[{"output_format": "md_tui"}])
 
     response = asyncio.run(
@@ -549,7 +549,7 @@ def test_mcp_cleanup_requires_elicited_confirmation(monkeypatch):
         called.append(work_id)
         return server._ok({"work_id": work_id})
 
-    monkeypatch.setattr(server, "cleanup_work", fake_cleanup)
+    monkeypatch.setattr(server, "_cleanup_work_impl", fake_cleanup)
     ctx = _ElicitationContext(responses=[{"cleanup_confirmed": False}])
 
     response = asyncio.run(
@@ -641,7 +641,7 @@ def test_fastmcp_set_chapters_uses_three_ordered_elicitations(
             raise AssertionError(params.message)
         return types.ElicitResult(action="accept", content=content)
 
-    initialized = server.init_work(
+    initialized = server._init_work_impl(
         str(ko_short),
         str(tmp_path / "round-trip"),
         enable_short_answer=False,
@@ -649,7 +649,7 @@ def test_fastmcp_set_chapters_uses_three_ordered_elicitations(
         enable_extension=False,
     )
     work_id = initialized["data"]["work_id"]
-    scanned = server.scan_pdf(work_id)
+    scanned = server._scan_pdf_impl(work_id)
 
     async def scenario():
         async with create_connected_server_and_client_session(
@@ -691,8 +691,8 @@ def test_fastmcp_static_choice_elicitations_use_supported_schemas(monkeypatch):
         captured["finalize"] = (work_id, output_format, keep_work_dir)
         return server._ok({"format": output_format})
 
-    monkeypatch.setattr(server, "prepare_ocr", fake_prepare_ocr)
-    monkeypatch.setattr(server, "finalize_study", fake_finalize_study)
+    monkeypatch.setattr(server, "_prepare_ocr_impl", fake_prepare_ocr)
+    monkeypatch.setattr(server, "_finalize_study_impl", fake_finalize_study)
 
     async def on_elicit(context, params):
         if "OCR로 읽을 PDF의 언어" in params.message:

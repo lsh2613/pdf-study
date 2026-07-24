@@ -119,7 +119,7 @@ def test_progress_fingerprint_preserves_same_md_tui_generation(ko_with_toc, tmp_
     progress = out / "ch1" / "progress.json"
     progress.write_text('{"completed":true}', encoding="utf-8")
 
-    rerendered = server.finalize_study(wid, "md_tui")
+    rerendered = server._finalize_study_impl(wid, "md_tui")
 
     assert rerendered["ok"], rerendered
     assert progress.read_text(encoding="utf-8") == '{"completed":true}'
