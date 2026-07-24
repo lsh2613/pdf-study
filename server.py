@@ -609,15 +609,15 @@ async def _elicit_question_setup(
     *,
     output_dir: str | None = None,
 ) -> dict[str, Any] | None:
-    fields: dict[str, tuple[Any, Any]] = {
-        "user_context": (
+    fields: dict[str, tuple[Any, Any]] = {}
+    if setup["user_context_request"]:
+        fields["user_context"] = (
             str | None,
             Field(
                 default=None,
                 description="선택 사항: 학습 목적, 배경지식, 관심 분야, 현재 수준",
             ),
-        ),
-    }
+        )
     for question in setup["questions"]:
         choice_desc = " / ".join(
             f"{choice['label']}: {choice['desc']}" for choice in question["choices"]
@@ -800,6 +800,7 @@ def init_work(
     user_context: str = "",
     replace_existing: bool = False,
     _agent_cwd_path: Path | None = None,
+    _user_context_confirmed: bool = False,
 ) -> dict[str, Any]:
     """워크스페이스를 생성하고 work_id를 발급합니다.
 
@@ -929,6 +930,7 @@ def init_work(
         output_dir=resolved_dir,
         options=options,
         user_context=user_context,
+        user_context_confirmed=_user_context_confirmed,
         work_id=work_id,
     )
     state = workspace.load_state(work_id)
@@ -1049,6 +1051,7 @@ async def _mcp_init_work_tool(
         user_context=user_context,
         replace_existing=replace_existing,
         _agent_cwd_path=agent_cwd,
+        _user_context_confirmed=True,
     )
 
 
@@ -1304,37 +1307,25 @@ async def _mcp_scan_pdf_tool(
     ctx: Context,
     scan_size: int = 30,
     force_vision: bool = False,
-    enable_short_answer: bool | None = None,
-    enable_reflection: bool | None = None,
-    enable_extension: bool | None = None,
-    user_context: str | None = None,
 ) -> dict[str, Any]:
     """미정 문제 유형을 MCP elicitation으로 직접 확인한 뒤 스캔한다."""
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
     setup = _question_setup_payload(workspace.load_state(work_id))
-    if setup["pending_fields"] and _client_supports_elicitation(ctx):
+    selected: dict[str, Any] = {}
+    if setup["pending_fields"] or setup["user_context_request"]:
         selected = await _elicit_question_setup(ctx, setup)
         if selected is None:
             return _elicitation_cancelled({"question_setup": setup})
-        enable_short_answer = selected.get(
-            "enable_short_answer", enable_short_answer,
-        )
-        enable_reflection = selected.get(
-            "enable_reflection", enable_reflection,
-        )
-        enable_extension = selected.get(
-            "enable_extension", enable_extension,
-        )
     return scan_pdf(
         work_id=work_id,
         scan_size=scan_size,
         force_vision=force_vision,
-        enable_short_answer=enable_short_answer,
-        enable_reflection=enable_reflection,
-        enable_extension=enable_extension,
-        user_context=user_context,
+        enable_short_answer=selected.get("enable_short_answer"),
+        enable_reflection=selected.get("enable_reflection"),
+        enable_extension=selected.get("enable_extension"),
+        user_context=selected.get("user_context"),
     )
 
 
@@ -1369,27 +1360,25 @@ def prepare_ocr(work_id: str, ocr_language: str = "") -> dict[str, Any]:
 async def _mcp_prepare_ocr_tool(
     work_id: str,
     ctx: Context,
-    ocr_language: str = "",
 ) -> dict[str, Any]:
     """OCR 언어를 MCP elicitation으로 직접 확인한 뒤 모델을 준비한다."""
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
-    if _client_supports_elicitation(ctx):
-        message = (
-            f"{_ocr_language_setup()['question']}\n"
-            f"{_choice_lines([dict(choice) for choice in _OCR_LANGUAGE_CHOICES])}"
+    message = (
+        f"{_ocr_language_setup()['question']}\n"
+        f"{_choice_lines([dict(choice) for choice in _OCR_LANGUAGE_CHOICES])}"
+    )
+    result = await ctx.elicit(message=message, schema=_OcrLanguageSelection)
+    if result.action != "accept" or result.data is None:
+        return _elicitation_cancelled(
+            {"ocr_language_setup": _ocr_language_setup()},
         )
-        result = await ctx.elicit(message=message, schema=_OcrLanguageSelection)
-        if result.action != "accept" or result.data is None:
-            return _elicitation_cancelled(
-                {"ocr_language_setup": _ocr_language_setup()},
-            )
-        ocr_language = result.data.ocr_language
-        if ocr_language not in {
-            choice["value"] for choice in _OCR_LANGUAGE_CHOICES
-        }:
-            raise ValueError("지원하지 않는 OCR 언어입니다.")
+    ocr_language = result.data.ocr_language
+    if ocr_language not in {
+        choice["value"] for choice in _OCR_LANGUAGE_CHOICES
+    }:
+        raise ValueError("지원하지 않는 OCR 언어입니다.")
     return prepare_ocr(work_id=work_id, ocr_language=ocr_language)
 
 
@@ -1582,64 +1571,57 @@ async def _mcp_set_chapters_tool(
     work_id: str,
     chapters: list[dict[str, Any]],
     ctx: Context,
-    execution_mode: str = "",
-    extraction_mode: str = "",
-    ocr_language: str = "",
     book_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """챕터, 추출 방식, 실행 방식을 각각 elicitation으로 확인한 뒤 확정한다."""
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
-    if _client_supports_elicitation(ctx):
-        chapter_selection = await _elicit_chapter_setup(ctx, work_id, chapters)
-        if chapter_selection is None:
-            return _elicitation_cancelled({
-                "chapters": chapters,
-                "next_step": _set_chapters_next_step(
-                    workspace.load_state(work_id).get("text_quality"),
-                ),
-            })
-        if chapter_selection.get("chapter_strategy") == "reanalyze_with_vision":
-            return _err(
-                "사용자가 목차 이미지 재분석을 선택해 챕터를 확정하지 않았습니다.",
-                data={"selected_chapter_strategy": "reanalyze_with_vision"},
-                next_action=(
-                    f'scan_pdf(work_id="{work_id}", force_vision=True)를 호출한 뒤 '
-                    "prepare_ocr → scan_toc_with_ocr 순서로 다시 구성하세요."
-                ),
-            )
-        if not chapter_selection["chapters_confirmed"]:
-            return _elicitation_cancelled({
-                "chapters": chapters,
-                "next_step": _set_chapters_next_step(
-                    workspace.load_state(work_id).get("text_quality"),
-                ),
-            })
-        selected_extraction_mode = await _elicit_extraction_mode(ctx, work_id)
-        if selected_extraction_mode is None:
-            return _elicitation_cancelled({
-                "chapters": chapters,
-                "next_step": _set_chapters_next_step(
-                    workspace.load_state(work_id).get("text_quality"),
-                ),
-            })
-        selected_execution_mode = await _elicit_execution_mode(ctx)
-        if selected_execution_mode is None:
-            return _elicitation_cancelled({
-                "chapters": chapters,
-                "next_step": _set_chapters_next_step(
-                    workspace.load_state(work_id).get("text_quality"),
-                ),
-            })
-        extraction_mode = selected_extraction_mode
-        execution_mode = selected_execution_mode
+    chapter_selection = await _elicit_chapter_setup(ctx, work_id, chapters)
+    if chapter_selection is None:
+        return _elicitation_cancelled({
+            "chapters": chapters,
+            "next_step": _set_chapters_next_step(
+                workspace.load_state(work_id).get("text_quality"),
+            ),
+        })
+    if chapter_selection.get("chapter_strategy") == "reanalyze_with_vision":
+        return _err(
+            "사용자가 목차 이미지 재분석을 선택해 챕터를 확정하지 않았습니다.",
+            data={"selected_chapter_strategy": "reanalyze_with_vision"},
+            next_action=(
+                f'scan_pdf(work_id="{work_id}", force_vision=True)를 호출한 뒤 '
+                "prepare_ocr → scan_toc_with_ocr 순서로 다시 구성하세요."
+            ),
+        )
+    if not chapter_selection["chapters_confirmed"]:
+        return _elicitation_cancelled({
+            "chapters": chapters,
+            "next_step": _set_chapters_next_step(
+                workspace.load_state(work_id).get("text_quality"),
+            ),
+        })
+    extraction_mode = await _elicit_extraction_mode(ctx, work_id)
+    if extraction_mode is None:
+        return _elicitation_cancelled({
+            "chapters": chapters,
+            "next_step": _set_chapters_next_step(
+                workspace.load_state(work_id).get("text_quality"),
+            ),
+        })
+    execution_mode = await _elicit_execution_mode(ctx)
+    if execution_mode is None:
+        return _elicitation_cancelled({
+            "chapters": chapters,
+            "next_step": _set_chapters_next_step(
+                workspace.load_state(work_id).get("text_quality"),
+            ),
+        })
     return set_chapters(
         work_id=work_id,
         chapters=chapters,
         execution_mode=execution_mode,
         extraction_mode=extraction_mode,
-        ocr_language=ocr_language,
         book_info=book_info,
     )
 
@@ -2098,30 +2080,27 @@ def finalize_study(
 async def _mcp_finalize_study_tool(
     work_id: str,
     ctx: Context,
-    output_format: str = "",
-    keep_work_dir: bool = True,
 ) -> dict[str, Any]:
     """최종 형식을 MCP elicitation으로 확인한 뒤 렌더링한다."""
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
-    if _client_supports_elicitation(ctx):
-        message = (
-            "최종 학습 자료 형식을 선택하세요.\n"
-            f"{_choice_lines([dict(choice) for choice in _OUTPUT_FORMAT_CHOICES])}"
-        )
-        result = await ctx.elicit(message=message, schema=_OutputFormatSelection)
-        if result.action != "accept" or result.data is None:
-            return _elicitation_cancelled(_output_format_choice_data())
-        output_format = result.data.output_format
-        if output_format not in {
-            choice["value"] for choice in _OUTPUT_FORMAT_CHOICES
-        }:
-            raise ValueError("지원하지 않는 출력 형식입니다.")
+    message = (
+        "최종 학습 자료 형식을 선택하세요.\n"
+        f"{_choice_lines([dict(choice) for choice in _OUTPUT_FORMAT_CHOICES])}"
+    )
+    result = await ctx.elicit(message=message, schema=_OutputFormatSelection)
+    if result.action != "accept" or result.data is None:
+        return _elicitation_cancelled(_output_format_choice_data())
+    output_format = result.data.output_format
+    if output_format not in {
+        choice["value"] for choice in _OUTPUT_FORMAT_CHOICES
+    }:
+        raise ValueError("지원하지 않는 출력 형식입니다.")
     return finalize_study(
         work_id=work_id,
         output_format=output_format,
-        keep_work_dir=keep_work_dir,
+        keep_work_dir=True,
     )
 
 
@@ -2156,21 +2135,20 @@ async def _mcp_cleanup_work_tool(
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
-    if _client_supports_elicitation(ctx):
-        message = (
-            "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다. "
-            "삭제 후에는 이 중간 상태로 작업을 재개할 수 없습니다."
-        )
-        result = await ctx.elicit(message=message, schema=_CleanupSelection)
-        if (
-            result.action != "accept"
-            or result.data is None
-            or not result.data.cleanup_confirmed
-        ):
-            return _elicitation_cancelled({
-                "work_id": work_id,
-                "cleanup_confirmed": False,
-            })
+    message = (
+        "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다. "
+        "삭제 후에는 이 중간 상태로 작업을 재개할 수 없습니다."
+    )
+    result = await ctx.elicit(message=message, schema=_CleanupSelection)
+    if (
+        result.action != "accept"
+        or result.data is None
+        or not result.data.cleanup_confirmed
+    ):
+        return _elicitation_cancelled({
+            "work_id": work_id,
+            "cleanup_confirmed": False,
+        })
     return cleanup_work(work_id=work_id)
 
 

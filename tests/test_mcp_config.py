@@ -30,6 +30,16 @@ def test_init_and_resume_public_schemas_exclude_choice_and_path_parameters():
     assert properties["resume_work"] == {"pdf_path"}
 
 
+def test_choice_tools_expose_only_non_choice_public_parameters():
+    properties = _mcp_input_properties()
+
+    assert properties["scan_pdf"] == {"work_id", "scan_size", "force_vision"}
+    assert properties["prepare_ocr"] == {"work_id"}
+    assert properties["set_chapters"] == {"work_id", "chapters", "book_info"}
+    assert properties["finalize_study"] == {"work_id"}
+    assert properties["cleanup_work"] == {"work_id"}
+
+
 def test_global_config_uses_home_dir_not_project_dir(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     home_dir = tmp_path / "home"

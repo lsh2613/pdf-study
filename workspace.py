@@ -412,6 +412,7 @@ def create_workspace(
     output_dir: str | os.PathLike,
     options: dict[str, bool | None],
     user_context: str = "",
+    user_context_confirmed: bool = False,
     execution_mode: str | None = None,
     extraction_mode: str | None = None,
     work_id: str | None = None,
@@ -461,7 +462,9 @@ def create_workspace(
         "extraction_mode": extraction_mode,
         "question_options": question_options,
         "user_context": user_context.strip(),
-        "user_context_confirmed": bool(user_context.strip()),
+        "user_context_confirmed": (
+            user_context_confirmed or bool(user_context.strip())
+        ),
         "page_count": None,
         "text_quality": None,
         "ocr_language": None,

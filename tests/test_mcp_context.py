@@ -288,7 +288,7 @@ def test_mcp_resume_work_requires_elicited_confirmation(
     assert "기존 .work/state.json을 등록해 남은 챕터부터 계속합니다." in ctx.messages[0]
 
 
-def test_mcp_scan_pdf_uses_elicited_question_choices_not_agent_arguments(
+def test_mcp_scan_pdf_uses_elicited_question_choices(
     tmp_path, ko_short,
 ):
     initialized = server.init_work(str(ko_short), str(tmp_path / "out"))
@@ -304,9 +304,6 @@ def test_mcp_scan_pdf_uses_elicited_question_choices_not_agent_arguments(
     response = asyncio.run(
         server._mcp_scan_pdf_tool(
             work_id=work_id,
-            enable_short_answer=True,
-            enable_reflection=False,
-            enable_extension=True,
             ctx=ctx,
         )
     )
@@ -357,8 +354,6 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
                     "pdf_pages": [1, 12],
                 },
             ],
-            execution_mode="sequential",
-            extraction_mode="ocr",
             ctx=ctx,
         )
     )
@@ -420,8 +415,6 @@ def test_mcp_set_chapters_cancellation_never_changes_state(
         server._mcp_set_chapters_tool(
             work_id=work_id,
             chapters=scanned["data"]["recommendations"]["suggested_chapters"],
-            execution_mode="parallel",
-            extraction_mode="text",
             ctx=ctx,
         )
     )
@@ -481,8 +474,6 @@ def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
         server._mcp_set_chapters_tool(
             work_id=work_id,
             chapters=scanned["data"]["recommendations"]["suggested_chapters"],
-            execution_mode="parallel",
-            extraction_mode="ocr",
             ctx=ctx,
         )
     )
@@ -498,7 +489,7 @@ def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
     assert len(ctx.messages) == 1
 
 
-def test_mcp_finalize_uses_elicited_format_not_agent_argument(monkeypatch):
+def test_mcp_finalize_uses_elicited_format(monkeypatch):
     captured = {}
 
     def fake_finalize(work_id, output_format="", keep_work_dir=True):
@@ -515,8 +506,6 @@ def test_mcp_finalize_uses_elicited_format_not_agent_argument(monkeypatch):
     response = asyncio.run(
         server._mcp_finalize_study_tool(
             work_id="work-1",
-            output_format="html",
-            keep_work_dir=False,
             ctx=ctx,
         )
     )
@@ -525,7 +514,7 @@ def test_mcp_finalize_uses_elicited_format_not_agent_argument(monkeypatch):
     assert captured == {
         "work_id": "work-1",
         "output_format": "md_tui",
-        "keep_work_dir": False,
+        "keep_work_dir": True,
     }
     assert "정적 웹사이트 — 브라우저로 열람 + 진도 저장 서버" in ctx.messages[0]
     assert "챕터별 Markdown + 터미널 학습 TUI" in ctx.messages[0]
@@ -560,7 +549,6 @@ def test_fastmcp_round_trip_uses_request_workspace_and_elicitation(
         return types.ElicitResult(
             action="accept",
             content={
-                "output_dir_confirmed": True,
                 "enable_short_answer": False,
                 "enable_reflection": True,
                 "enable_extension": False,
@@ -576,9 +564,6 @@ def test_fastmcp_round_trip_uses_request_workspace_and_elicitation(
                 "init_work",
                 {
                     "pdf_path": str(ko_short),
-                    "enable_short_answer": True,
-                    "enable_reflection": False,
-                    "enable_extension": True,
                 },
                 meta={
                     "x-codex-turn-metadata": {
@@ -660,8 +645,6 @@ def test_fastmcp_set_chapters_uses_three_ordered_elicitations(
                             "pdf_pages": [1, 12],
                         },
                     ],
-                    "execution_mode": "sequential",
-                    "extraction_mode": "ocr",
                 },
             )
 
@@ -705,15 +688,11 @@ def test_fastmcp_static_choice_elicitations_use_supported_schemas(monkeypatch):
         ) as client:
             prepared = await client.call_tool(
                 "prepare_ocr",
-                {"work_id": "work-ocr", "ocr_language": "korean"},
+                {"work_id": "work-ocr"},
             )
             finalized = await client.call_tool(
                 "finalize_study",
-                {
-                    "work_id": "work-finalize",
-                    "output_format": "html",
-                    "keep_work_dir": False,
-                },
+                {"work_id": "work-finalize"},
             )
             return prepared, finalized
 
@@ -725,5 +704,5 @@ def test_fastmcp_static_choice_elicitations_use_supported_schemas(monkeypatch):
     assert finalized.structuredContent["ok"] is True
     assert captured == {
         "ocr": ("work-ocr", "english"),
-        "finalize": ("work-finalize", "md_tui", False),
+        "finalize": ("work-finalize", "md_tui", True),
     }
