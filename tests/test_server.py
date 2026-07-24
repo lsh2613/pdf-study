@@ -359,10 +359,11 @@ def test_init_work_rejects_missing_pdf(tmp_path):
     assert r["ok"] is False
 
 
-def test_init_work_default_output_dir_uses_cwd_result_pdf_basename(tmp_path, ko_short, monkeypatch):
-    """output_dir 미지정 시 <cwd>/result/<pdf_basename>/ 로 자동 생성."""
-    monkeypatch.chdir(tmp_path)
-    r = server.init_work(str(ko_short))  # output_dir 생략
+def test_init_work_default_output_dir_uses_agent_cwd_result_pdf_basename(
+    tmp_path, ko_short,
+):
+    """output_dir 미지정 시 명시된 agent cwd 아래 기본 폴더를 만든다."""
+    r = server.init_work(str(ko_short), _agent_cwd_path=tmp_path)
     _check_envelope(r)
     assert r["ok"], r
     out = r["data"]["output_dir"]
@@ -382,33 +383,35 @@ def test_init_work_docstring_tells_agents_when_to_use_mcp():
     assert "scan_pdf는 OCR 모델 다운로드/로드/실행을 하지 않고" in doc
 
 
-def test_init_work_docstring_clarifies_default_output_uses_server_startup_directory():
+def test_init_work_docstring_rejects_server_startup_directory_fallback():
     doc = server.init_work.__doc__ or ""
 
-    assert "MCP 서버를 시작한 디렉터리" in doc
-    assert "자동으로 덮어쓰지 않습니다" in doc
+    assert "현재 agent workspace" in doc
+    assert "서버 실행 cwd로 폴백하지 않고" in doc
 
 
-def test_init_work_docstring_instructs_agents_to_pass_caller_cwd_as_output_dir():
+def test_init_work_docstring_resolves_relative_paths_from_agent_workspace():
     doc = server.init_work.__doc__ or ""
 
-    assert "호출 측 cwd" in doc
-    assert "output_dir에 명시" in doc
+    assert "상대 경로" in doc
+    assert "현재 agent workspace를 기준으로만 해석" in doc
 
 
-def test_init_work_blank_output_dir_falls_back_to_default(tmp_path, ko_short, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    r = server.init_work(str(ko_short), output_dir="   ")  # 공백만
+def test_init_work_blank_output_dir_uses_agent_cwd_default(tmp_path, ko_short):
+    r = server.init_work(
+        str(ko_short),
+        output_dir="   ",
+        _agent_cwd_path=tmp_path,
+    )
     assert r["ok"], r
     assert r["data"]["output_dir"] == str(tmp_path / "result" / "ko_short")
 
 
-def test_init_work_default_dir_sanitizes_pdf_name(tmp_path, monkeypatch):
+def test_init_work_default_dir_sanitizes_pdf_name(tmp_path):
     """공백/특수문자가 있는 PDF 파일명은 _ 로 치환."""
     weird = tmp_path / "리팩터링 2판-페이지 1.pdf"
     weird.write_bytes(b"%PDF-1.4")  # 진짜 PDF는 아니지만 init_work는 존재만 확인
-    monkeypatch.chdir(tmp_path)
-    r = server.init_work(str(weird))
+    r = server.init_work(str(weird), _agent_cwd_path=tmp_path)
     assert r["ok"], r
     out = r["data"]["output_dir"]
     assert out == str(tmp_path / "result" / "리팩터링_2판-페이지_1")

@@ -29,9 +29,19 @@
 `user_choice_required`와 `user_choice_instruction`을 담는다. 클라이언트는 같은 규칙으로
 사용자에게 선택지를 제시하고, 명시적으로 받은 값 또는 요청에만 따라야 한다.
 
+클라이언트가 MCP form elicitation을 지원하면 서버는 문제 유형, OCR 언어, 챕터 구성과
+처리 모드, 최종 출력 형식, 기존 작업 재개·교체, 중간 작업 정리를 실제 실행 직전에 다시
+요청한다. 이 경우 도구 호출 인자로 먼저 들어온 선택값보다 elicitation 응답이
+canonical이며, 사용자가 거절하거나 취소하면 상태를 바꾸지 않는다. 챕터 구성
+elicitation은 `recommendations.user_choice_options`와 처리 모드 선택지의 기존
+label·설명을 그대로 보여주고, 제출된 챕터 제목과 PDF 범위도 함께 확인한다.
+새 작업을 만드는 `init_work` elicitation은 해석된 절대 `output_dir`도 함께 보여주고
+확인받는다.
+elicitation을 지원하지 않는 클라이언트는 기존 구조화 선택 계약을 따른다.
+
 ## 도구 흐름
 
-`init_work(pdf_path, output_dir, enable_multiple_choice, enable_short_answer, enable_reflection, enable_extension, user_context, replace_existing)`는 작업 폴더를 만든다. 객관식은 기존 호환을 위해 기본 활성이다. 단답형·주관식·확장형은 기본값이 없으며, 사용자가 이미 명시하지 않은 값은 `null`로 저장한다. 입력 PDF가 없거나 모든 문제 유형을 명시적으로 끄면 실패한다. 성공 응답은 `work_id`, `.work` 경로, 실제 출력 경로, 현재 `question_options`, `question_setup`을 담는다. `output_dir`이 비어 있으면 MCP 서버를 시작한 디렉터리 아래 `result/<pdf_basename>`을 쓴다. 호출 측 cwd 아래에 만들려면 클라이언트는 `<호출 측 cwd>/result/<pdf_basename>`을 `output_dir`로 명시해야 한다.
+`init_work(pdf_path, output_dir, enable_multiple_choice, enable_short_answer, enable_reflection, enable_extension, user_context, replace_existing)`는 작업 폴더를 만든다. 객관식은 기존 호환을 위해 기본 활성이다. 단답형·주관식·확장형은 기본값이 없으며, 사용자가 이미 명시하지 않은 값은 `null`로 저장한다. 입력 PDF가 없거나 모든 문제 유형을 명시적으로 끄면 실패한다. 성공 응답은 `work_id`, `.work` 경로, 실제 출력 경로, 현재 `question_options`, `question_setup`을 담는다. `output_dir`이 비어 있으면 MCP 요청 메타의 단일 Codex workspace 또는 MCP root를 현재 agent cwd로 보고 그 아래 `result/<pdf_basename>`을 쓴다. 상대 `output_dir`도 이 cwd를 기준으로 해석한다. 현재 agent cwd를 하나로 식별할 수 없으면 `ok=false`, `data.required_parameters=["output_dir"]`로 절대 경로를 요구하며 MCP 서버 프로세스 cwd로 폴백하지 않는다. `resume_work`의 pdf_path 기반 경로 추론도 같은 규칙을 쓴다.
 
 같은 `output_dir`에 기존 pdf-study 작업이 있으면 `init_work`는 상태나 파일을 바꾸지 않고 `ok=false`와 `data.existing_work`, `data.choices`를 반환한다. 재개 가능한 `.work/state.json`이 있으면 선택지는 다음 세 항목이다. 항목과 설명은 클라이언트가 바꾸거나 합치거나 추천을 붙이지 않고 그대로 보여줘야 한다.
 

@@ -119,3 +119,4 @@ def test_global_codex_registration_uses_cli_and_verifies_result(
         ],
         ["codex", "mcp", "get", "pdf-study"],
     ]
+

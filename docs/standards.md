@@ -13,6 +13,15 @@
 응답을 읽어야만 선택지를 얻는 흐름을 새로 만들면 안 된다. 실패 응답의 `data.choices`는
 누락·오류 호출을 위한 fallback으로만 사용한다.
 
+MCP form elicitation 지원 클라이언트에서는 선택을 소비하는 도구가 실행 직전에
+사용자 입력을 직접 받아야 한다. 호출 인자에 먼저 들어온 값을 사용자 선택으로
+간주하면 안 되며, 거절·취소 시 상태를 바꾸지 않아야 한다. 미지원 클라이언트의
+구조화 선택 fallback은 유지한다.
+
+빈 또는 상대 `output_dir`을 `Path.cwd()`로 해석하면 안 된다. 단일 요청 workspace나
+MCP root가 있을 때만 이를 기준으로 경로를 계산하고, 없거나 모호하면 절대 경로를
+요구해야 한다.
+
 `get_subagent_prompts`는 요약과 확장 결과의 실제 pending 챕터 목록을 분리해 반환해야 한다. `completed`·`skipped`는 done, `pending`·`failed`·`in_progress`는 pending으로 판정하고, 확장 문제가 비활성이면 `extension_pending_chapter_ids`는 항상 빈 목록이어야 한다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합만 담고, raw 검증과 workflow·`next_action`은 완료 챕터를 제외한 이 처리 대상과 실제 pending 결과 유형에만 적용해야 한다.
 
 ## 상태 저장

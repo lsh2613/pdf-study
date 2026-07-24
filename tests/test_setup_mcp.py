@@ -68,3 +68,9 @@ def test_pyproject_has_one_dev_dependency_definition_without_unused_plugin():
     ]
     assert "dependency-groups" not in project
     assert "pytest-mock" not in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+
+def test_runtime_requires_mcp_version_with_fastmcp_elicitation():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert "mcp>=1.28.0" in project["project"]["dependencies"]

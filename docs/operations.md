@@ -95,6 +95,16 @@ fixture 생성기·입력 폰트·PDF 파일 해시가 현재 manifest와 다르
 
 ## 결과물 실행
 
+`output_dir`을 비우면 MCP 요청에서 단일 agent workspace를 확인할 수 있는
+클라이언트는 그 아래 `result/<pdf-name>`을 사용한다. 상대 경로도 같은 workspace
+기준이다. workspace가 없거나 여러 개라 모호하면 서버는 MCP 프로세스 cwd를 쓰지
+않고 절대 `output_dir`을 요구한다.
+
+MCP form elicitation을 지원하는 클라이언트에서는 필수 선택을 사용하는 도구가 실행
+직전에 선택 UI를 다시 연다. 이 응답이 에이전트가 도구 인자에 먼저 넣은 값보다
+우선하며, 거절하거나 취소하면 상태를 바꾸지 않는다. 미지원 클라이언트는 응답의
+구조화된 선택지를 그대로 사용자에게 보여준 뒤 기존 방식으로 전달한다.
+
 같은 출력 폴더에 기존 작업이나 완료 결과가 있으면 `init_work`는 자동 덮어쓰지 않는다. 응답의 `resume`, `replace`, `new_output_dir` 선택지를 그대로 보여주고 사용자의 답에 따라 `resume_work`, `init_work(..., replace_existing=true)`, 또는 다른 `output_dir`의 `init_work`를 호출한다. `replace`는 기존 `.work`를 새 작업으로 바꾸지만, 이전 렌더 결과는 새 렌더가 성공할 때까지 유지한다.
 
 HTML 결과물은 결과 폴더에서 macOS/Linux의 `start_study.sh` 또는 Windows의

@@ -9,9 +9,12 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import unquote, urlparse
 
-from mcp.server.fastmcp import FastMCP
+from mcp import types
+from mcp.server.fastmcp import Context, FastMCP
+from pydantic import BaseModel, Field, create_model
 
 from . import analysis, processing_mode_contract, prompts, question_contract, workspace
 from .renderer import RENDERERS
@@ -19,7 +22,16 @@ from .renderer.output_manager import install_rendered_output
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("pdf-study-builder")
+MCP_INSTRUCTIONS = """
+pdf-study의 응답에서 user_choice_required=true인 선택지는 사람의 결정이 필요하다.
+서버가 MCP elicitation을 시작하면 반드시 사용자에게 그대로 표시하고, 에이전트가
+대신 선택하거나 기존 인자로 자동 응답하지 않는다. elicitation을 지원하지 않는
+클라이언트는 choices의 label과 desc를 그대로 보여준 뒤 답을 받을 때까지 다음 도구를
+호출하지 않는다. 빈 output_dir은 MCP 서버 프로세스 cwd가 아니라 현재 호출자의
+workspace를 기준으로 해석한다.
+""".strip()
+
+mcp = FastMCP("pdf-study-builder", instructions=MCP_INSTRUCTIONS)
 
 
 _OUTPUT_FORMAT_CHOICES = (
@@ -47,6 +59,36 @@ _OCR_LANGUAGE_CHOICES = (
         "desc": "영어 PDF를 영어 OCR 모델로 읽습니다.",
     },
 )
+
+
+class _OutputFormatSelection(BaseModel):
+    output_format: Literal["html", "md_tui"] = Field(
+        description="사용자가 선택한 최종 학습 자료 형식",
+    )
+
+
+class _OcrLanguageSelection(BaseModel):
+    ocr_language: Literal["korean", "english"] = Field(
+        description="사용자가 선택한 PDF OCR 언어",
+    )
+
+
+class _ReplaceExistingSelection(BaseModel):
+    replace_existing: bool = Field(
+        description="기존 pdf-study 작업을 같은 출력 폴더에서 교체할지 여부",
+    )
+
+
+class _ResumeSelection(BaseModel):
+    resume_confirmed: bool = Field(
+        description="기존 pdf-study 작업을 이어서 진행할지 여부",
+    )
+
+
+class _CleanupSelection(BaseModel):
+    cleanup_confirmed: bool = Field(
+        description="최종 결과는 유지하고 .work 중간 데이터만 삭제할지 여부",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +462,243 @@ def _pdf_name_slug(pdf_path: str) -> str:
     return safe or "study"
 
 
+def _context_meta(ctx: Context) -> dict[str, Any]:
+    """MCP 요청의 확장 메타를 일반 dict로 정규화한다."""
+    meta = getattr(getattr(ctx, "request_context", None), "meta", None)
+    if meta is None:
+        return {}
+    if isinstance(meta, dict):
+        return meta
+    if hasattr(meta, "model_dump"):
+        dumped = meta.model_dump(by_alias=True)
+        return dumped if isinstance(dumped, dict) else {}
+    return {}
+
+
+def _valid_workspace_paths(values: Any) -> list[Path]:
+    if not isinstance(values, dict):
+        return []
+    paths: list[Path] = []
+    for raw_path in values:
+        if not isinstance(raw_path, str):
+            continue
+        candidate = Path(raw_path).expanduser()
+        if candidate.is_absolute() and candidate.is_dir():
+            paths.append(candidate.resolve())
+    return list(dict.fromkeys(paths))
+
+
+def _codex_workspace_paths(ctx: Context) -> list[Path]:
+    turn_meta = _context_meta(ctx).get("x-codex-turn-metadata")
+    if not isinstance(turn_meta, dict):
+        return []
+    return _valid_workspace_paths(turn_meta.get("workspaces"))
+
+
+def _client_supports(ctx: Context, capability: types.ClientCapabilities) -> bool:
+    checker = getattr(getattr(ctx, "session", None), "check_client_capability", None)
+    if not callable(checker):
+        return False
+    try:
+        return bool(checker(capability))
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
+def _client_supports_elicitation(ctx: Context) -> bool:
+    return _client_supports(
+        ctx,
+        types.ClientCapabilities(elicitation=types.ElicitationCapability()),
+    )
+
+
+async def _agent_cwd(ctx: Context) -> Path | None:
+    """현재 호출자의 단일 workspace를 찾는다. 서버 프로세스 cwd는 쓰지 않는다."""
+    codex_paths = _codex_workspace_paths(ctx)
+    if len(codex_paths) == 1:
+        return codex_paths[0]
+    if len(codex_paths) > 1:
+        return None
+
+    if not _client_supports(
+        ctx,
+        types.ClientCapabilities(roots=types.RootsCapability()),
+    ):
+        return None
+    try:
+        result = await ctx.session.list_roots()
+    except Exception:  # 클라이언트 roots 구현 실패는 명시 경로 요청으로 복구한다.
+        return None
+
+    root_paths: list[Path] = []
+    for root in result.roots:
+        parsed = urlparse(str(root.uri))
+        if parsed.scheme != "file":
+            continue
+        candidate = Path(unquote(parsed.path))
+        if candidate.is_absolute() and candidate.is_dir():
+            root_paths.append(candidate.resolve())
+    root_paths = list(dict.fromkeys(root_paths))
+    return root_paths[0] if len(root_paths) == 1 else None
+
+
+def _missing_output_dir(pdf_path: str) -> dict[str, Any]:
+    suggested_suffix = str(Path("result") / _pdf_name_slug(pdf_path))
+    return _err(
+        "현재 agent workspace를 하나로 식별할 수 없어 output_dir을 정하지 않았습니다. "
+        "MCP 서버 실행 경로로 대체하지 않습니다. 현재 agent cwd를 기준으로 한 절대 경로를 "
+        "output_dir에 전달하세요.",
+        data={
+            "required_parameters": ["output_dir"],
+            "suggested_relative_path": suggested_suffix,
+        },
+        next_action=(
+            "현재 agent cwd를 확인한 뒤 "
+            f"output_dir=<agent cwd>/{suggested_suffix}로 같은 도구를 다시 호출하세요."
+        ),
+    )
+
+
+def _resolve_output_dir(
+    output_dir: str,
+    pdf_path: str,
+    *,
+    agent_cwd: Path | None = None,
+) -> str | None:
+    raw = (output_dir or "").strip()
+    if not raw:
+        if agent_cwd is None:
+            return None
+        return str((agent_cwd / "result" / _pdf_name_slug(pdf_path)).resolve())
+
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        if agent_cwd is None:
+            return None
+        candidate = agent_cwd / candidate
+    return str(candidate.resolve())
+
+
+def _choice_lines(choices: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        f"- {choice['label']} ({choice.get('value', '')}): {choice['desc']}"
+        for choice in choices
+    )
+
+
+def _elicitation_cancelled(data: dict[str, Any]) -> dict[str, Any]:
+    return _err(
+        "사용자가 필수 선택을 승인하지 않아 다음 단계를 실행하지 않았습니다.",
+        data=data,
+        next_action="같은 선택지를 사용자에게 다시 보여주고 명시적 답을 받은 뒤 재시도하세요.",
+    )
+
+
+async def _elicit_question_setup(
+    ctx: Context,
+    setup: dict[str, Any],
+    *,
+    output_dir: str | None = None,
+) -> dict[str, Any] | None:
+    fields: dict[str, tuple[Any, Any]] = {}
+    if output_dir is not None:
+        fields["output_dir_confirmed"] = (
+            bool,
+            Field(description="표시된 절대 출력 폴더를 사용할지 여부"),
+        )
+    for question in setup["questions"]:
+        choice_desc = " / ".join(
+            f"{choice['label']}: {choice['desc']}" for choice in question["choices"]
+        )
+        fields[question["field"]] = (
+            bool,
+            Field(description=f"{question['question']} {choice_desc}"),
+        )
+    schema = create_model("PdfStudyQuestionSetupSelection", **fields)
+    message = (
+        (
+            "다음 위치에 새 작업을 만듭니다. 출력 폴더를 확인해주세요.\n"
+            f"- {output_dir}\n\n"
+            if output_dir is not None else ""
+        )
+        + "다음 문제 유형을 사용자가 직접 선택해야 합니다. 각 항목과 설명을 그대로 "
+        "확인한 뒤 답해주세요.\n"
+        + "\n".join(
+            f"\n{question['question']}\n{_choice_lines(question['choices'])}"
+            for question in setup["questions"]
+        )
+    )
+    result = await ctx.elicit(message=message, schema=schema)
+    if result.action != "accept" or result.data is None:
+        return None
+    return result.data.model_dump()
+
+
+async def _elicit_processing_setup(
+    ctx: Context,
+    work_id: str,
+    chapters: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    text_quality = workspace.load_state(work_id).get("text_quality")
+    mode_choices = _processing_mode_choices(text_quality)
+    mode_values = tuple(
+        f"{choice['execution_mode']}:{choice['extraction_mode']}"
+        for choice in mode_choices
+    )
+    mode_type = Literal.__getitem__(mode_values)
+    outline = workspace.load_outline(work_id) or {}
+    recommendations = outline.get("recommendations") or {}
+    chapter_choices = recommendations.get("user_choice_options") or []
+    fields: dict[str, tuple[Any, Any]] = {
+        "processing_mode": (
+            mode_type,
+            Field(description="사용자가 선택한 챕터 처리 방식"),
+        ),
+        "chapters_confirmed": (
+            bool,
+            Field(description="표시된 챕터 제목과 PDF 페이지 범위를 이대로 사용할지 여부"),
+        ),
+    }
+    if chapter_choices:
+        chapter_values = tuple(choice["value"] for choice in chapter_choices)
+        fields["chapter_strategy"] = (
+            Literal.__getitem__(chapter_values),
+            Field(description="사용자가 선택한 챕터 구성 방식"),
+        )
+    schema = create_model("PdfStudyChapterProcessingSelection", **fields)
+    chapter_lines = []
+    for chapter in chapters:
+        pages = chapter.get("pdf_pages", chapter.get("page_range"))
+        chapter_lines.append(
+            f"- {chapter.get('chapter_id')}: {chapter.get('title')} / PDF {pages}"
+        )
+    message = (
+        "챕터 범위와 처리 방식은 사용자가 직접 확인해야 합니다.\n\n"
+        + (
+            "[챕터 구성 방식]\n"
+            + _choice_lines(chapter_choices)
+            + "\n\n"
+            if chapter_choices else ""
+        )
+        + "[챕터]\n"
+        + "\n".join(chapter_lines)
+        + "\n\n[처리 방식]\n"
+        + "\n".join(
+            f"- {choice['label']} "
+            f"({choice['execution_mode']}:{choice['extraction_mode']}): {choice['desc']}"
+            for choice in mode_choices
+        )
+    )
+    result = await ctx.elicit(message=message, schema=schema)
+    if result.action != "accept" or result.data is None:
+        return None
+    selected = result.data.model_dump()
+    execution_mode, extraction_mode = selected.pop("processing_mode").split(":", 1)
+    selected["execution_mode"] = execution_mode
+    selected["extraction_mode"] = extraction_mode
+    return selected
+
+
 def _safe(label: str):
     """MCP 도구의 예외를 ok=False 응답으로 변환 (sync/async 모두 지원)."""
     def deco(fn):
@@ -458,7 +737,6 @@ def _safe(label: str):
 # 1. init_work
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
 @_safe("init_work")
 def init_work(
     pdf_path: str,
@@ -469,6 +747,7 @@ def init_work(
     enable_extension: bool | None = None,
     user_context: str = "",
     replace_existing: bool = False,
+    _agent_cwd_path: Path | None = None,
 ) -> dict[str, Any]:
     """워크스페이스를 생성하고 work_id를 발급합니다.
 
@@ -495,14 +774,10 @@ def init_work(
     Do not directly summarize a PDF when the request is to create learning
     material from a PDF. Use this MCP workflow instead.
 
-    - output_dir: 학습 자료를 저장할 디렉토리. 비워두면 **MCP 서버를 시작한 디렉터리**
-      아래에 `result/<pdf_basename>/` 형태로 자동 생성됩니다
-      (PDF 파일명에서 안전하지 않은 문자는 `_`로 치환). 이 경로는 MCP를 호출한
-      클라이언트의 현재 디렉터리와 다를 수 있습니다. 같은 PDF를 재실행하면 같은
-      폴더를 대상으로 하지만, 기존 파일은 자동으로 덮어쓰지 않습니다. 서버가 반환한
-      resume/replace/new_output_dir 선택을 따르세요.
-      호출 측 cwd를 기준으로 결과를 만들려면 output_dir에 명시하세요:
-      `<호출 측 cwd>/result/<pdf_basename>`.
+    - output_dir: 학습 자료를 저장할 디렉토리. 비워두면 MCP 요청에서 확인한 현재
+      agent workspace 아래 `result/<pdf_basename>/`을 사용합니다. 현재 workspace를
+      하나로 식별할 수 없으면 서버 실행 cwd로 폴백하지 않고 명시적 절대 경로를
+      요구합니다. 상대 경로도 현재 agent workspace를 기준으로만 해석합니다.
     - enable_multiple_choice: 객관식 활성/비활성. 기존 호환을 위해 기본 활성.
     - enable_short_answer / enable_reflection / enable_extension: 사용자가 이미 명시한
       값만 전달합니다. 미지정(None)이면 응답의 question_setup 선택지를 설명 그대로
@@ -519,9 +794,13 @@ def init_work(
     전달합니다.
     다음 단계: scan_pdf(work_id)
     """
-    resolved_dir = (output_dir or "").strip()
-    if not resolved_dir:
-        resolved_dir = str(Path.cwd() / "result" / _pdf_name_slug(pdf_path))
+    resolved_dir = _resolve_output_dir(
+        output_dir,
+        pdf_path,
+        agent_cwd=_agent_cwd_path,
+    )
+    if resolved_dir is None:
+        return _missing_output_dir(pdf_path)
 
     if not isinstance(replace_existing, bool):
         return _err(
@@ -621,13 +900,118 @@ def init_work(
     )
 
 
+@mcp.tool(name="init_work", description=init_work.__doc__)
+@_safe("init_work")
+async def _mcp_init_work_tool(
+    pdf_path: str,
+    ctx: Context,
+    output_dir: str = "",
+    enable_multiple_choice: bool = True,
+    enable_short_answer: bool | None = None,
+    enable_reflection: bool | None = None,
+    enable_extension: bool | None = None,
+    user_context: str = "",
+    replace_existing: bool = False,
+) -> dict[str, Any]:
+    """MCP 요청 workspace를 sync 구현에 명시적으로 전달한다."""
+    agent_cwd = await _agent_cwd(ctx)
+    resolved_dir = _resolve_output_dir(
+        output_dir,
+        pdf_path,
+        agent_cwd=agent_cwd,
+    )
+    existing = (
+        workspace.inspect_output_dir(resolved_dir)
+        if resolved_dir is not None
+        else None
+    )
+    if replace_existing and resolved_dir is not None:
+        assert existing is not None
+        if (
+            existing["kind"] in {
+                "managed_work", "damaged_managed_work", "managed_output",
+            }
+            and _client_supports_elicitation(ctx)
+        ):
+            message = (
+                "기존 출력 폴더 처리 방식을 사용자가 직접 확인해야 합니다.\n"
+                "- 기존 작업 교체 (replace): 기존 중간 작업을 제거하고 같은 출력 폴더에서 "
+                "새로 시작합니다. 이전 렌더 결과는 새 렌더가 성공할 때까지 유지됩니다."
+            )
+            result = await ctx.elicit(
+                message=message,
+                schema=_ReplaceExistingSelection,
+            )
+            if (
+                result.action != "accept"
+                or result.data is None
+                or not result.data.replace_existing
+            ):
+                return _elicitation_cancelled({
+                    "output_dir": resolved_dir,
+                    "existing_work": existing,
+                    "selected_action": None,
+                })
+    will_create_workspace = (
+        existing is not None
+        and (
+            existing["kind"] == "available"
+            or (
+                replace_existing
+                and existing["kind"] in {
+                    "managed_work", "damaged_managed_work", "managed_output",
+                }
+            )
+        )
+    )
+    if will_create_workspace and _client_supports_elicitation(ctx):
+        initial_setup = _question_setup_payload({
+            "question_options": {
+                "short_answer": None,
+                "reflection": None,
+                "extension": None,
+            },
+            "user_context": user_context,
+            "user_context_confirmed": bool(user_context.strip()),
+        })
+        selected = await _elicit_question_setup(
+            ctx,
+            initial_setup,
+            output_dir=resolved_dir,
+        )
+        if selected is None:
+            return _elicitation_cancelled({"question_setup": initial_setup})
+        if not selected.pop("output_dir_confirmed"):
+            return _elicitation_cancelled({
+                "output_dir": resolved_dir,
+                "question_setup": initial_setup,
+            })
+        enable_short_answer = selected["enable_short_answer"]
+        enable_reflection = selected["enable_reflection"]
+        enable_extension = selected["enable_extension"]
+    return init_work(
+        pdf_path=pdf_path,
+        output_dir=resolved_dir or output_dir,
+        enable_multiple_choice=enable_multiple_choice,
+        enable_short_answer=enable_short_answer,
+        enable_reflection=enable_reflection,
+        enable_extension=enable_extension,
+        user_context=user_context,
+        replace_existing=replace_existing,
+        _agent_cwd_path=agent_cwd,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1b. resume_work
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
 @_safe("resume_work")
-def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
+def resume_work(
+    output_dir: str = "",
+    pdf_path: str = "",
+    _agent_cwd_path: Path | None = None,
+) -> dict[str, Any]:
     """이전에 시작했던 작업을 디스크에서 재개합니다 (서버 재시작 후 등).
 
     work_id → work_dir 매핑은 메모리에만 있어 MCP 서버가 재시작되면
@@ -635,18 +1019,22 @@ def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
     복원해 이후 도구들이 정상 동작하도록 합니다.
 
     - output_dir: 재개할 작업의 output_dir. 주면 그 폴더의 .work/를 사용.
-    - pdf_path: output_dir을 비우면 init_work과 동일한 규칙으로, MCP 서버를
-      시작한 디렉터리 아래 `result/<pdf_basename>`으로 추론합니다. 이 경로는
-      MCP를 호출한 클라이언트의 현재 디렉터리와 다를 수 있습니다.
+    - pdf_path: output_dir을 비우면 init_work과 동일하게 현재 agent workspace 아래
+      `result/<pdf_basename>`으로 추론합니다. workspace가 불명확하면 output_dir의
+      절대 경로를 요구하며 MCP 서버 실행 cwd는 사용하지 않습니다.
     둘 중 하나는 반드시 필요합니다.
     다음 단계: 남은 챕터가 있으면 get_subagent_prompts(work_id)로 워크플로를
     받아 pending 챕터만 처리, 없으면 바로 finalize_study(work_id).
     """
-    resolved = (output_dir or "").strip()
-    if not resolved:
-        if not (pdf_path or "").strip():
-            return _err("output_dir 또는 pdf_path 중 하나는 필요합니다.")
-        resolved = str(Path.cwd() / "result" / _pdf_name_slug(pdf_path))
+    if not (output_dir or "").strip() and not (pdf_path or "").strip():
+        return _err("output_dir 또는 pdf_path 중 하나는 필요합니다.")
+    resolved = _resolve_output_dir(
+        output_dir,
+        pdf_path,
+        agent_cwd=_agent_cwd_path,
+    )
+    if resolved is None:
+        return _missing_output_dir(pdf_path)
 
     state = workspace.resume_workspace(resolved)
     work_id = state["work_id"]
@@ -686,11 +1074,49 @@ def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
     )
 
 
+@mcp.tool(name="resume_work", description=resume_work.__doc__)
+@_safe("resume_work")
+async def _mcp_resume_work_tool(
+    ctx: Context,
+    output_dir: str = "",
+    pdf_path: str = "",
+) -> dict[str, Any]:
+    """MCP 요청 workspace를 sync 재개 구현에 명시적으로 전달한다."""
+    agent_cwd = await _agent_cwd(ctx)
+    resolved = _resolve_output_dir(
+        output_dir,
+        pdf_path,
+        agent_cwd=agent_cwd,
+    )
+    if resolved is not None:
+        existing = workspace.inspect_output_dir(resolved)
+        if existing["can_resume"] and _client_supports_elicitation(ctx):
+            message = (
+                "- 기존 작업 이어가기 (resume): 기존 .work/state.json을 등록해 "
+                "남은 챕터부터 계속합니다."
+            )
+            result = await ctx.elicit(message=message, schema=_ResumeSelection)
+            if (
+                result.action != "accept"
+                or result.data is None
+                or not result.data.resume_confirmed
+            ):
+                return _elicitation_cancelled({
+                    "output_dir": resolved,
+                    "existing_work": existing,
+                    "selected_action": None,
+                })
+    return resume_work(
+        output_dir=resolved or output_dir,
+        pdf_path=pdf_path,
+        _agent_cwd_path=agent_cwd,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 2. scan_pdf
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
 @_safe("scan_pdf")
 def scan_pdf(
     work_id: str,
@@ -819,11 +1245,48 @@ def scan_pdf(
     return _ok(data, next_action=next_action)
 
 
+@mcp.tool(name="scan_pdf", description=scan_pdf.__doc__)
+@_safe("scan_pdf")
+async def _mcp_scan_pdf_tool(
+    work_id: str,
+    ctx: Context,
+    scan_size: int = 30,
+    force_vision: bool = False,
+    enable_short_answer: bool | None = None,
+    enable_reflection: bool | None = None,
+    enable_extension: bool | None = None,
+    user_context: str | None = None,
+) -> dict[str, Any]:
+    """미정 문제 유형을 MCP elicitation으로 직접 확인한 뒤 스캔한다."""
+    setup = _question_setup_payload(workspace.load_state(work_id))
+    if setup["pending_fields"] and _client_supports_elicitation(ctx):
+        selected = await _elicit_question_setup(ctx, setup)
+        if selected is None:
+            return _elicitation_cancelled({"question_setup": setup})
+        enable_short_answer = selected.get(
+            "enable_short_answer", enable_short_answer,
+        )
+        enable_reflection = selected.get(
+            "enable_reflection", enable_reflection,
+        )
+        enable_extension = selected.get(
+            "enable_extension", enable_extension,
+        )
+    return scan_pdf(
+        work_id=work_id,
+        scan_size=scan_size,
+        force_vision=force_vision,
+        enable_short_answer=enable_short_answer,
+        enable_reflection=enable_reflection,
+        enable_extension=enable_extension,
+        user_context=user_context,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 3. prepare_ocr / scan_toc_with_ocr
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
 @_safe("prepare_ocr")
 def prepare_ocr(work_id: str, ocr_language: str = "") -> dict[str, Any]:
     """PaddleOCR CPU 모델을 준비합니다.
@@ -844,6 +1307,28 @@ def prepare_ocr(work_id: str, ocr_language: str = "") -> dict[str, Any]:
         f'scan_toc_with_ocr(work_id="{work_id}") 또는 '
         f'set_chapters(work_id="{work_id}", ..., extraction_mode="ocr")'
     ))
+
+
+@mcp.tool(name="prepare_ocr", description=prepare_ocr.__doc__)
+@_safe("prepare_ocr")
+async def _mcp_prepare_ocr_tool(
+    work_id: str,
+    ctx: Context,
+    ocr_language: str = "",
+) -> dict[str, Any]:
+    """OCR 언어를 MCP elicitation으로 직접 확인한 뒤 모델을 준비한다."""
+    if _client_supports_elicitation(ctx):
+        message = (
+            f"{_ocr_language_setup()['question']}\n"
+            f"{_choice_lines([dict(choice) for choice in _OCR_LANGUAGE_CHOICES])}"
+        )
+        result = await ctx.elicit(message=message, schema=_OcrLanguageSelection)
+        if result.action != "accept" or result.data is None:
+            return _elicitation_cancelled(
+                {"ocr_language_setup": _ocr_language_setup()},
+            )
+        ocr_language = result.data.ocr_language
+    return prepare_ocr(work_id=work_id, ocr_language=ocr_language)
 
 
 @mcp.tool()
@@ -887,7 +1372,6 @@ def scan_toc_with_ocr(work_id: str) -> dict[str, Any]:
 # 4. set_chapters
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
 @_safe("set_chapters")
 def set_chapters(
     work_id: str,
@@ -1028,6 +1512,55 @@ def set_chapters(
         "'p11-p18' 같은 페이지 범위 문자열을 chapter_id로 쓰지 마세요(특정 페이지를 "
         "보려면 scan_pdf의 toc_page_images 경로를 직접 여세요)."
     ))
+
+
+@mcp.tool(name="set_chapters", description=set_chapters.__doc__)
+@_safe("set_chapters")
+async def _mcp_set_chapters_tool(
+    work_id: str,
+    chapters: list[dict[str, Any]],
+    ctx: Context,
+    execution_mode: str = "",
+    extraction_mode: str = "",
+    ocr_language: str = "",
+    book_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """챕터 범위와 처리 모드를 MCP elicitation으로 확인한 뒤 확정한다."""
+    if _client_supports_elicitation(ctx):
+        selected = await _elicit_processing_setup(ctx, work_id, chapters)
+        if selected is None:
+            return _elicitation_cancelled({
+                "chapters": chapters,
+                "next_step": _set_chapters_next_step(
+                    workspace.load_state(work_id).get("text_quality"),
+                ),
+            })
+        if selected.get("chapter_strategy") == "reanalyze_with_vision":
+            return _err(
+                "사용자가 목차 이미지 재분석을 선택해 챕터를 확정하지 않았습니다.",
+                data={"selected_chapter_strategy": "reanalyze_with_vision"},
+                next_action=(
+                    f'scan_pdf(work_id="{work_id}", force_vision=True)를 호출한 뒤 '
+                    "prepare_ocr → scan_toc_with_ocr 순서로 다시 구성하세요."
+                ),
+            )
+        if not selected["chapters_confirmed"]:
+            return _elicitation_cancelled({
+                "chapters": chapters,
+                "next_step": _set_chapters_next_step(
+                    workspace.load_state(work_id).get("text_quality"),
+                ),
+            })
+        execution_mode = selected["execution_mode"]
+        extraction_mode = selected["extraction_mode"]
+    return set_chapters(
+        work_id=work_id,
+        chapters=chapters,
+        execution_mode=execution_mode,
+        extraction_mode=extraction_mode,
+        ocr_language=ocr_language,
+        book_info=book_info,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1328,7 +1861,6 @@ def list_pending_chapters(work_id: str) -> dict[str, Any]:
 # 10. finalize_study
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
 @_safe("finalize_study")
 def finalize_study(
     work_id: str,
@@ -1480,11 +2012,35 @@ def finalize_study(
     )
 
 
+@mcp.tool(name="finalize_study", description=finalize_study.__doc__)
+@_safe("finalize_study")
+async def _mcp_finalize_study_tool(
+    work_id: str,
+    ctx: Context,
+    output_format: str = "",
+    keep_work_dir: bool = True,
+) -> dict[str, Any]:
+    """최종 형식을 MCP elicitation으로 확인한 뒤 렌더링한다."""
+    if _client_supports_elicitation(ctx):
+        message = (
+            "최종 학습 자료 형식을 선택하세요.\n"
+            f"{_choice_lines([dict(choice) for choice in _OUTPUT_FORMAT_CHOICES])}"
+        )
+        result = await ctx.elicit(message=message, schema=_OutputFormatSelection)
+        if result.action != "accept" or result.data is None:
+            return _elicitation_cancelled(_output_format_choice_data())
+        output_format = result.data.output_format
+    return finalize_study(
+        work_id=work_id,
+        output_format=output_format,
+        keep_work_dir=keep_work_dir,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 11. cleanup_work
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
 @_safe("cleanup_work")
 def cleanup_work(work_id: str) -> dict[str, Any]:
     """완료된 학습 결과는 유지하고 해당 작업의 `.work` 중간 데이터만 삭제합니다.
@@ -1500,6 +2056,31 @@ def cleanup_work(work_id: str) -> dict[str, Any]:
             "그대로 사용할 수 있습니다."
         ),
     )
+
+
+@mcp.tool(name="cleanup_work", description=cleanup_work.__doc__)
+@_safe("cleanup_work")
+async def _mcp_cleanup_work_tool(
+    work_id: str,
+    ctx: Context,
+) -> dict[str, Any]:
+    """중간 작업 삭제를 MCP elicitation으로 확인한 뒤 실행한다."""
+    if _client_supports_elicitation(ctx):
+        message = (
+            "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다. "
+            "삭제 후에는 이 중간 상태로 작업을 재개할 수 없습니다."
+        )
+        result = await ctx.elicit(message=message, schema=_CleanupSelection)
+        if (
+            result.action != "accept"
+            or result.data is None
+            or not result.data.cleanup_confirmed
+        ):
+            return _elicitation_cancelled({
+                "work_id": work_id,
+                "cleanup_confirmed": False,
+            })
+    return cleanup_work(work_id=work_id)
 
 
 # ---------------------------------------------------------------------------

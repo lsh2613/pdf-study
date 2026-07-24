@@ -24,6 +24,8 @@
 - HTML·Markdown+TUI·출력 fingerprint는 `renderer/study_loader.py`의 중립 렌더 입력을 공유하므로, 완료 결과만 읽기와 skip 챕터 제외 규칙이 출력 형식별로 갈라지지 않는다.
 - Markdown+TUI 렌더러의 설계 주석은 현재 `docs/contracts.md`와 `docs/architecture.md`를 참조하며, 삭제된 문서 경로를 가리키지 않는다.
 - 다음 도구에 사용자 선택이 필요하면 앞선 성공 응답의 `next_step`이 필수 파라미터와 구조화된 선택지를 제공한다. 처리 모드와 출력 형식의 실패 응답 선택지는 잘못된 호출을 위한 fallback으로 유지한다.
+- MCP form elicitation 지원 세션에서는 새 작업의 절대 출력 폴더와 문제 유형, OCR 언어, 챕터 구성·범위와 처리 모드, 최종 형식, 기존 작업 재개·교체와 `.work` 정리를 실행 직전에 서버가 직접 확인하고 응답값을 호출 인자보다 우선한다.
+- 빈 또는 상대 `output_dir`은 요청의 단일 agent workspace를 기준으로 계산하며, workspace가 없거나 모호하면 서버 cwd로 폴백하지 않고 절대 경로를 요구한다.
 - 완료된 렌더 결과는 `cleanup_work`로 렌더링을 다시 하지 않고 `.work` 중간 데이터만 제거할 수 있다. 미완료 작업은 재개 데이터를 보호하기 위해 거부한다.
 - `finalize_study`는 `force` 없이도 완료분 자료를 만들며, 미반영 챕터의 결과 유형·상태·오류는 성공 응답의 `omitted_chapters`와 실행 안내로 알린다.
 
@@ -31,7 +33,7 @@
 
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, 선택지 요구, 최종 렌더링, 진도 저장 서버, 설치 스크립트와 MCP 설정 보호를 다룬다.
 - 테스트 시작 시 fixture 생성기 fingerprint와 PDF 해시를 확인해 오래된 합성 PDF를 자동 재생성한다.
-- 최근 확인: 현재 checkout에서 `.venv/bin/python -m pytest -q`가 296개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
+- 최근 확인: 현재 checkout에서 `.venv/bin/python -m pytest -q`가 325개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
 
 ## 남은 일
 

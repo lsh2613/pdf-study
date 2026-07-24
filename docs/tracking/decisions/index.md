@@ -8,3 +8,4 @@
 - `0006-project-local-venv.md` - MCP 실행은 저장소 안 `.venv`를 기준으로 한다.
 - `0007-extension-without-search.md` - 확장 문제는 외부 검색 없이 본문과 학습자 정보로 만든다.
 - `0008-managed-output-replacement.md` - 기존 출력은 명시적으로 선택하고 manifest 관리 경로만 교체한다.
+- `0009-request-context-and-elicitation.md` - agent workspace 기준 경로와 서버 주도 필수 선택을 사용한다.

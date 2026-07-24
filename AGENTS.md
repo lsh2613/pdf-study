@@ -44,6 +44,8 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
 - 챕터 추출 범위의 canonical 키는 PDF 파일의 1-based 범위를 담는 `pdf_pages`다. `source_pages`는 원문에 표시된 페이지 번호를 보존하는 선택적 메타이며 추출 범위를 바꾸지 않는다. 구형 `page_range`·`printed_range`는 기존 작업 읽기 호환에만 사용한다.
 - 텍스트 레이어가 없거나 깨진 PDF는 text 모드로 밀어붙이면 안 된다. OCR 흐름은 `set_chapters`에서 PaddleOCR CPU로 본문을 선계산해 `chapters_raw/chN.json`의 `text`와 `char_count`로 저장하는 방향이다. `body_text`는 raw 본문을 덮어쓰는 경로로 쓰지 않는다.
 - 사용자가 골라야 하는 선택지는 서버 응답의 항목과 설명을 바꾸지 않는다. 추천·기본값을 임의로 붙이거나 선택지를 합치면 안 된다.
+- MCP form elicitation 지원 세션에서는 필수 선택을 쓰는 도구가 실행 직전에 서버가 사용자 응답을 직접 받아야 한다. 에이전트가 먼저 넣은 인자보다 elicitation 응답을 우선하고, 거절·취소 시 상태를 바꾸면 안 된다. 미지원 클라이언트의 기존 구조화 선택 fallback은 유지한다.
+- 빈 또는 상대 `output_dir`은 MCP 서버 프로세스 cwd로 해석하면 안 된다. 요청의 단일 agent workspace나 MCP root를 기준으로 계산하고, 없거나 모호하면 절대 경로를 요구한다.
 - 확장 문제는 외부 검색 없이 챕터 본문과 학습자 정보만으로 만든다. 검색 도구나 HTTP 검색 클라이언트를 다시 추가하려면 별도의 보안·계약 결정을 먼저 기록해야 한다.
 - `.work/state.json`은 잠금이 걸린 `workspace.py` 헬퍼로만 바꾼다. 직접 read-modify-write를 넣으면 병렬 처리에서 상태가 깨진다.
 - `set_chapters`는 스캔 여부, 처리 모드, 챕터 정의와 책 정보 준비를 상태 변경 없이 먼저 검증한다. 검증된 모드·챕터와 처리 시작 phase는 하나의 잠금 구간에서 확정하고, 이후 본문 추출 실패는 새 설정의 `chapter_processing=failed`로 남긴다. 같은 작업의 `set_chapters` 전체 처리는 직렬화하며 책 정보 rollback 실패를 숨기면 안 된다.
