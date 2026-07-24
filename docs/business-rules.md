@@ -42,6 +42,12 @@ MCP form elicitation을 지원하는 클라이언트에서는 필수 선택을 �
 취소하면 작업 상태와 출력 파일을 바꾸지 않는다. 미지원 클라이언트만 기존
 `user_choice_required` 지시 계약으로 폴백한다.
 
+`set_chapters`의 사용자 확인은 챕터 구성·범위, text/OCR 본문 추출 방식,
+sequential/parallel 실행 방식의 세 elicitation으로 분리한다. 두 처리 축은 독립된
+결정이며 네 조합을 한 폼의 단일 선택지로 합치지 않는다. 요청은 이 순서로 실행하고,
+앞선 요청이 거절·취소되면 뒤 요청과 상태 변경을 실행하지 않는다. 텍스트가 깨졌거나
+없는 PDF의 추출 방식 폼은 OCR만 허용한다.
+
 빈 `output_dir`과 상대 경로는 MCP 서버 프로세스의 cwd로 해석하지 않는다. 요청에서
 현재 agent workspace를 하나로 식별할 수 있을 때만 그 경로를 기준으로
 `result/<pdf_basename>` 또는 상대 경로를 계산한다. 식별할 수 없거나 여러 workspace가

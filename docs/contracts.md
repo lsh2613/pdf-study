@@ -32,12 +32,15 @@
 클라이언트가 MCP form elicitation을 지원하면 서버는 문제 유형, OCR 언어, 챕터 구성과
 처리 모드, 최종 출력 형식, 기존 작업 재개·교체, 중간 작업 정리를 실제 실행 직전에 다시
 요청한다. 이 경우 도구 호출 인자로 먼저 들어온 선택값보다 elicitation 응답이
-canonical이며, 사용자가 거절하거나 취소하면 상태를 바꾸지 않는다. 챕터 구성
-elicitation은 `recommendations.user_choice_options`와 처리 모드 선택지의 기존
-label·설명을 그대로 보여주고, 제출된 챕터 제목과 PDF 범위도 함께 확인한다.
+canonical이며, 사용자가 거절하거나 취소하면 상태를 바꾸지 않는다. `set_chapters`의
+form elicitation은 한 도구 호출 안에서 세 번 실행한다. 첫 번째는
+`recommendations.user_choice_options`와 제출된 챕터 제목·PDF 범위를 확인하고,
+두 번째는 text/OCR 본문 추출 방식을 선택하며, 세 번째는 sequential/parallel 실행
+방식을 선택한다. 앞 단계가 거절·취소되면 뒤 요청과 상태 변경을 실행하지 않는다.
 새 작업을 만드는 `init_work` elicitation은 해석된 절대 `output_dir`도 함께 보여주고
 확인받는다.
-elicitation을 지원하지 않는 클라이언트는 기존 구조화 선택 계약을 따른다.
+elicitation을 지원하지 않는 클라이언트는 기존 네 처리 조합을 포함한 구조화 선택
+계약을 따른다.
 
 ## 도구 흐름
 
@@ -67,7 +70,7 @@ OCR이 필요한 목차 이미지 흐름 또는 텍스트 레이어가 없거나
 
 `set_chapters`의 OCR 모드는 선택한 `ocr_language` 또는 `prepare_ocr`가 상태에 보존한 언어를 사용한다. 둘 다 없으면 상태를 바꾸지 않고 한국어·영어 선택지를 반환한다. OCR raw에는 사용 언어를 함께 기록하므로 다른 언어로 다시 설정하면 기존 raw를 재사용하지 않는다.
 
-처리 모드 선택은 `scan_pdf` 또는 `scan_toc_with_ocr`의 `data.next_step.choices`에서 먼저 받는다. 각 선택지는 `execution_mode`, `extraction_mode`, `label`, `desc`를 담는다. 누락·오류로 `set_chapters`가 실패하면 같은 선택지가 `data.choices`에 fallback으로 들어간다. 텍스트 레이어가 없거나 깨진 PDF에서는 `forced_extraction_mode="ocr"`가 함께 오고, 선택지는 OCR 조합만 남는다. 클라이언트는 빠진 text 선택지를 다시 만들어 사용자에게 보여주면 안 된다.
+처리 모드 선택은 `scan_pdf` 또는 `scan_toc_with_ocr`의 `data.next_step.choices`에서 먼저 받는다. 각 선택지는 `execution_mode`, `extraction_mode`, `label`, `desc`를 담는다. 이 네 조합은 elicitation 미지원 클라이언트와 누락·오류 fallback의 호환 계약이다. form elicitation 지원 클라이언트에서는 같은 허용 범위를 text/OCR과 sequential/parallel의 두 독립된 요청으로 나누며, 그 전에 챕터 구성·범위를 별도 요청으로 확인한다. 누락·오류로 `set_chapters`가 실패하면 기존 조합 선택지가 `data.choices`에 fallback으로 들어간다. 텍스트 레이어가 없거나 깨진 PDF에서는 `forced_extraction_mode="ocr"`가 함께 오고, 구조화 선택지는 OCR 조합만, 추출 방식 form은 OCR만 남는다. 클라이언트는 빠진 text 선택지를 다시 만들어 사용자에게 보여주면 안 된다.
 
 `get_subagent_prompts(work_id)`는 챕터 설정이 완료된 작업에서만 요약자 프롬프트, 확장 문제 프롬프트, 처리 순서와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 반환한다. 챕터 설정 전 호출은 실패하며 `data.chapter_setup`과 이전 스캔의 챕터·처리 방식 선택 정보를 돌려 `set_chapters`로 복구하게 한다. 두 pending 목록은 각각 아직 저장할 요약·기본 문제와 확장 문제가 남은 챕터 ID를 자연 정렬해 담는다. 기존 클라이언트용 `chapter_ids`는 두 pending 목록의 자연 정렬 합집합이며 완료된 챕터는 포함하지 않는다. skip 챕터는 모든 처리 목록에서 제외되고 `skipped_chapter_ids`에 따로 들어간다. workflow와 성공 `next_action`은 각 목록에 실제로 남은 결과 유형만 생성·저장하도록 안내한다. 두 pending 목록이 모두 비면 이 도구는 `list_pending_chapters`를 먼저 호출하게 하며, 그 응답의 구조화된 출력 형식 선택 뒤에만 렌더링으로 진행한다. raw 본문 파일, 비어 있지 않은 `text`, 실제 길이와 같은 `char_count` 검증은 두 pending 목록의 합집합에만 적용하므로 완료 챕터의 raw 손상은 재개를 막지 않는다. pending raw가 유효하지 않으면 실패하고 `data.invalid_chapters`에 챕터별 사유를 담으며, 그중 남아 있는 OCR 실패는 `data.failed_chapters`에도 같은 `{chapter_id, failed_pages, error}` 형태로 노출한다.
 

@@ -13,6 +13,9 @@
 - MCP form elicitation을 지원하는 클라이언트에서는 문제 유형, OCR 언어, 챕터
   구성·범위와 처리 모드, 출력 형식, 기존 작업 재개·교체, `.work` 정리를 실행 직전에
   서버가 직접 요청한다.
+- `set_chapters`는 챕터 구성·범위 확인, text/OCR 본문 추출 방식,
+  sequential/parallel 실행 방식을 이 순서의 독립된 세 form으로 요청하고, 모두
+  승인된 뒤에만 기존 sync 구현을 호출한다.
 - elicitation 응답은 에이전트가 도구 호출에 먼저 채운 선택 인자보다 우선한다.
   거절·취소 시 기존 sync 구현을 호출하지 않아 상태와 파일을 바꾸지 않는다.
 - 새 작업 생성 elicitation은 해석된 절대 `output_dir`을 함께 보여주고 확인받는다.
