@@ -45,6 +45,17 @@ def _check_envelope(resp: dict) -> None:
     assert set(resp.keys()) == {"ok", "error", "data", "next_action"}
 
 
+def _assert_no_choice_fallback(value) -> None:
+    if isinstance(value, dict):
+        assert "user_choice_required" not in value
+        assert "user_choice_instruction" not in value
+        for nested in value.values():
+            _assert_no_choice_fallback(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            _assert_no_choice_fallback(nested)
+
+
 def _init(pdf, out, **kw):
     r = server.init_work(str(pdf), str(out), **kw)
     return r
@@ -282,9 +293,8 @@ def test_init_work_requests_optional_question_types_and_user_context(tmp_path, k
     )
     assert setup["user_context_request"]["required"] is False
     assert "학습 목적" in setup["user_context_request"]["desc"]
-    assert setup["user_choice_required"] is True
-    assert "반드시 사용자에게서 받은 선택값" in setup["user_choice_instruction"]
     assert "scan_pdf" in r["next_action"]
+    _assert_no_choice_fallback(r)
 
 
 def test_scan_pdf_rejects_missing_question_choices_without_scanning(tmp_path, ko_short):
@@ -390,11 +400,11 @@ def test_init_work_docstring_rejects_server_startup_directory_fallback():
     assert "서버 실행 cwd로 폴백하지 않고" in doc
 
 
-def test_init_work_docstring_resolves_relative_paths_from_agent_workspace():
+def test_init_work_docstring_describes_fixed_workspace_output_path():
     doc = server.init_work.__doc__ or ""
 
-    assert "상대 경로" in doc
-    assert "현재 agent workspace를 기준으로만 해석" in doc
+    assert "현재 agent workspace" in doc
+    assert "result/<pdf_basename>" in doc
 
 
 def test_init_work_blank_output_dir_uses_agent_cwd_default(tmp_path, ko_short):
@@ -425,7 +435,7 @@ def test_init_work_explicit_output_dir_used_as_is(tmp_path, ko_short):
     assert (target / ".work" / "state.json").exists()
 
 
-def test_init_work_existing_output_returns_choices_without_mutation(tmp_path, ko_short):
+def test_init_work_existing_output_returns_metadata_without_fallback(tmp_path, ko_short):
     out = tmp_path / "out"
     first = server.init_work(str(ko_short), str(out))
     assert first["ok"], first
@@ -437,13 +447,9 @@ def test_init_work_existing_output_returns_choices_without_mutation(tmp_path, ko
     _check_envelope(repeated)
     assert repeated["ok"] is False
     assert repeated["data"]["existing_work"]["work_id"] == first["data"]["work_id"]
-    assert [choice["value"] for choice in repeated["data"]["choices"]] == [
-        "resume", "replace", "new_output_dir",
-    ]
-    assert all(choice["label"] and choice["desc"] for choice in repeated["data"]["choices"])
-    assert repeated["data"]["user_choice_required"] is True
-    assert "반드시 사용자에게서 받은 선택값" in repeated["data"]["user_choice_instruction"]
-    assert "항목과 설명을 바꾸지 말고" in repeated["next_action"]
+    assert "choices" not in repeated["data"]
+    assert repeated["next_action"] is None
+    _assert_no_choice_fallback(repeated)
     assert state_path.read_bytes() == before
 
 
@@ -496,7 +502,7 @@ def test_init_work_replace_existing_validates_before_removing_old_work(
     assert state_path.read_bytes() == before
 
 
-def test_init_work_rendered_output_without_state_omits_resume_choice(
+def test_init_work_rendered_output_without_state_has_no_choice_fallback(
     tmp_path, ko_short
 ):
     out = tmp_path / "legacy"
@@ -507,70 +513,43 @@ def test_init_work_rendered_output_without_state_omits_resume_choice(
     collision = server.init_work(str(ko_short), str(out))
 
     assert collision["ok"] is False
-    assert [choice["value"] for choice in collision["data"]["choices"]] == [
-        "replace", "new_output_dir",
-    ]
+    assert "choices" not in collision["data"]
+    _assert_no_choice_fallback(collision)
 
 
 # ---------------------------------------------------------------------------
 # set_chapters — 처리 모드(순차/병렬 · text/ocr)를 여기서 받는다
 # ---------------------------------------------------------------------------
 
-def _assert_mode_choices(r):
-    """모드 미지정 거부 응답이 4가지 조합과 특징을 모두 담는지 검증."""
+def _assert_internal_mode_error(r):
+    """공개 wrapper 밖의 모드 누락은 선택 fallback 없이 거부한다."""
     _check_envelope(r)
     assert r["ok"] is False
-    assert "execution_mode" in r["error"] and "extraction_mode" in r["error"]
-    combos = {(c["execution_mode"], c["extraction_mode"]) for c in r["data"]["choices"]}
-    assert combos == {
-        ("sequential", "text"), ("parallel", "text"),
-        ("sequential", "ocr"), ("parallel", "ocr"),
-    }
-    assert all(c.get("label") and c.get("desc") for c in r["data"]["choices"])
-    assert r["data"]["execution_modes"] == ["sequential", "parallel"]
-    assert r["data"]["extraction_modes"] == ["text", "ocr"]
-    assert [choice["desc"] for choice in r["data"]["choices"]] == [
-        "디지털 PDF · 안정적·빠르고 저렴",
-        "디지털 PDF · 최대 5개 동시로 가장 빠름",
-        "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 순차 sub-agent 처리",
-        "스캔본·깨진 PDF · PaddleOCR CPU 선계산 뒤 최대 5개 sub-agent 동시 처리",
-    ]
-    assert "무난한 기본" not in r["error"]
-    # 구조화 선택 도구(AskUserQuestion) 사용 + verbatim 정책이 안내에 포함
-    assert "AskUserQuestion" in r["error"]
+    assert "내부 처리 모드" in r["error"]
+    assert set(r["data"]) == {"text_quality"}
+    _assert_no_choice_fallback(r)
 
 
-def test_scan_pdf_exposes_structured_next_set_chapters_choices(tmp_path, ko_with_toc):
-    """정상 scan_pdf 응답이 set_chapters의 사용자 선택을 미리 제공한다."""
+def test_scan_pdf_exposes_choice_free_set_chapters_step(tmp_path, ko_with_toc):
+    """정상 scan_pdf 응답은 에이전트가 생성할 chapters만 다음 입력으로 요구한다."""
     wid = server.init_work(str(ko_with_toc), str(tmp_path / "out"))["data"]["work_id"]
 
     scanned = _scan(wid)
 
     assert scanned["ok"], scanned
     recommendations = scanned["data"]["recommendations"]
-    chapter_choices = recommendations["user_choice_options"]
-    assert [choice["value"] for choice in chapter_choices] == recommendations["user_choices"]
-    assert all(choice["label"] and choice["desc"] for choice in chapter_choices)
-    assert recommendations["user_choice_required"] is True
-    assert "반드시 사용자에게서 받은 선택값" in recommendations["user_choice_instruction"]
+    assert "user_choice_options" not in recommendations
+    assert "user_choices" not in recommendations
 
     next_step = scanned["data"]["next_step"]
-    assert next_step["tool"] == "set_chapters"
-    assert next_step["required_parameters"] == [
-        "chapters", "execution_mode", "extraction_mode",
-    ]
-    assert {
-        (choice["execution_mode"], choice["extraction_mode"])
-        for choice in next_step["choices"]
-    } == {
-        ("sequential", "text"),
-        ("parallel", "text"),
-        ("sequential", "ocr"),
-        ("parallel", "ocr"),
+    assert next_step == {
+        "tool": "set_chapters",
+        "required_parameters": ["chapters"],
     }
+    _assert_no_choice_fallback(scanned)
 
 
-def test_scan_pdf_exposes_only_ocr_modes_when_text_is_unavailable(
+def test_scan_pdf_keeps_choice_free_step_when_text_is_unavailable(
     tmp_path, scanned_empty,
 ):
     """text가 금지된 PDF도 실패 호출 없이 유효한 다음 모드만 제공한다."""
@@ -580,59 +559,54 @@ def test_scan_pdf_exposes_only_ocr_modes_when_text_is_unavailable(
 
     assert scanned["ok"], scanned
     set_chapters_step = scanned["data"]["set_chapters_next_step"]
-    assert set_chapters_step["tool"] == "set_chapters"
-    assert {
-        (choice["execution_mode"], choice["extraction_mode"])
-        for choice in set_chapters_step["choices"]
-    } == {("sequential", "ocr"), ("parallel", "ocr")}
+    assert set_chapters_step == {
+        "tool": "set_chapters",
+        "required_parameters": ["chapters"],
+    }
 
 
 def test_set_chapters_requires_execution_mode(tmp_path, ko_short):
-    """execution_mode 미지정 시 거부 + 4조합 안내."""
+    """내부 execution_mode 미지정은 선택 fallback 없이 거부한다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     _scan(wid)
     r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
                                    "pdf_pages": [1, 12]}])  # 모드 생략
-    _assert_mode_choices(r)
+    _assert_internal_mode_error(r)
 
 
 def test_set_chapters_requires_extraction_mode(tmp_path, ko_short):
-    """execution_mode만 주고 extraction_mode 미지정 시 거부 + 4조합 안내."""
+    """내부 extraction_mode 미지정은 선택 fallback 없이 거부한다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     _scan(wid)
     r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
                                    "pdf_pages": [1, 12]}],
                             execution_mode="sequential")  # extraction_mode 생략
-    _assert_mode_choices(r)
+    _assert_internal_mode_error(r)
 
 
-def test_mode_choices_narrowed_to_ocr_when_no_text_layer(tmp_path, scanned_empty):
-    """스캔본(no_text_layer)이면 모드 미지정 거부 시 OCR 2조합만 제시한다."""
+def test_internal_mode_error_reports_no_text_layer_without_fallback(
+    tmp_path, scanned_empty,
+):
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
     _scan(wid)
     r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
                                    "pdf_pages": [1, 3]}])  # 모드 생략
     _check_envelope(r)
     assert r["ok"] is False
-    combos = {(c["execution_mode"], c["extraction_mode"]) for c in r["data"]["choices"]}
-    assert combos == {("sequential", "ocr"), ("parallel", "ocr")}
-    assert r["data"]["extraction_modes"] == ["ocr"]
-    assert r["data"]["forced_extraction_mode"] == "ocr"
-    assert "AskUserQuestion" in r["error"]
+    assert r["data"] == {"text_quality": "no_text_layer"}
+    _assert_no_choice_fallback(r)
 
 
-def test_scan_pdf_requires_korean_or_english_before_forced_ocr(tmp_path, scanned_empty):
-    """텍스트 레이어가 없는 PDF는 OCR 준비 전에 지원 언어를 명시적으로 고른다."""
+def test_scan_pdf_routes_forced_ocr_to_eliciting_prepare_tool(tmp_path, scanned_empty):
+    """텍스트 레이어가 없으면 선택 파라미터 없이 prepare_ocr로 이동한다."""
     wid = server.init_work(str(scanned_empty), str(tmp_path / "out"))["data"]["work_id"]
 
     scanned = _scan(wid)
 
     assert scanned["ok"] is True
-    setup = scanned["data"]["ocr_language_setup"]
-    assert setup["field"] == "ocr_language"
-    assert [choice["value"] for choice in setup["choices"]] == ["korean", "english"]
+    assert "ocr_language_setup" not in scanned["data"]
     assert scanned["data"]["next_step"]["tool"] == "prepare_ocr"
-    assert scanned["data"]["next_step"]["required_parameters"] == ["ocr_language"]
+    assert scanned["data"]["next_step"]["required_parameters"] == []
 
 
 def test_prepare_ocr_persists_selected_language(tmp_path, scanned_empty, monkeypatch):
@@ -658,17 +632,15 @@ def test_prepare_ocr_persists_selected_language(tmp_path, scanned_empty, monkeyp
     assert workspace.load_state(wid)["ocr_language"] == "english"
 
 
-def test_mode_choices_narrowed_to_ocr_when_garbled(tmp_path, ko_short):
-    """garbled(mojibake)면 모드 미지정 거부 시 OCR 조합만 제시한다."""
+def test_internal_mode_error_reports_garbled_without_fallback(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     _scan(wid)
     workspace.update_state(wid, text_quality="garbled")
     r = server.set_chapters(wid, [{"chapter_id": "ch1", "title": "전체",
                                    "pdf_pages": [1, 12]}],
                             execution_mode="sequential")  # extraction 생략
-    combos = {(c["execution_mode"], c["extraction_mode"]) for c in r["data"]["choices"]}
-    assert combos == {("sequential", "ocr"), ("parallel", "ocr")}
-    assert r["data"]["extraction_modes"] == ["ocr"]
+    assert r["data"] == {"text_quality": "garbled"}
+    _assert_no_choice_fallback(r)
 
 
 def test_set_chapters_text_mode_blocked_on_no_text_layer(tmp_path, scanned_empty):
@@ -833,7 +805,7 @@ def test_set_chapters_ocr_requires_prepare_when_cache_missing(
     _check_envelope(r)
     assert r["ok"] is False
     assert r["data"]["forced_next_step"] == "prepare_ocr"
-    assert r["next_action"] == f'prepare_ocr(work_id="{wid}", ocr_language="korean")'
+    assert r["next_action"] == f'prepare_ocr(work_id="{wid}")'
 
 
 def test_save_chapter_result_accepts_without_body_text(tmp_path, ko_short):
@@ -1521,11 +1493,10 @@ def test_scan_toc_with_ocr_returns_ocr_text(tmp_path, scanned_empty):
     assert r["data"]["toc_page_images"][0]["ocr_error"] is None
     assert r["data"]["toc_page_images"][0]["ocr_status"] == "completed"
     assert "set_chapters" in r["next_action"]
-    assert r["data"]["next_step"]["tool"] == "set_chapters"
-    assert {
-        (choice["execution_mode"], choice["extraction_mode"])
-        for choice in r["data"]["next_step"]["choices"]
-    } == {("sequential", "ocr"), ("parallel", "ocr")}
+    assert r["data"]["next_step"] == {
+        "tool": "set_chapters",
+        "required_parameters": ["chapters"],
+    }
 
 
 def test_scan_toc_with_ocr_requires_prepare_when_cache_missing(
@@ -1546,7 +1517,7 @@ def test_scan_toc_with_ocr_requires_prepare_when_cache_missing(
     _check_envelope(r)
     assert r["ok"] is False
     assert r["data"]["requires_prepare_ocr"] is True
-    assert r["next_action"] == f'prepare_ocr(work_id="{wid}", ocr_language="korean")'
+    assert r["next_action"] == f'prepare_ocr(work_id="{wid}")'
 
 
 def test_prepare_ocr_returns_model_diagnostics(tmp_path, ko_short):
@@ -1750,7 +1721,7 @@ def test_pending_guidance_lists_summary_and_extension_separately_on_resume(
 
 
 def test_finalize_requires_output_format(tmp_path, ko_short):
-    """output_format 미지정 시 거부 + 사용자에게 물어보라는 안내."""
+    """내부 output_format 미지정은 선택 fallback 없이 거부한다."""
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
@@ -1758,15 +1729,12 @@ def test_finalize_requires_output_format(tmp_path, ko_short):
     r = server.finalize_study(wid)  # output_format 생략
     _check_envelope(r)
     assert r["ok"] is False
-    assert "output_format" in r["error"]
-    assert {c["value"] for c in r["data"]["choices"]} == {"html", "md_tui"}
-    assert r["data"]["user_choice_required"] is True
-    assert "반드시 사용자에게서 받은 선택값" in r["data"]["user_choice_instruction"]
-    # 구조화 선택 도구(AskUserQuestion) 사용 정책이 안내에 포함
-    assert "AskUserQuestion" in r["error"]
+    assert "내부 출력 형식" in r["error"]
+    assert r["data"] is None
+    _assert_no_choice_fallback(r)
 
 
-def test_choice_next_steps_explicitly_require_user_selected_values(tmp_path, ko_short):
+def test_choice_next_steps_require_only_non_choice_parameters(tmp_path, ko_short):
     wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     scanned = _scan(wid)
 
@@ -1775,26 +1743,28 @@ def test_choice_next_steps_explicitly_require_user_selected_values(tmp_path, ko_
     finalize_step = server._finalize_next_step()
     ocr_step = server._prepare_ocr_next_step()
 
-    assert scan_step["user_choice_required"] is True
-    assert "반드시 사용자에게서 받은 선택값" in scan_step["user_choice_instruction"]
-    assert processing_step["user_choice_required"] is True
-    assert "반드시 사용자에게서 받은 선택값" in processing_step["user_choice_instruction"]
-    assert finalize_step["user_choice_required"] is True
-    assert finalize_step["user_choice_instruction"] == (
-        "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
-        "선택값 중 "
-        "output_format만 다음 도구에 전달하세요."
-    )
-    assert ocr_step["user_choice_required"] is True
-    assert ocr_step["user_choice_instruction"] == (
-        "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
-        "선택값 중 "
-        "ocr_language만 다음 도구에 전달하세요."
-    )
+    assert scan_step == {
+        "tool": "prepare_ocr",
+        "required_parameters": [],
+    }
+    assert processing_step == {
+        "tool": "set_chapters",
+        "required_parameters": ["chapters"],
+    }
+    assert finalize_step == {
+        "tool": "finalize_study",
+        "required_parameters": [],
+    }
+    assert ocr_step == {
+        "tool": "prepare_ocr",
+        "required_parameters": [],
+    }
+    _assert_no_choice_fallback([
+        scan_step, processing_step, finalize_step, ocr_step,
+    ])
 
 
-def test_completed_pending_exposes_finalize_choices_without_failure(tmp_path, ko_short):
-    """완료된 작업은 list_pending_chapters에서 출력 형식 선택지를 제공한다."""
+def test_completed_pending_exposes_choice_free_finalize_step(tmp_path, ko_short):
     wid = server.init_work(
         str(ko_short),
         str(tmp_path / "out"),
@@ -1810,23 +1780,11 @@ def test_completed_pending_exposes_finalize_choices_without_failure(tmp_path, ko
 
     assert pending["ok"], pending
     next_step = pending["data"]["next_step"]
-    assert next_step["tool"] == "finalize_study"
-    assert next_step["required_parameters"] == ["output_format"]
-    assert next_step["choices"] == [
-        {
-            "value": "html",
-            "label": "HTML",
-            "desc": "정적 웹사이트 — 브라우저로 열람 + 진도 저장 서버",
-        },
-        {
-            "value": "md_tui",
-            "label": "Markdown + TUI",
-            "desc": "챕터별 Markdown + 터미널 학습 TUI",
-        },
-    ]
-
-    fallback = server.finalize_study(wid)
-    assert fallback["data"]["choices"] == next_step["choices"]
+    assert next_step == {
+        "tool": "finalize_study",
+        "required_parameters": [],
+    }
+    _assert_no_choice_fallback(pending)
 
 
 def test_pending_before_chapter_setup_does_not_offer_finalize_choices(
@@ -1841,8 +1799,7 @@ def test_pending_before_chapter_setup_does_not_offer_finalize_choices(
     assert "next_step" not in pending["data"]
 
 
-def test_completed_resume_exposes_finalize_choices_without_failure(tmp_path, ko_short):
-    """재개한 완료 작업도 실패 호출 없이 다음 출력 형식을 선택할 수 있다."""
+def test_completed_resume_exposes_choice_free_finalize_step(tmp_path, ko_short):
     out = tmp_path / "out"
     wid = server.init_work(
         str(ko_short),
@@ -1859,10 +1816,11 @@ def test_completed_resume_exposes_finalize_choices_without_failure(tmp_path, ko_
     resumed = server.resume_work(output_dir=str(out))
 
     assert resumed["ok"], resumed
-    assert resumed["data"]["next_step"]["tool"] == "finalize_study"
-    assert {choice["value"] for choice in resumed["data"]["next_step"]["choices"]} == {
-        "html", "md_tui",
+    assert resumed["data"]["next_step"] == {
+        "tool": "finalize_study",
+        "required_parameters": [],
     }
+    _assert_no_choice_fallback(resumed)
 
 
 def test_cleanup_work_removes_completed_workspace_without_rerender(
@@ -1886,11 +1844,6 @@ def test_cleanup_work_removes_completed_workspace_without_rerender(
         "tool": "cleanup_work",
         "required_parameters": [],
         "desc": "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다.",
-        "user_choice_required": True,
-        "user_choice_instruction": (
-            "사용자가 .work 중간 데이터 삭제를 명시적으로 요청한 경우에만 "
-            "cleanup_work를 호출하세요."
-        ),
     }
     main_before = (out / "main.html").read_bytes()
     manifest_before = (out / ".pdf-study-manifest.json").read_bytes()
@@ -1936,18 +1889,18 @@ def test_finalize_rejects_unknown_format(tmp_path, ko_short):
     _check_envelope(r)
     assert r["ok"] is False
     assert "output_format" in r["error"]
-    assert {choice["value"] for choice in r["data"]["choices"]} == {"html", "md_tui"}
-    assert r["data"]["user_choice_required"] is True
+    assert r["data"] is None
+    _assert_no_choice_fallback(r)
 
 
-def test_ocr_language_setup_requires_a_user_selected_value():
+def test_ocr_language_setup_is_private_elicitation_data():
     setup = server._ocr_language_setup()
 
-    assert setup["user_choice_required"] is True
-    assert setup["user_choice_instruction"] == (
-        "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
-        "선택값 중 ocr_language만 다음 도구에 전달하세요."
-    )
+    assert setup["field"] == "ocr_language"
+    assert [choice["value"] for choice in setup["choices"]] == [
+        "korean", "english",
+    ]
+    _assert_no_choice_fallback(setup)
 
 
 def test_md_tui_renderer_finalizes_ok(tmp_path, ko_short):

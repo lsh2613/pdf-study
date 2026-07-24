@@ -11,6 +11,25 @@ import pytest
 from pdf_study import server, workspace
 
 
+def _assert_no_choice_fallback(value):
+    if isinstance(value, dict):
+        for forbidden in (
+            "choices",
+            "user_choice_required",
+            "user_choice_instruction",
+            "user_choice_options",
+            "user_choices",
+            "question_setup",
+            "ocr_language_setup",
+        ):
+            assert forbidden not in value
+        for nested in value.values():
+            _assert_no_choice_fallback(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            _assert_no_choice_fallback(nested)
+
+
 class _ElicitationContext:
     def __init__(
         self,
@@ -118,6 +137,7 @@ def test_mcp_init_work_uses_single_codex_workspace_as_agent_cwd(
     assert response["data"]["output_dir"] == str(expected)
     assert expected.is_dir()
     assert not (server_cwd / "result").exists()
+    _assert_no_choice_fallback(response)
 
 
 def test_mcp_init_work_uses_elicited_question_choices(
@@ -318,6 +338,7 @@ def test_mcp_scan_pdf_uses_elicited_question_choices(
     assert "단답형 문제를 생성할까요?" in ctx.messages[0]
     assert "단답형 문제 포함" in ctx.messages[0]
     assert "챕터 핵심 개념을 짧은 문장으로 답하는 문제를 만듭니다." in ctx.messages[0]
+    _assert_no_choice_fallback(response)
 
 
 def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
@@ -422,6 +443,7 @@ def test_mcp_set_chapters_cancellation_never_changes_state(
     assert response["ok"] is False
     assert len(ctx.messages) == message_count
     assert workspace.load_state(work_id)["phases"]["chapter_setup"] != "completed"
+    _assert_no_choice_fallback(response)
 
 
 def test_mcp_extraction_elicitation_forces_ocr_for_garbled_text(
