@@ -73,6 +73,11 @@ def set_chapters_next_step(text_quality: str | None) -> dict[str, Any]:
         "tool": "set_chapters",
         "required_parameters": ["chapters", "execution_mode", "extraction_mode"],
         "choices": choices(text_quality),
+        "user_choice_required": True,
+        "user_choice_instruction": (
+            "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
+            "선택값 중 execution_mode와 extraction_mode만 다음 도구에 전달하세요."
+        ),
     }
 
 
@@ -112,6 +117,11 @@ def invalid_mode_data(text_quality: str | None) -> dict[str, Any]:
     force_ocr = text_extraction_is_unavailable(text_quality)
     data: dict[str, Any] = {
         "choices": choices(text_quality),
+        "user_choice_required": True,
+        "user_choice_instruction": (
+            "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
+            "선택값 중 execution_mode와 extraction_mode만 다음 도구에 전달하세요."
+        ),
         "execution_modes": list(VALID_EXECUTION_MODES),
         "extraction_modes": ["ocr"] if force_ocr else list(VALID_EXTRACTION_MODES),
     }

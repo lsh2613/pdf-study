@@ -122,6 +122,12 @@ def _with_offset_meta(
     reco["source_pages_available"] = (
         [1, page_count - page_offset] if off_known else None
     )
+    reco["user_choice_required"] = True
+    reco["user_choice_instruction"] = (
+        "user_choice_options의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 "
+        "사용자에게서 받은 선택값에 따라 chapters를 구성하세요. 직접 입력이나 청크를 "
+        "고르면 필요한 PDF 페이지 범위 또는 청크 크기도 사용자에게 받아야 합니다."
+    )
 
     # 발췌본(부분 PDF) 경고 — 목차에 더 많은 챕터가 적혀 있어도
     # 이 파일의 PDF 페이지를 벗어나는 챕터는 제외해야 한다.
@@ -255,6 +261,8 @@ def _build_recommendations(
             "page_offset": int | None,
             "offset_confidence": "high" | "low" | "none",
             "user_choice_options": [{"value", "label", "desc"}, ...],
+            "user_choice_required": True,
+            "user_choice_instruction": str,
             "user_choices": [...],  # 구형 클라이언트 호환용 value 목록
             "next_step_guidance": str,
         }

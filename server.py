@@ -78,6 +78,11 @@ def _ocr_language_setup() -> dict[str, Any]:
         "field": "ocr_language",
         "question": "OCR로 읽을 PDF의 언어를 선택하세요.",
         "choices": [dict(choice) for choice in _OCR_LANGUAGE_CHOICES],
+        "user_choice_required": True,
+        "user_choice_instruction": (
+            "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
+            "선택값 중 ocr_language만 다음 도구에 전달하세요."
+        ),
     }
 
 
@@ -86,6 +91,11 @@ def _prepare_ocr_next_step() -> dict[str, Any]:
         "tool": "prepare_ocr",
         "required_parameters": ["ocr_language"],
         "choices": [dict(choice) for choice in _OCR_LANGUAGE_CHOICES],
+        "user_choice_required": True,
+        "user_choice_instruction": (
+            "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
+            "선택값 중 ocr_language만 다음 도구에 전달하세요."
+        ),
     }
 
 
@@ -94,6 +104,22 @@ def _finalize_next_step() -> dict[str, Any]:
         "tool": "finalize_study",
         "required_parameters": ["output_format"],
         "choices": [dict(choice) for choice in _OUTPUT_FORMAT_CHOICES],
+        "user_choice_required": True,
+        "user_choice_instruction": (
+            "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
+            "선택값 중 output_format만 다음 도구에 전달하세요."
+        ),
+    }
+
+
+def _output_format_choice_data() -> dict[str, Any]:
+    return {
+        "choices": [dict(choice) for choice in _OUTPUT_FORMAT_CHOICES],
+        "user_choice_required": True,
+        "user_choice_instruction": (
+            "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
+            "선택값 중 output_format만 다음 도구에 전달하세요."
+        ),
     }
 
 
@@ -339,7 +365,7 @@ def _question_setup_payload(state: dict[str, Any]) -> dict[str, Any]:
         for item in _QUESTION_SETUP_DEFS
         if options.get(item["state_key"]) is None
     ]
-    return {
+    setup = {
         "pending_fields": [item["field"] for item in questions],
         "questions": questions,
         "user_context_request": (
@@ -357,6 +383,13 @@ def _question_setup_payload(state: dict[str, Any]) -> dict[str, Any]:
             }
         ),
     }
+    if questions:
+        setup["user_choice_required"] = True
+        setup["user_choice_instruction"] = (
+            "questions의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 "
+            "받은 선택값만 pending_fields의 각 파라미터로 다음 scan_pdf 호출에 전달하세요."
+        )
+    return setup
 
 
 def _question_setup_next_action(work_id: str, setup: dict[str, Any]) -> str:
@@ -542,6 +575,13 @@ def init_work(
                     "output_dir": existing["output_dir"],
                     "existing_work": existing,
                     "choices": choices,
+                    "user_choice_required": True,
+                    "user_choice_instruction": (
+                        "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 "
+                        "사용자에게서 받은 선택값에 따라 resume_work, "
+                        "init_work(replace_existing=True), 또는 새 output_dir 호출 중 하나만 "
+                        "실행하세요."
+                    ),
                 },
                 next_action=(
                     "data.choices의 항목과 설명을 바꾸지 말고 사용자에게 보여주세요. "
@@ -1023,6 +1063,24 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
     또는 메인 LLM이 직접 처리 — 어느 쪽이든 같은 프롬프트를 사용.
     """
     state = workspace.load_state(work_id)
+    if state.get("phases", {}).get("chapter_setup") != "completed":
+        data: dict[str, Any] = {
+            "chapter_setup": state.get("phases", {}).get("chapter_setup"),
+            "scanning": state.get("phases", {}).get("scanning"),
+        }
+        outline = workspace.load_outline(work_id)
+        if outline and outline.get("recommendations"):
+            data["recommendations"] = outline["recommendations"]
+            data["next_step"] = _set_chapters_next_step(state.get("text_quality"))
+        return _err(
+            "챕터 설정이 완료되지 않아 sub-agent 프롬프트를 만들 수 없습니다.",
+            data=data,
+            next_action=(
+                "scan_pdf 또는 scan_toc_with_ocr 응답의 챕터 구성·처리 방식 선택지를 "
+                "사용자에게 보여주고, 사용자가 선택한 chapters, execution_mode, "
+                "extraction_mode로 set_chapters를 먼저 호출하세요."
+            ),
+        )
     pending = workspace.pending_chapters_from_state(state)
     pending_ids = set(pending["summary_pending"]) | set(pending["extension_pending"])
     invalid = analysis.validate_chapter_raw_inputs(
@@ -1050,8 +1108,10 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
     extension_pending = data["extension_pending_chapter_ids"]
     if not summary_pending and not extension_pending:
         return _ok(data, next_action=(
-            f"처리할 pending 챕터가 없습니다. finalize_study(work_id=\"{work_id}\")를 "
-            "호출하세요."
+            f"처리할 pending 챕터가 없습니다. "
+            f"list_pending_chapters(work_id=\"{work_id}\")를 호출해 완료 상태를 확인하고, "
+            "그 응답의 output_format 선택지를 사용자에게 보여준 뒤 선택값으로 "
+            "finalize_study를 호출하세요."
         ))
     pending_actions: list[str] = []
     if summary_pending:
@@ -1287,13 +1347,13 @@ def finalize_study(
             "md_tui: 챕터별 Markdown + 학습 TUI' 중 무엇을 원하는지 물어본 뒤 "
             "그 선택을 output_format으로 전달해 다시 호출하세요.\n"
             + analysis.CHOICE_POLICY,
-            data={"choices": [dict(choice) for choice in _OUTPUT_FORMAT_CHOICES]},
+            data=_output_format_choice_data(),
         )
     renderer_cls = RENDERERS.get(output_format)
     if renderer_cls is None:
         return _err(
-            f"unknown output_format: {output_format!r}. "
-            f"choices={list(RENDERERS)}"
+            f"unknown output_format: {output_format!r}. choices={list(RENDERERS)}",
+            data=_output_format_choice_data(),
         )
 
     state = workspace.load_state(work_id)
@@ -1329,6 +1389,11 @@ def finalize_study(
         "tool": "cleanup_work",
         "required_parameters": [],
         "desc": "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다.",
+        "user_choice_required": True,
+        "user_choice_instruction": (
+            "사용자가 .work 중간 데이터 삭제를 명시적으로 요청한 경우에만 "
+            "cleanup_work를 호출하세요."
+        ),
     }
 
     # MCP 서버를 띄운 그 인터프리터(=의존성 rich·pymupdf가 이미 설치된 venv).

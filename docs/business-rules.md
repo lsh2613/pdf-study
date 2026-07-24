@@ -76,7 +76,7 @@ PDF 품질·작업 완료 상태에 따라 달라지는 선택지는 응답이 c
 
 작업 재개는 `<output_dir>/.work/state.json`의 상태를 기준으로 한다. 서버 프로세스가 재시작되어 메모리 등록이 사라져도 디스크 상태가 남아 있으면 같은 `work_id`로 남은 챕터만 이어서 처리할 수 있어야 한다.
 
-재개 시 `get_subagent_prompts`는 완료되지 않은 결과를 `summary_pending_chapter_ids`와 `extension_pending_chapter_ids`로 나눠 반환한다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이며, 완료 챕터는 이 목록과 raw 검증 대상에서 제외한다. workflow와 `next_action`은 각 챕터에 실제로 남은 요약 또는 확장 결과만 생성·저장하도록 안내해야 한다.
+재개 시 `get_subagent_prompts`는 챕터 설정이 완료된 작업에서만 완료되지 않은 결과를 `summary_pending_chapter_ids`와 `extension_pending_chapter_ids`로 나눠 반환한다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이며, 완료 챕터는 이 목록과 raw 검증 대상에서 제외한다. workflow와 `next_action`은 각 챕터에 실제로 남은 요약 또는 확장 결과만 생성·저장하도록 안내해야 한다. 두 목록이 모두 비면 이 도구는 `finalize_study`를 직접 안내하지 않고 `list_pending_chapters`를 먼저 호출하게 해야 한다.
 
 챕터 설정이 완료되고 두 pending 목록이 비면 `list_pending_chapters`와 `resume_work`는
 다음 도구 `finalize_study`의 `output_format` 선택지를 구조화해 반환한다. 사용자는

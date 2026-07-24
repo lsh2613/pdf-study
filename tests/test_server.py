@@ -221,6 +221,8 @@ def test_init_work_requests_optional_question_types_and_user_context(tmp_path, k
     )
     assert setup["user_context_request"]["required"] is False
     assert "학습 목적" in setup["user_context_request"]["desc"]
+    assert setup["user_choice_required"] is True
+    assert "반드시 사용자에게서 받은 선택값" in setup["user_choice_instruction"]
     assert "scan_pdf" in r["next_action"]
 
 
@@ -375,6 +377,8 @@ def test_init_work_existing_output_returns_choices_without_mutation(tmp_path, ko
         "resume", "replace", "new_output_dir",
     ]
     assert all(choice["label"] and choice["desc"] for choice in repeated["data"]["choices"])
+    assert repeated["data"]["user_choice_required"] is True
+    assert "반드시 사용자에게서 받은 선택값" in repeated["data"]["user_choice_instruction"]
     assert "항목과 설명을 바꾸지 말고" in repeated["next_action"]
     assert state_path.read_bytes() == before
 
@@ -483,6 +487,8 @@ def test_scan_pdf_exposes_structured_next_set_chapters_choices(tmp_path, ko_with
     chapter_choices = recommendations["user_choice_options"]
     assert [choice["value"] for choice in chapter_choices] == recommendations["user_choices"]
     assert all(choice["label"] and choice["desc"] for choice in chapter_choices)
+    assert recommendations["user_choice_required"] is True
+    assert "반드시 사용자에게서 받은 선택값" in recommendations["user_choice_instruction"]
 
     next_step = scanned["data"]["next_step"]
     assert next_step["tool"] == "set_chapters"
@@ -1080,9 +1086,22 @@ def test_get_subagent_prompts_ignores_missing_raw_when_all_results_completed(
     assert response["data"]["summary_pending_chapter_ids"] == []
     assert response["data"]["extension_pending_chapter_ids"] == []
     assert response["data"]["chapter_ids"] == []
-    assert "finalize_study" in response["next_action"]
+    assert "list_pending_chapters" in response["next_action"]
+    assert response["next_action"].index("list_pending_chapters") < response["next_action"].index("finalize_study")
     assert "save_chapter_result" not in response["next_action"]
     assert "save_extension_result" not in response["next_action"]
+
+
+def test_get_subagent_prompts_rejects_work_without_chapter_setup(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    _scan(wid)
+
+    response = server.get_subagent_prompts(wid)
+
+    assert response["ok"] is False
+    assert response["data"]["chapter_setup"] != "completed"
+    assert "set_chapters" in response["next_action"]
+    assert "finalize_study" not in response["next_action"]
 
 
 def test_get_subagent_prompts_next_action_mentions_only_summary_when_pending(
@@ -1677,8 +1696,37 @@ def test_finalize_requires_output_format(tmp_path, ko_short):
     assert r["ok"] is False
     assert "output_format" in r["error"]
     assert {c["value"] for c in r["data"]["choices"]} == {"html", "md_tui"}
+    assert r["data"]["user_choice_required"] is True
+    assert "반드시 사용자에게서 받은 선택값" in r["data"]["user_choice_instruction"]
     # 구조화 선택 도구(AskUserQuestion) 사용 정책이 안내에 포함
     assert "AskUserQuestion" in r["error"]
+
+
+def test_choice_next_steps_explicitly_require_user_selected_values(tmp_path, ko_short):
+    wid = server.init_work(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    scanned = _scan(wid)
+
+    scan_step = scanned["data"]["next_step"]
+    processing_step = server._set_chapters_next_step("normal")
+    finalize_step = server._finalize_next_step()
+    ocr_step = server._prepare_ocr_next_step()
+
+    assert scan_step["user_choice_required"] is True
+    assert "반드시 사용자에게서 받은 선택값" in scan_step["user_choice_instruction"]
+    assert processing_step["user_choice_required"] is True
+    assert "반드시 사용자에게서 받은 선택값" in processing_step["user_choice_instruction"]
+    assert finalize_step["user_choice_required"] is True
+    assert finalize_step["user_choice_instruction"] == (
+        "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
+        "선택값 중 "
+        "output_format만 다음 도구에 전달하세요."
+    )
+    assert ocr_step["user_choice_required"] is True
+    assert ocr_step["user_choice_instruction"] == (
+        "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
+        "선택값 중 "
+        "ocr_language만 다음 도구에 전달하세요."
+    )
 
 
 def test_completed_pending_exposes_finalize_choices_without_failure(tmp_path, ko_short):
@@ -1774,6 +1822,11 @@ def test_cleanup_work_removes_completed_workspace_without_rerender(
         "tool": "cleanup_work",
         "required_parameters": [],
         "desc": "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다.",
+        "user_choice_required": True,
+        "user_choice_instruction": (
+            "사용자가 .work 중간 데이터 삭제를 명시적으로 요청한 경우에만 "
+            "cleanup_work를 호출하세요."
+        ),
     }
     main_before = (out / "main.html").read_bytes()
     manifest_before = (out / ".pdf-study-manifest.json").read_bytes()
@@ -1819,6 +1872,18 @@ def test_finalize_rejects_unknown_format(tmp_path, ko_short):
     _check_envelope(r)
     assert r["ok"] is False
     assert "output_format" in r["error"]
+    assert {choice["value"] for choice in r["data"]["choices"]} == {"html", "md_tui"}
+    assert r["data"]["user_choice_required"] is True
+
+
+def test_ocr_language_setup_requires_a_user_selected_value():
+    setup = server._ocr_language_setup()
+
+    assert setup["user_choice_required"] is True
+    assert setup["user_choice_instruction"] == (
+        "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
+        "선택값 중 ocr_language만 다음 도구에 전달하세요."
+    )
 
 
 def test_md_tui_renderer_finalizes_ok(tmp_path, ko_short):

@@ -41,11 +41,27 @@ def test_ocr_only_choice_step_and_fallback_data_share_the_same_contract():
     assert choices == processing_mode_contract.invalid_mode_data("garbled")["choices"]
     assert processing_mode_contract.invalid_mode_data("garbled") == {
         "choices": choices,
+        "user_choice_required": True,
+        "user_choice_instruction": (
+            "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
+            "선택값 중 execution_mode와 extraction_mode만 다음 도구에 전달하세요."
+        ),
         "execution_modes": ["sequential", "parallel"],
         "extraction_modes": ["ocr"],
         "text_quality": "garbled",
         "forced_extraction_mode": "ocr",
     }
+
+
+def test_set_chapters_next_step_requires_presenting_choices_to_the_user():
+    step = processing_mode_contract.set_chapters_next_step(None)
+
+    assert step["user_choice_required"] is True
+    assert step["user_choice_instruction"] == (
+        "choices의 모든 항목과 설명을 그대로 사용자에게 보여주고, 반드시 사용자에게서 받은 "
+        "선택값 중 "
+        "execution_mode와 extraction_mode만 다음 도구에 전달하세요."
+    )
 
 
 def test_invalid_mode_messages_are_built_from_the_canonical_options():
