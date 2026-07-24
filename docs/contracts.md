@@ -54,6 +54,12 @@ workspace가 없거나 여러 개면 MCP 서버 cwd로 폴백하지 않고 실�
 덮어쓰지 않는다. 새 작업은 단답형·주관식·확장형과 선택적 `user_context` form을
 승인한 뒤 만든다. 빈 context도 유효한 확정값이다.
 
+workspace를 하나로 식별할 수 없는 실패 응답은
+`data.required_context=["workspace_or_root"]`와 권장 상대 경로만 반환한다.
+`next_action`은 클라이언트가 정확히 하나의 workspace 또는 file root를 노출한 뒤
+같은 `init_work(pdf_path)` 호출을 재시도하도록 안내하며, 공개 스키마에 없는 경로
+인자를 요구하면 안 된다.
+
 `resume_work(pdf_path)`는 같은 고정 경로의 `.work/state.json`을
 `resume_confirmed` Elicitation 승인 뒤 다시 등록한다.
 
@@ -114,6 +120,10 @@ pending 판정의 정확한 상태 매핑은 다음과 같다.
 `cleanup_work(work_id)`는 삭제 Elicitation 승인 뒤 rendering phase가 완료된 작업의
 정확한 `.work`만 삭제한다. 결과 파일, manifest, 진도, 사용자 파일은 건드리지 않고
 렌더링도 다시 실행하지 않는다.
+
+공개 도구 설명, 오류와 `next_action`의 호출 예시는 등록된 MCP 입력만 사용할 수
+있다. 선택값이 필요한 경우에는 해당 도구가 form Elicitation을 연다고 안내하고,
+제거된 선택 인자나 번호형 자유 텍스트 선택지를 대체 입력처럼 노출하지 않는다.
 
 렌더러는 임시 staging 폴더에 완전한 새 세대를 만든 뒤 이전 manifest의 관리 경로만 교체한다. 렌더 또는 설치가 실패하면 이전 결과와 manifest를 복원하고 partial 파일을 최종 폴더에 남기지 않는다. manifest가 관리하지 않는 기존 경로와 새 렌더 경로가 충돌하면 사용자 파일을 덮어쓰지 않고 실패한다.
 

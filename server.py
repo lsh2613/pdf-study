@@ -277,10 +277,8 @@ def _pending_guidance(
     if not summary_pending and not extension_pending and _ready_to_finalize(state):
         return (
             f"summary_pending={summary_pending}, extension_pending={extension_pending}. "
-            f'남은 챕터가 없습니다. finalize_study(work_id="{work_id}", '
-            "output_format=...)로 진행하세요. output_format은 사용자에게 "
-            "'html(웹 사이트) / md_tui(터미널 학습)' 중 물어보고 그 선택을 "
-            "전달하세요."
+            f'남은 챕터가 없습니다. finalize_study(work_id="{work_id}")를 '
+            "호출하면 서버가 최종 결과 형식 Elicitation을 엽니다."
         )
 
     if not summary_pending and not extension_pending:
@@ -526,16 +524,16 @@ async def _agent_cwd(ctx: Context) -> Path | None:
 def _missing_output_dir(pdf_path: str) -> dict[str, Any]:
     suggested_suffix = str(Path("result") / _pdf_name_slug(pdf_path))
     return _err(
-        "현재 agent workspace를 하나로 식별할 수 없어 output_dir을 정하지 않았습니다. "
-        "MCP 서버 실행 경로로 대체하지 않습니다. 현재 agent cwd를 기준으로 한 절대 경로를 "
-        "output_dir에 전달하세요.",
+        "현재 agent workspace 또는 MCP file root를 하나로 식별할 수 없어 고정 출력 "
+        "폴더를 계산하지 않았습니다. MCP 서버 실행 경로로 대체하지 않습니다.",
         data={
-            "required_parameters": ["output_dir"],
+            "required_context": ["workspace_or_root"],
             "suggested_relative_path": suggested_suffix,
         },
         next_action=(
-            "현재 agent cwd를 확인한 뒤 "
-            f"output_dir=<agent cwd>/{suggested_suffix}로 같은 도구를 다시 호출하세요."
+            "MCP 세션에 정확히 하나의 Codex workspace 또는 file root를 노출한 뒤 "
+            f"같은 도구를 동일한 입력으로 다시 호출하세요. 결과는 {suggested_suffix}에 "
+            "생성됩니다."
         ),
     )
 
@@ -994,7 +992,7 @@ def _resume_work_impl(
     """이전에 시작했던 작업을 디스크에서 재개합니다 (서버 재시작 후 등).
 
     work_id → work_dir 매핑은 메모리에만 있어 MCP 서버가 재시작되면
-    사라집니다. 이 도구는 <output_dir>/.work/state.json에 보존된 work_id를
+    사라집니다. 이 도구는 고정 결과 폴더의 .work/state.json에 보존된 work_id를
     복원해 이후 도구들이 정상 동작하도록 합니다.
 
     공개 MCP 입력은 pdf_path 하나뿐입니다. 현재 agent workspace 아래의 고정 경로
@@ -1111,15 +1109,14 @@ def _scan_pdf_impl(
     챕터 경계는 텍스트 레이어를 신뢰하지 않고 두 소스에서만 얻습니다:
     응답.data.recommendations.primary_mode 가
       - "from_outline": PDF 내장 목차(북마크)로 챕터를 구성. suggested_chapters에
-        담겨 옵니다. **사용자에게 보여 확인**받고, 맞으면 그대로 set_chapters.
-        **틀리면 scan_pdf(work_id, force_vision=True)로 재호출**하면 목차 페이지를
-        이미지로 렌더합니다. OCR은 사용자가 한국어·영어를 고른 뒤 prepare_ocr 후
-        scan_toc_with_ocr에서 수행합니다.
+        담겨 옵니다. set_chapters를 호출하면 서버가 구성·범위를 form
+        Elicitation으로 확인합니다. 목차 이미지 재분석을 선택하면
+        scan_pdf(work_id, force_vision=True)로 목차 페이지를 렌더합니다.
       - "analyze_toc_from_images": 내장 목차가 없음. 응답.data.toc_page_images
         (목차 페이지 JPEG 경로, ocr_status)를 확인한 뒤 prepare_ocr와
         scan_toc_with_ocr를 호출해 OCR 텍스트를 얻으세요.
-        **PDF 텍스트나 파이썬 스크립트로 목차를 추정하지 마세요.** OCR 언어
-        선택지를 그대로 사용자에게 보여준 뒤 prepare_ocr에 전달하세요.
+        **PDF 텍스트나 파이썬 스크립트로 목차를 추정하지 마세요.** prepare_ocr를
+        호출하면 서버가 OCR 언어 Elicitation을 엽니다.
     force_vision은 외부 계약 호환용 legacy 이름이며, 현재 동작은 목차 페이지
     이미지 렌더입니다.
 
@@ -1127,10 +1124,10 @@ def _scan_pdf_impl(
     기존 작업이면 이 도구가 스캔 전에 form Elicitation을 엽니다. 선택값은 공개
     도구 인자로 받지 않습니다.
 
-    **페이지 오프셋 + 선택지 흐름 (필수)**:
+    **페이지 오프셋 + Elicitation 흐름 (필수)**:
     recommendations에 page_offset(PDF = 원문 + offset), offset_confidence,
-    각 챕터의 pdf_pages(PDF 페이지)·source_pages(원문 페이지), 구조화된
-    recommendations와 next_step_guidance가 담깁니다.
+    각 챕터의 pdf_pages(PDF 페이지)·source_pages(원문 페이지)와
+    next_step_guidance가 담깁니다.
     응답.data.set_chapters_next_step은 에이전트가 구성해야 할 chapters만 요구합니다.
     챕터 구성·범위, 본문 추출 방식, 실행 방식은 set_chapters 호출 중 서버가 각각
     별도의 Elicitation으로 확인합니다.
@@ -1262,7 +1259,8 @@ def _prepare_ocr_impl(work_id: str, ocr_language: str = "") -> dict[str, Any]:
     공개 MCP 입력은 work_id뿐이며 서버가 한국어/영어를 form Elicitation으로
     확인합니다. 첫 실행에서 모델 파일 다운로드와 모델 로드가 오래 걸릴 수 있으므로,
     OCR이 필요한 흐름에서는 이 도구를 별도로 호출해 사용자에게 지연 이유를 드러냅니다.
-    다음 단계: scan_toc_with_ocr(work_id) 또는 set_chapters(..., extraction_mode="ocr")
+    다음 단계: scan_toc_with_ocr(work_id) 또는 set_chapters(work_id, chapters,
+    book_info). set_chapters가 본문 추출 방식과 실행 방식을 Elicitation으로 확인합니다.
     """
     if ocr_language not in analysis.ocr.OCR_LANGUAGE_MODELS:
         return _err(
@@ -1272,7 +1270,8 @@ def _prepare_ocr_impl(work_id: str, ocr_language: str = "") -> dict[str, Any]:
     data["ocr_language"] = ocr_language
     return _ok(data, next_action=(
         f'scan_toc_with_ocr(work_id="{work_id}") 또는 '
-        f'set_chapters(work_id="{work_id}", ..., extraction_mode="ocr")'
+        f'set_chapters(work_id="{work_id}", chapters=..., book_info=...)를 호출하세요. '
+        "set_chapters가 본문 추출 방식과 실행 방식을 Elicitation으로 확인합니다."
     ))
 
 
@@ -1325,7 +1324,7 @@ def scan_toc_with_ocr(work_id: str) -> dict[str, Any]:
             "OCR 모델 캐시가 없어 목차 OCR을 시작하지 않았습니다. "
             "prepare_ocr(work_id)를 먼저 호출해 모델 다운로드/로드를 사용자가 볼 수 "
             "있는 단계에서 수행하세요.",
-            data=data,
+            data=_without_choice_fallback(data),
             next_action=(
                 f'prepare_ocr(work_id="{work_id}")'
             ),
@@ -1333,7 +1332,7 @@ def scan_toc_with_ocr(work_id: str) -> dict[str, Any]:
     data["next_step"] = _set_chapters_next_step(
         workspace.load_state(work_id).get("text_quality")
     )
-    return _ok(data, next_action=(
+    return _ok(_without_choice_fallback(data), next_action=(
         f'set_chapters(work_id="{work_id}", chapters=<toc_page_images[].ocr_text와 '
         "path 이미지로 구성>, book_info={...})를 호출하면 서버가 필요한 "
         "Elicitation을 차례로 엽니다."
@@ -1368,12 +1367,12 @@ def _set_chapters_impl(
       sub-agent 디스패치, 렌더링 모두에서 제외됩니다. **찾아보기·색인·
       판권·저자 소개 같은 비본문 페이지가 섞여 들어왔을 때 사용**하세요.
     - book_info: 메인 LLM이 PDF 메타·목차로 보강한 책 정보
-    extraction_mode="ocr"에서는 set_chapters 시점에 PaddleOCR CPU로 본문 텍스트를
-    선계산합니다. 서브에이전트는 get_chapter_content가 반환한 text를 읽습니다.
+    OCR 방식에서는 set_chapters 시점에 PaddleOCR CPU로 본문 텍스트를 선계산합니다.
+    서브에이전트는 get_chapter_content가 반환한 text를 읽습니다.
 
     ※ text 모드 가드: scan_pdf가 측정한 text_quality가 "garbled"(인코딩 깨짐) 또는
       "no_text_layer"(텍스트 거의 없음)이면 text 추출이 무의미하므로 거부하고
-      extraction_mode='ocr'로 다시 호출하도록 강제합니다(data.forced_extraction_mode="ocr").
+      본문 추출 Elicitation에서 OCR 방식만 허용합니다.
     다음 단계: get_subagent_prompts(work_id)
     """
     if execution_mode not in processing_mode_contract.VALID_EXECUTION_MODES or \
@@ -1402,9 +1401,9 @@ def _set_chapters_impl(
             )
             return _err(
                 f"이 PDF는 {reason} text 모드 추출 결과를 신뢰할 수 없습니다 "
-                f"(text_quality={tq}). extraction_mode='ocr'로 다시 호출하세요 — "
-                "PaddleOCR CPU로 본문을 선계산합니다. "
-                "execution_mode는 고른 값을 그대로 유지하면 됩니다.",
+                f"(text_quality={tq}). 같은 set_chapters 호출을 다시 실행해 본문 추출 "
+                "Elicitation에서 OCR 방식을 선택하세요. PaddleOCR CPU로 본문을 "
+                "선계산합니다.",
                 data={
                     "text_quality": tq,
                     "forced_extraction_mode": "ocr",
@@ -1567,15 +1566,18 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
         }
         outline = workspace.load_outline(work_id)
         if outline and outline.get("recommendations"):
-            data["recommendations"] = outline["recommendations"]
+            data["recommendations"] = _without_choice_fallback(
+                outline["recommendations"],
+            )
             data["next_step"] = _set_chapters_next_step(state.get("text_quality"))
         return _err(
             "챕터 설정이 완료되지 않아 sub-agent 프롬프트를 만들 수 없습니다.",
             data=data,
             next_action=(
-                "scan_pdf 또는 scan_toc_with_ocr 응답의 챕터 구성·처리 방식 선택지를 "
-                "사용자에게 보여주고, 사용자가 선택한 chapters, execution_mode, "
-                "extraction_mode로 set_chapters를 먼저 호출하세요."
+                "scan_pdf 또는 scan_toc_with_ocr 응답에서 chapters를 구성한 뒤 "
+                f'set_chapters(work_id="{work_id}", chapters=..., book_info=...)를 '
+                "호출하세요. 서버가 챕터 범위, 본문 추출 방식, 실행 방식을 각각 "
+                "Elicitation으로 확인합니다."
             ),
         )
     pending = workspace.pending_chapters_from_state(state)
@@ -1831,11 +1833,11 @@ def _finalize_study_impl(
     output_format: str = "",
     keep_work_dir: bool = True,
 ) -> dict[str, Any]:
-    """학습 자료를 output_dir에 렌더링합니다.
+    """학습 자료를 고정 결과 폴더에 렌더링합니다.
 
-    공개 MCP 입력은 work_id뿐이며, 서버가 form Elicitation으로 output_format을
+    공개 MCP 입력은 work_id뿐이며, 서버가 form Elicitation으로 최종 결과 형식을
     확인한 뒤 중간 작업 폴더를 보존한 채 렌더링합니다.
-    내부 output_format 값:
+    지원 형식:
         - html: 정적 사이트 (브라우저로 열람)
         - md_tui: 챕터별 폴더 + summary.md + 학습 TUI
     응답의 next_action에 학습 자료 실행 방법이 포함됩니다.

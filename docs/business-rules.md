@@ -54,7 +54,13 @@ sequential/parallel 실행 방식의 세 elicitation으로 분리한다. 두 처
 출력 폴더는 요청에서 단일 Codex workspace 또는 단일 MCP file root를 식별할 수 있을
 때만 그 아래 `result/<pdf_basename>`으로 계산한다. 공개 MCP 도구는 `output_dir`을
 받지 않으며, workspace가 없거나 여러 개라 모호하면 MCP 서버 프로세스 cwd로
-폴백하지 않고 상태 변경 없이 실패한다.
+폴백하지 않고 상태 변경 없이 실패한다. 이때 클라이언트가 정확히 하나의 workspace
+또는 file root를 노출한 뒤 같은 호출을 재시도하도록 안내하며, 제거된 경로
+파라미터를 입력하라고 요구하면 안 된다.
+
+공개 도구 설명, 오류와 `next_action`은 등록된 MCP 입력만 호출 예시에 사용할 수
+있다. 선택은 해당 도구의 form Elicitation으로 받는다고 안내하고, 제거된 선택
+파라미터나 번호형 자유 텍스트 선택지를 대체 경로로 제공하면 안 된다.
 
 ## 문제 생성
 

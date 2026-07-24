@@ -35,7 +35,9 @@
 스키마에서 선택 파라미터를 제거하고, 공개 응답에서도 `choices`,
 `user_choice_required`, `user_choice_instruction`, `question_setup`,
 `ocr_language_setup` 같은 fallback을 제거한다. 선택 정의는 Elicitation 메시지를
-구성하는 private helper 안에만 둔다.
+구성하는 private helper 안에만 둔다. 공개 도구 설명, 오류와 `next_action`도 실제
+등록된 입력만 예시로 사용하고, 선택이 필요하면 도구가 form을 연다고 안내한다.
+번호형 자유 텍스트 선택지는 구조화 fallback과 같은 우회 경로로 취급한다.
 
 ## Python 직접 실행으로 Elicitation 우회
 
@@ -90,7 +92,9 @@ sync 구현을 한 번 호출한다. 따라서 두 번째나 세 번째 form에�
 대응: MCP 래퍼는 요청 메타의 단일 Codex workspace를 우선 사용하고, 없으면 단일
 MCP root를 사용한다. 공개 `output_dir` 없이 그 아래 `result/<pdf-name>`을 계산한다.
 workspace가 없거나 여러 개라 모호하면 서버 cwd로 폴백하지 않고 상태 변경 없이
-실패한다. sync 구현도 호출자 workspace를 명시적으로 주입받지 않은 빈·상대 경로를
+실패한다. 실패 응답은 필요한 세션 context가 `workspace_or_root`임을 표시하고,
+클라이언트가 정확히 하나의 root를 노출한 뒤 같은 공개 호출을 재시도하도록
+안내한다. sync 구현도 호출자 workspace를 명시적으로 주입받지 않은 빈·상대 경로를
 거부한다.
 
 ## 챕터 설정 검증과 처리 상태

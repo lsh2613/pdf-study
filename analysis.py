@@ -52,20 +52,6 @@ def _trusted_offset_fields(offset_info: dict[str, Any]) -> dict[str, Any]:
         "page_offset_confidence": confidence,
     }
 
-# 모든 "선택지를 사용자에게 제시" 지점에 공통으로 붙이는 정책. 메인 에이전트가
-# MCP 선택지를 자기 말로 풀어쓰거나(요약/번역), '권장·기본값' 같은 표현을 임의로
-# 덧붙이는 드리프트를 막기 위함. server.py의 거부 메시지도 이걸 재사용한다.
-CHOICE_POLICY = (
-    "[선택지 제시 규칙] 이 선택지는 MCP가 준 것이다. 클라이언트에 **구조화된 "
-    "선택 도구가 있으면 반드시 그 도구로 물어라**(예: Claude Code의 AskUserQuestion) "
-    "— data.choices, data.next_step.choices 또는 recommendations.user_choice_options를 "
-    "옵션으로 그대로 넣어라. legacy user_choices는 값 호환용이다. 없으면 번호 목록으로 "
-    "보여줘라. 어느 경우든 각 항목의 label·설명을 **그대로** 쓰고, 문구를 요약·변형하지 "
-    "말며, 항목을 합치거나 빼거나 새로 만들지 말고, MCP가 명시하지 않은 '추천·기본값' "
-    "표현을 임의로 덧붙이지 마라. 사용자가 고른 값만 전달해 재호출하라. "
-)
-
-
 # ---------------------------------------------------------------------------
 # scan_pdf
 # ---------------------------------------------------------------------------
@@ -147,16 +133,6 @@ def _with_offset_meta(
         + ("." if off_known else " (offset 미측정 → 원문 페이지는 '미상'으로 표기).")
         + " source_pages가 null이면 원문 번호가 없는 front matter(표지·서문)입니다. "
     )
-    manual_chunk = (
-        "직접 입력을 고르면 챕터 범위를 **PDF 페이지**로 받으세요"
-        + (f" (사용자가 원문 페이지로 말하면 PDF = 원문 + {page_offset} 로 변환). "
-           if off_known else " (offset 미측정이라 PDF 페이지로 직접 받으세요). ")
-        + "청크를 고르면 N페이지 균등 분할. "
-    )
-    # 모든 단계 공통 정책 (CHOICE_POLICY): 구조화 선택 도구로 user_choice_options를
-    # 그대로 제시하고, 임의로 합치거나 빼거나 권장 표현을 덧붙이지 말 것.
-    choices_policy = "그런 다음 " + CHOICE_POLICY
-
     if source == "outline":
         reco["user_choice_options"] = [
             {
@@ -184,12 +160,10 @@ def _with_offset_meta(
         reco["next_step_guidance"] = (
             "[내장 목차] PDF 북마크(get_toc)에서 챕터를 구성했습니다 — PDF 페이지를 "
             "직접 가리켜 offset/OCR 없이 정확합니다. " + excerpt_note + two_number
-            + choices_policy
-            + "① 이대로 진행 → suggested_chapters를 그대로 set_chapters. "
-            "② 목차가 틀림 → scan_pdf(work_id, force_vision=True)로 목차 페이지를 "
-            "이미지로 렌더한 뒤 prepare_ocr → scan_toc_with_ocr로 OCR 텍스트를 "
-            "얻어 재구성. "
-            "③ 직접 입력. ④ 청크. " + manual_chunk
+            + "set_chapters(work_id, chapters=suggested_chapters, book_info=...)를 "
+            "호출하면 서버가 챕터 구성·범위와 처리 방식을 form Elicitation으로 "
+            "확인합니다. 목차 이미지 재분석이 확정되면 반환 안내에 따라 "
+            "scan_pdf(work_id, force_vision=True)를 호출하세요."
         )
     else:
         reco["user_choice_options"] = [
@@ -213,8 +187,8 @@ def _with_offset_meta(
         reco["next_step_guidance"] = (
             "[목차 이미지 분석] 내장 목차가 없습니다. **PDF 텍스트레이어나 파이썬 "
             "스크립트로 목차를 추정하지 마세요 — 스캔본·글꼴 깨진 PDF에서 잘못된 "
-            "페이지가 나옵니다.** scan_pdf가 준 OCR 언어를 골라 "
-            "prepare_ocr(work_id, ocr_language) 후 "
+            "페이지가 나옵니다.** prepare_ocr(work_id)를 호출해 서버의 OCR 언어 "
+            "Elicitation을 완료한 후 "
             "scan_toc_with_ocr(work_id)를 호출해 toc_page_images[].ocr_text를 얻고, "
             "① 최상위 챕터 항목만(하위 절 '1.1' 무시) 골라 각 항목의 원문 페이지번호를 "
             "읽고, ② toc_page_images[].path 이미지의 꼬리말 원문 번호와 PDF 페이지를 "
@@ -225,8 +199,10 @@ def _with_offset_meta(
             "챕터 경계를 자동 확정하지 않음). ocr_error가 있거나 OCR 텍스트만으로 "
             "부족하면 path 이미지를 확인하세요. chunk_fallback은 목차를 도저히 못 "
             "읽을 때만. "
-            + excerpt_note + two_number + choices_policy
-            + "① 이대로 진행 ② 직접 입력 ③ 청크. " + manual_chunk
+            + excerpt_note + two_number
+            + "chapters를 구성해 set_chapters(work_id, chapters=..., "
+            "book_info=...)를 호출하면 서버가 구성·범위와 처리 방식을 form "
+            "Elicitation으로 확인합니다."
         )
     return reco
 

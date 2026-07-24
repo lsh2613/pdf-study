@@ -28,6 +28,26 @@ def _assert_no_choice_fallback(value):
     elif isinstance(value, list):
         for nested in value:
             _assert_no_choice_fallback(nested)
+    elif isinstance(value, str):
+        assert "[선택지 제시 규칙]" not in value
+        assert "① 이대로 진행" not in value
+
+
+def _assert_no_removed_workflow_inputs(value) -> None:
+    if isinstance(value, dict):
+        for nested in value.values():
+            _assert_no_removed_workflow_inputs(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            _assert_no_removed_workflow_inputs(nested)
+    elif isinstance(value, str):
+        for removed in (
+            "output_dir",
+            "output_format",
+            "extraction_mode",
+            "execution_mode",
+        ):
+            assert removed not in value
 
 
 class _ElicitationContext:
@@ -104,8 +124,95 @@ def test_sync_init_work_never_falls_back_to_mcp_server_cwd(
     response = server._init_work_impl(str(ko_short), "")
 
     assert response["ok"] is False
-    assert response["data"]["required_parameters"] == ["output_dir"]
+    assert response["data"]["required_context"] == ["workspace_or_root"]
+    assert "required_parameters" not in response["data"]
+    _assert_no_removed_workflow_inputs(response["error"])
+    _assert_no_removed_workflow_inputs(response["next_action"])
     assert not (server_cwd / "result").exists()
+
+
+def test_choice_tool_descriptions_never_advertise_removed_inputs():
+    choice_tool_names = {
+        "init_work",
+        "resume_work",
+        "scan_pdf",
+        "prepare_ocr",
+        "set_chapters",
+        "finalize_study",
+        "cleanup_work",
+    }
+
+    for tool in asyncio.run(server.mcp.list_tools()):
+        if tool.name in choice_tool_names:
+            _assert_no_removed_workflow_inputs(tool.description)
+
+
+def test_public_recovery_guidance_uses_registered_tool_inputs(
+    tmp_path, ko_short, monkeypatch,
+):
+    initialized = server._init_work_impl(
+        str(ko_short),
+        str(tmp_path / "out"),
+        enable_short_answer=False,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    work_id = initialized["data"]["work_id"]
+
+    scanned = server._scan_pdf_impl(work_id)
+    assert scanned["ok"] is True, scanned
+    pending = server.get_subagent_prompts(work_id)
+    _assert_no_choice_fallback(pending)
+    _assert_no_removed_workflow_inputs(pending)
+
+    monkeypatch.setattr(
+        server.analysis,
+        "prepare_ocr_impl",
+        lambda _work_id, _language: {},
+    )
+    prepared = server._prepare_ocr_impl(work_id, "korean")
+    _assert_no_removed_workflow_inputs(prepared["next_action"])
+
+    finalize_guidance = server._pending_guidance(
+        {
+            "phases": {"chapter_setup": "completed"},
+            "chapters": {},
+            "question_options": {"extension": False},
+        },
+        work_id,
+    )
+    _assert_no_removed_workflow_inputs(finalize_guidance)
+
+
+def test_scan_toc_with_ocr_filters_private_choice_data(
+    tmp_path, ko_short, monkeypatch,
+):
+    initialized = server._init_work_impl(
+        str(ko_short),
+        str(tmp_path / "out"),
+        enable_short_answer=False,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    work_id = initialized["data"]["work_id"]
+    workspace.update_state(work_id, ocr_language="korean")
+    monkeypatch.setattr(
+        server.analysis,
+        "scan_toc_with_ocr_impl",
+        lambda _work_id: {
+            "toc_page_images": [],
+            "recommendations": {
+                "user_choice_options": [{"value": "proceed"}],
+                "next_step_guidance": "set_chapters(work_id, chapters=...)",
+            },
+        },
+    )
+
+    response = server.scan_toc_with_ocr(work_id)
+
+    assert response["ok"] is True
+    _assert_no_choice_fallback(response)
+    _assert_no_removed_workflow_inputs(response)
 
 
 def test_mcp_init_work_uses_single_codex_workspace_as_agent_cwd(
@@ -339,6 +446,7 @@ def test_mcp_scan_pdf_uses_elicited_question_choices(
     assert "단답형 문제 포함" in ctx.messages[0]
     assert "챕터 핵심 개념을 짧은 문장으로 답하는 문제를 만듭니다." in ctx.messages[0]
     _assert_no_choice_fallback(response)
+    _assert_no_removed_workflow_inputs(response)
 
 
 def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
