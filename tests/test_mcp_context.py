@@ -43,6 +43,38 @@ class _ElicitationContext:
         return SimpleNamespace(action=action, data=data)
 
 
+def test_choice_tools_fail_closed_without_elicitation(tmp_path, ko_short):
+    ctx = _ElicitationContext(
+        cwd=tmp_path,
+        elicitation_supported=False,
+    )
+    calls = [
+        server._mcp_init_work_tool(pdf_path=str(ko_short), ctx=ctx),
+        server._mcp_resume_work_tool(pdf_path=str(ko_short), ctx=ctx),
+        server._mcp_scan_pdf_tool(work_id="missing", ctx=ctx),
+        server._mcp_prepare_ocr_tool(work_id="missing", ctx=ctx),
+        server._mcp_set_chapters_tool(
+            work_id="missing",
+            chapters=[],
+            ctx=ctx,
+        ),
+        server._mcp_finalize_study_tool(work_id="missing", ctx=ctx),
+        server._mcp_cleanup_work_tool(work_id="missing", ctx=ctx),
+    ]
+
+    responses = [asyncio.run(call) for call in calls]
+
+    assert all(response["ok"] is False for response in responses)
+    assert all(
+        response["data"] == {
+            "required_capability": "elicitation.form",
+        }
+        for response in responses
+    )
+    assert ctx.messages == []
+    assert not (tmp_path / "result").exists()
+
+
 def test_sync_init_work_never_falls_back_to_mcp_server_cwd(
     tmp_path, ko_short, monkeypatch,
 ):

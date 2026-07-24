@@ -518,6 +518,15 @@ def _client_supports_elicitation(ctx: Context) -> bool:
     )
 
 
+def _elicitation_required(ctx: Context) -> dict[str, Any] | None:
+    if _client_supports_elicitation(ctx):
+        return None
+    return _err(
+        "이 도구는 사용자 선택을 직접 받기 위해 MCP form elicitation 지원이 필요합니다.",
+        data={"required_capability": "elicitation.form"},
+    )
+
+
 async def _agent_cwd(ctx: Context) -> Path | None:
     """현재 호출자의 단일 workspace를 찾는다. 서버 프로세스 cwd는 쓰지 않는다."""
     codex_paths = _codex_workspace_paths(ctx)
@@ -960,6 +969,9 @@ async def _mcp_init_work_tool(
     replace_existing: bool = False,
 ) -> dict[str, Any]:
     """MCP 요청 workspace를 sync 구현에 명시적으로 전달한다."""
+    capability_error = _elicitation_required(ctx)
+    if capability_error is not None:
+        return capability_error
     agent_cwd = await _agent_cwd(ctx)
     resolved_dir = _resolve_output_dir(
         output_dir,
@@ -1128,6 +1140,9 @@ async def _mcp_resume_work_tool(
     pdf_path: str = "",
 ) -> dict[str, Any]:
     """MCP 요청 workspace를 sync 재개 구현에 명시적으로 전달한다."""
+    capability_error = _elicitation_required(ctx)
+    if capability_error is not None:
+        return capability_error
     agent_cwd = await _agent_cwd(ctx)
     resolved = _resolve_output_dir(
         output_dir,
@@ -1304,6 +1319,9 @@ async def _mcp_scan_pdf_tool(
     user_context: str | None = None,
 ) -> dict[str, Any]:
     """미정 문제 유형을 MCP elicitation으로 직접 확인한 뒤 스캔한다."""
+    capability_error = _elicitation_required(ctx)
+    if capability_error is not None:
+        return capability_error
     setup = _question_setup_payload(workspace.load_state(work_id))
     if setup["pending_fields"] and _client_supports_elicitation(ctx):
         selected = await _elicit_question_setup(ctx, setup)
@@ -1363,6 +1381,9 @@ async def _mcp_prepare_ocr_tool(
     ocr_language: str = "",
 ) -> dict[str, Any]:
     """OCR 언어를 MCP elicitation으로 직접 확인한 뒤 모델을 준비한다."""
+    capability_error = _elicitation_required(ctx)
+    if capability_error is not None:
+        return capability_error
     if _client_supports_elicitation(ctx):
         message = (
             f"{_ocr_language_setup()['question']}\n"
@@ -1576,6 +1597,9 @@ async def _mcp_set_chapters_tool(
     book_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """챕터, 추출 방식, 실행 방식을 각각 elicitation으로 확인한 뒤 확정한다."""
+    capability_error = _elicitation_required(ctx)
+    if capability_error is not None:
+        return capability_error
     if _client_supports_elicitation(ctx):
         chapter_selection = await _elicit_chapter_setup(ctx, work_id, chapters)
         if chapter_selection is None:
@@ -2087,6 +2111,9 @@ async def _mcp_finalize_study_tool(
     keep_work_dir: bool = True,
 ) -> dict[str, Any]:
     """최종 형식을 MCP elicitation으로 확인한 뒤 렌더링한다."""
+    capability_error = _elicitation_required(ctx)
+    if capability_error is not None:
+        return capability_error
     if _client_supports_elicitation(ctx):
         message = (
             "최종 학습 자료 형식을 선택하세요.\n"
@@ -2135,6 +2162,9 @@ async def _mcp_cleanup_work_tool(
     ctx: Context,
 ) -> dict[str, Any]:
     """중간 작업 삭제를 MCP elicitation으로 확인한 뒤 실행한다."""
+    capability_error = _elicitation_required(ctx)
+    if capability_error is not None:
+        return capability_error
     if _client_supports_elicitation(ctx):
         message = (
             "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다. "
