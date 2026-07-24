@@ -462,10 +462,14 @@ def init_work(
     Do not directly summarize a PDF when the request is to create learning
     material from a PDF. Use this MCP workflow instead.
 
-    - output_dir: 학습 자료를 저장할 디렉토리. 비워두면 현재 작업 디렉토리
-      아래에 `result/<pdf_basename>/` 형태로 자동 생성됩니다 (PDF 파일명에서
-      안전하지 않은 문자는 `_`로 치환). 같은 PDF로 재실행하면 같은 폴더에
-      **덮어씌워지므로**, 이전 결과를 보존하려면 명시적으로 다른 경로를 주세요.
+    - output_dir: 학습 자료를 저장할 디렉토리. 비워두면 **MCP 서버를 시작한 디렉터리**
+      아래에 `result/<pdf_basename>/` 형태로 자동 생성됩니다
+      (PDF 파일명에서 안전하지 않은 문자는 `_`로 치환). 이 경로는 MCP를 호출한
+      클라이언트의 현재 디렉터리와 다를 수 있습니다. 같은 PDF를 재실행하면 같은
+      폴더를 대상으로 하지만, 기존 파일은 자동으로 덮어쓰지 않습니다. 서버가 반환한
+      resume/replace/new_output_dir 선택을 따르세요.
+      호출 측 cwd를 기준으로 결과를 만들려면 output_dir에 명시하세요:
+      `<호출 측 cwd>/result/<pdf_basename>`.
     - enable_multiple_choice: 객관식 활성/비활성. 기존 호환을 위해 기본 활성.
     - enable_short_answer / enable_reflection / enable_extension: 사용자가 이미 명시한
       값만 전달합니다. 미지정(None)이면 응답의 question_setup 선택지를 설명 그대로
@@ -591,8 +595,9 @@ def resume_work(output_dir: str = "", pdf_path: str = "") -> dict[str, Any]:
     복원해 이후 도구들이 정상 동작하도록 합니다.
 
     - output_dir: 재개할 작업의 output_dir. 주면 그 폴더의 .work/를 사용.
-    - pdf_path: output_dir을 비우면 init_work과 동일한 규칙
-      (<cwd>/result/<pdf_basename>)으로 추론합니다.
+    - pdf_path: output_dir을 비우면 init_work과 동일한 규칙으로, MCP 서버를
+      시작한 디렉터리 아래 `result/<pdf_basename>`으로 추론합니다. 이 경로는
+      MCP를 호출한 클라이언트의 현재 디렉터리와 다를 수 있습니다.
     둘 중 하나는 반드시 필요합니다.
     다음 단계: 남은 챕터가 있으면 get_subagent_prompts(work_id)로 워크플로를
     받아 pending 챕터만 처리, 없으면 바로 finalize_study(work_id).

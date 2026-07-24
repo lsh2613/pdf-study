@@ -24,7 +24,7 @@
 
 ## 도구 흐름
 
-`init_work(pdf_path, output_dir, enable_multiple_choice, enable_short_answer, enable_reflection, enable_extension, user_context, replace_existing)`는 작업 폴더를 만든다. 객관식은 기존 호환을 위해 기본 활성이다. 단답형·주관식·확장형은 기본값이 없으며, 사용자가 이미 명시하지 않은 값은 `null`로 저장한다. 입력 PDF가 없거나 모든 문제 유형을 명시적으로 끄면 실패한다. 성공 응답은 `work_id`, `.work` 경로, 실제 출력 경로, 현재 `question_options`, `question_setup`을 담는다.
+`init_work(pdf_path, output_dir, enable_multiple_choice, enable_short_answer, enable_reflection, enable_extension, user_context, replace_existing)`는 작업 폴더를 만든다. 객관식은 기존 호환을 위해 기본 활성이다. 단답형·주관식·확장형은 기본값이 없으며, 사용자가 이미 명시하지 않은 값은 `null`로 저장한다. 입력 PDF가 없거나 모든 문제 유형을 명시적으로 끄면 실패한다. 성공 응답은 `work_id`, `.work` 경로, 실제 출력 경로, 현재 `question_options`, `question_setup`을 담는다. `output_dir`이 비어 있으면 MCP 서버를 시작한 디렉터리 아래 `result/<pdf_basename>`을 쓴다. 호출 측 cwd 아래에 만들려면 클라이언트는 `<호출 측 cwd>/result/<pdf_basename>`을 `output_dir`로 명시해야 한다.
 
 같은 `output_dir`에 기존 pdf-study 작업이 있으면 `init_work`는 상태나 파일을 바꾸지 않고 `ok=false`와 `data.existing_work`, `data.choices`를 반환한다. 재개 가능한 `.work/state.json`이 있으면 선택지는 다음 세 항목이다. 항목과 설명은 클라이언트가 바꾸거나 합치거나 추천을 붙이지 않고 그대로 보여줘야 한다.
 

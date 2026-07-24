@@ -319,6 +319,20 @@ def test_init_work_docstring_tells_agents_when_to_use_mcp():
     assert "scan_pdf는 OCR 모델 다운로드/로드/실행을 하지 않고" in doc
 
 
+def test_init_work_docstring_clarifies_default_output_uses_server_startup_directory():
+    doc = server.init_work.__doc__ or ""
+
+    assert "MCP 서버를 시작한 디렉터리" in doc
+    assert "자동으로 덮어쓰지 않습니다" in doc
+
+
+def test_init_work_docstring_instructs_agents_to_pass_caller_cwd_as_output_dir():
+    doc = server.init_work.__doc__ or ""
+
+    assert "호출 측 cwd" in doc
+    assert "output_dir에 명시" in doc
+
+
 def test_init_work_blank_output_dir_falls_back_to_default(tmp_path, ko_short, monkeypatch):
     monkeypatch.chdir(tmp_path)
     r = server.init_work(str(ko_short), output_dir="   ")  # 공백만
