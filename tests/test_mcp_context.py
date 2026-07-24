@@ -522,3 +522,118 @@ def test_fastmcp_round_trip_uses_request_workspace_and_elicitation(
         "extension": False,
     }
     assert len(messages) == 1
+
+
+def test_fastmcp_set_chapters_uses_three_ordered_elicitations(
+    tmp_path, ko_short,
+):
+    messages = []
+
+    async def on_elicit(context, params):
+        messages.append(params.message)
+        if "[챕터 구성과 범위]" in params.message:
+            content = {
+                "chapter_strategy": "proceed",
+                "chapters_confirmed": True,
+            }
+        elif "[본문 추출 방식]" in params.message:
+            content = {"extraction_mode": "text"}
+        elif "[실행 방식]" in params.message:
+            content = {"execution_mode": "parallel"}
+        else:
+            raise AssertionError(params.message)
+        return types.ElicitResult(action="accept", content=content)
+
+    initialized = server.init_work(
+        str(ko_short),
+        str(tmp_path / "round-trip"),
+        enable_short_answer=False,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    work_id = initialized["data"]["work_id"]
+    scanned = server.scan_pdf(work_id)
+
+    async def scenario():
+        async with create_connected_server_and_client_session(
+            server.mcp,
+            elicitation_callback=on_elicit,
+        ) as client:
+            return await client.call_tool(
+                "set_chapters",
+                {
+                    "work_id": work_id,
+                    "chapters": [
+                        {
+                            "chapter_id": "ch1",
+                            "title": "통합 테스트",
+                            "pdf_pages": [1, 12],
+                        },
+                    ],
+                    "execution_mode": "sequential",
+                    "extraction_mode": "ocr",
+                },
+            )
+
+    result = asyncio.run(scenario())
+
+    assert result.structuredContent is not None
+    assert result.structuredContent["ok"] is True
+    assert len(messages) == 3
+    assert "[챕터 구성과 범위]" in messages[0]
+    assert "[본문 추출 방식]" in messages[1]
+    assert "[실행 방식]" in messages[2]
+
+
+def test_fastmcp_static_choice_elicitations_use_supported_schemas(monkeypatch):
+    captured = {}
+
+    def fake_prepare_ocr(work_id, ocr_language=""):
+        captured["ocr"] = (work_id, ocr_language)
+        return server._ok({"ocr_language": ocr_language})
+
+    def fake_finalize_study(work_id, output_format="", keep_work_dir=True):
+        captured["finalize"] = (work_id, output_format, keep_work_dir)
+        return server._ok({"format": output_format})
+
+    monkeypatch.setattr(server, "prepare_ocr", fake_prepare_ocr)
+    monkeypatch.setattr(server, "finalize_study", fake_finalize_study)
+
+    async def on_elicit(context, params):
+        if "OCR로 읽을 PDF의 언어" in params.message:
+            content = {"ocr_language": "english"}
+        elif "최종 학습 자료 형식" in params.message:
+            content = {"output_format": "md_tui"}
+        else:
+            raise AssertionError(params.message)
+        return types.ElicitResult(action="accept", content=content)
+
+    async def scenario():
+        async with create_connected_server_and_client_session(
+            server.mcp,
+            elicitation_callback=on_elicit,
+        ) as client:
+            prepared = await client.call_tool(
+                "prepare_ocr",
+                {"work_id": "work-ocr", "ocr_language": "korean"},
+            )
+            finalized = await client.call_tool(
+                "finalize_study",
+                {
+                    "work_id": "work-finalize",
+                    "output_format": "html",
+                    "keep_work_dir": False,
+                },
+            )
+            return prepared, finalized
+
+    prepared, finalized = asyncio.run(scenario())
+
+    assert prepared.structuredContent is not None
+    assert prepared.structuredContent["ok"] is True
+    assert finalized.structuredContent is not None
+    assert finalized.structuredContent["ok"] is True
+    assert captured == {
+        "ocr": ("work-ocr", "english"),
+        "finalize": ("work-finalize", "md_tui", False),
+    }

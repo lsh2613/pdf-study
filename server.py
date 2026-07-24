@@ -9,7 +9,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 from mcp import types
@@ -62,14 +62,20 @@ _OCR_LANGUAGE_CHOICES = (
 
 
 class _OutputFormatSelection(BaseModel):
-    output_format: Literal["html", "md_tui"] = Field(
+    output_format: str = Field(
         description="사용자가 선택한 최종 학습 자료 형식",
+        json_schema_extra={
+            "enum": [choice["value"] for choice in _OUTPUT_FORMAT_CHOICES],
+        },
     )
 
 
 class _OcrLanguageSelection(BaseModel):
-    ocr_language: Literal["korean", "english"] = Field(
+    ocr_language: str = Field(
         description="사용자가 선택한 PDF OCR 언어",
+        json_schema_extra={
+            "enum": [choice["value"] for choice in _OCR_LANGUAGE_CHOICES],
+        },
     )
 
 
@@ -651,8 +657,11 @@ async def _elicit_chapter_setup(
     if chapter_choices:
         chapter_values = tuple(choice["value"] for choice in chapter_choices)
         fields["chapter_strategy"] = (
-            Literal.__getitem__(chapter_values),
-            Field(description="사용자가 선택한 챕터 구성 방식"),
+            str,
+            Field(
+                description="사용자가 선택한 챕터 구성 방식",
+                json_schema_extra={"enum": list(chapter_values)},
+            ),
         )
     schema = create_model("PdfStudyChapterSetupSelection", **fields)
     chapter_lines = []
@@ -676,18 +685,27 @@ async def _elicit_chapter_setup(
     result = await ctx.elicit(message=message, schema=schema)
     if result.action != "accept" or result.data is None:
         return None
-    return result.data.model_dump()
+    selected = result.data.model_dump()
+    if (
+        chapter_choices
+        and selected.get("chapter_strategy") not in chapter_values
+    ):
+        raise ValueError("지원하지 않는 챕터 구성 방식입니다.")
+    return selected
 
 
 async def _elicit_extraction_mode(ctx: Context, work_id: str) -> str | None:
     text_quality = workspace.load_state(work_id).get("text_quality")
     choices = processing_mode_contract.extraction_choices(text_quality)
-    mode_type = Literal.__getitem__(tuple(choice["value"] for choice in choices))
+    allowed_values = tuple(choice["value"] for choice in choices)
     schema = create_model(
         "PdfStudyExtractionModeSelection",
         extraction_mode=(
-            mode_type,
-            Field(description="사용자가 선택한 본문 추출 방식"),
+            str,
+            Field(
+                description="사용자가 선택한 본문 추출 방식",
+                json_schema_extra={"enum": list(allowed_values)},
+            ),
         ),
     )
     message = (
@@ -698,24 +716,33 @@ async def _elicit_extraction_mode(ctx: Context, work_id: str) -> str | None:
     result = await ctx.elicit(message=message, schema=schema)
     if result.action != "accept" or result.data is None:
         return None
-    return str(result.data.extraction_mode)
+    selected = str(result.data.extraction_mode)
+    if selected not in allowed_values:
+        raise ValueError("지원하지 않는 본문 추출 방식입니다.")
+    return selected
 
 
 async def _elicit_execution_mode(ctx: Context) -> str | None:
     choices = processing_mode_contract.execution_choices()
-    mode_type = Literal.__getitem__(tuple(choice["value"] for choice in choices))
+    allowed_values = tuple(choice["value"] for choice in choices)
     schema = create_model(
         "PdfStudyExecutionModeSelection",
         execution_mode=(
-            mode_type,
-            Field(description="사용자가 선택한 챕터 실행 방식"),
+            str,
+            Field(
+                description="사용자가 선택한 챕터 실행 방식",
+                json_schema_extra={"enum": list(allowed_values)},
+            ),
         ),
     )
     message = "[실행 방식]\n" + _choice_lines(choices)
     result = await ctx.elicit(message=message, schema=schema)
     if result.action != "accept" or result.data is None:
         return None
-    return str(result.data.execution_mode)
+    selected = str(result.data.execution_mode)
+    if selected not in allowed_values:
+        raise ValueError("지원하지 않는 챕터 실행 방식입니다.")
+    return selected
 
 
 def _safe(label: str):
@@ -1347,6 +1374,10 @@ async def _mcp_prepare_ocr_tool(
                 {"ocr_language_setup": _ocr_language_setup()},
             )
         ocr_language = result.data.ocr_language
+        if ocr_language not in {
+            choice["value"] for choice in _OCR_LANGUAGE_CHOICES
+        }:
+            raise ValueError("지원하지 않는 OCR 언어입니다.")
     return prepare_ocr(work_id=work_id, ocr_language=ocr_language)
 
 
@@ -2065,6 +2096,10 @@ async def _mcp_finalize_study_tool(
         if result.action != "accept" or result.data is None:
             return _elicitation_cancelled(_output_format_choice_data())
         output_format = result.data.output_format
+        if output_format not in {
+            choice["value"] for choice in _OUTPUT_FORMAT_CHOICES
+        }:
+            raise ValueError("지원하지 않는 출력 형식입니다.")
     return finalize_study(
         work_id=work_id,
         output_format=output_format,
