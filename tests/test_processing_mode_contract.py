@@ -34,6 +34,48 @@ def test_choices_preserve_public_contract_and_return_fresh_copies():
     assert processing_mode_contract.choices(None)[0]["label"] == "Sequential + Text"
 
 
+def test_elicitation_choices_split_extraction_from_execution():
+    assert processing_mode_contract.extraction_choices(None) == [
+        {
+            "value": "text",
+            "label": "Text",
+            "desc": "PDF 텍스트 레이어를 사용해 본문을 추출합니다.",
+        },
+        {
+            "value": "ocr",
+            "label": "OCR",
+            "desc": "PaddleOCR CPU로 본문을 먼저 읽어 텍스트로 저장합니다.",
+        },
+    ]
+    assert processing_mode_contract.execution_choices() == [
+        {
+            "value": "sequential",
+            "label": "Sequential",
+            "desc": "챕터를 한 개씩 순서대로 처리합니다.",
+        },
+        {
+            "value": "parallel",
+            "label": "Parallel",
+            "desc": "최대 5개 sub-agent가 챕터를 동시에 처리합니다.",
+        },
+    ]
+
+
+def test_elicitation_extraction_choices_force_ocr_without_changing_fallback():
+    assert processing_mode_contract.extraction_choices("garbled") == [
+        {
+            "value": "ocr",
+            "label": "OCR",
+            "desc": "PaddleOCR CPU로 본문을 먼저 읽어 텍스트로 저장합니다.",
+        },
+    ]
+    assert len(processing_mode_contract.choices("garbled")) == 2
+    assert {
+        choice["execution_mode"]
+        for choice in processing_mode_contract.choices("garbled")
+    } == {"sequential", "parallel"}
+
+
 def test_ocr_only_choice_step_and_fallback_data_share_the_same_contract():
     choices = processing_mode_contract.choices("garbled")
 
