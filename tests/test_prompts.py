@@ -31,16 +31,24 @@ def test_prompt_contract_is_korean_only():
     assert "한국어 요약" in out["summarizer_prompt"]
 
 
-def test_prompts_embed_canonical_question_examples(monkeypatch):
+def test_prompts_embed_agent_question_examples(monkeypatch):
     monkeypatch.setattr(
         question_contract,
-        "summary_payload_example",
+        "agent_summary_payload_example",
         lambda: {"contract_probe": True},
     )
 
     prompt = prompts.build_prompts(_state())["summarizer_prompt"]
 
     assert '"contract_probe": true' in prompt
+
+
+def test_summarizer_prompt_assigns_answer_placement_to_server():
+    prompt = prompts.build_prompts(_state())["summarizer_prompt"]
+
+    assert '"correct_answer"' in prompt
+    assert '"incorrect_answers"' in prompt
+    assert "정답 위치도 정하지 마세요" in prompt
 
 
 def test_extension_prompt_embeds_canonical_question_example(monkeypatch):

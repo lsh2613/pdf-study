@@ -138,6 +138,10 @@ _SUMMARIZER = """\
 `\\n` 같은 글자를 직접 타이핑하지 마세요(JSON 직렬화는 도구가 알아서 합니다).
 summary에는 한국어 요약을 넣으세요.
 
+객관식은 `correct_answer`에 정답 하나, `incorrect_answers`에 오답 보기 배열을
+넣으세요. 객관식의 `options`와 `answer_index`는 넣지 말고 정답 위치도 정하지 마세요.
+서버가 저장할 때 보기 순서와 answer_index를 한 번만 배치합니다.
+
 {summary_json_example}
 
 비활성화된 유형은 해당 키를 빈 배열([])로 두세요. 키 자체는 유지.
@@ -286,7 +290,7 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     enabled_types_block = _format_enabled_types(opts)
     input_mode_block = INPUT_MODE_OCR if ocr_mode else INPUT_MODE_TEXT
     summary_json_example = json.dumps(
-        question_contract.summary_payload_example(), ensure_ascii=False, indent=2,
+        question_contract.agent_summary_payload_example(), ensure_ascii=False, indent=2,
     )
     summarizer_prompt = _SUMMARIZER.format(
         book_info_block=book_info_block,

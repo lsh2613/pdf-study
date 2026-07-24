@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import copy
+import random
 import re
-from typing import Any
+from typing import Any, Callable
 
 
 BASIC_QUESTION_TYPES = ("multiple_choice", "short_answer", "reflection")
@@ -51,6 +52,19 @@ def summary_payload_example() -> dict[str, Any]:
     })
 
 
+def agent_summary_payload_example() -> dict[str, Any]:
+    """생성 agent가 반환할 객관식 정답·오답 분리 예시."""
+    example = summary_payload_example()
+    multiple_choice = example["questions"]["multiple_choice"][0]
+    multiple_choice.pop("options")
+    multiple_choice.pop("answer_index")
+    multiple_choice.update(
+        correct_answer="정답",
+        incorrect_answers=["오답 1"],
+    )
+    return example
+
+
 def extension_payload_example() -> dict[str, Any]:
     return copy.deepcopy({
         "questions": {
@@ -69,6 +83,75 @@ def _is_nonempty_str(value: Any) -> bool:
 
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _shuffle_choices(choices: list[str]) -> None:
+    """운영 저장에서 한 번만 사용할 예측 불가능한 보기 순서 섞기."""
+    random.SystemRandom().shuffle(choices)
+
+
+def materialize_multiple_choice_options(
+    data: Any,
+    *,
+    shuffle_options: Callable[[list[str]], None] | None = None,
+) -> tuple[Any, list[str]]:
+    """Agent 형식 객관식을 저장·렌더용 정규 형식으로 바꾼다.
+
+    기존 ``options``/``answer_index`` 형식은 그대로 통과시킨다. 새 형식은 정답과
+    오답을 합친 뒤 한 번만 섞어 정규 형식으로 바꾼 복사본을 반환한다.
+    """
+    normalized = copy.deepcopy(data)
+    if not isinstance(normalized, dict):
+        return normalized, []
+    questions = normalized.get("questions")
+    if not isinstance(questions, dict):
+        return normalized, []
+    items = questions.get("multiple_choice")
+    if not isinstance(items, list):
+        return normalized, []
+
+    missing: list[str] = []
+    shuffle = shuffle_options or _shuffle_choices
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        if "correct_answer" not in item and "incorrect_answers" not in item:
+            continue
+
+        path = f"questions.multiple_choice[{index}]"
+        item_missing: list[str] = []
+        correct_answer = item.get("correct_answer")
+        incorrect_answers = item.get("incorrect_answers")
+        if not _is_nonempty_str(correct_answer):
+            item_missing.append(f"{path}.correct_answer")
+        if (
+            not isinstance(incorrect_answers, list)
+            or not incorrect_answers
+            or any(not _is_nonempty_str(answer) for answer in incorrect_answers)
+            or (
+                _is_nonempty_str(correct_answer)
+                and (
+                    correct_answer in incorrect_answers
+                    or len(set([correct_answer, *incorrect_answers]))
+                    != len(incorrect_answers) + 1
+                )
+            )
+        ):
+            item_missing.append(f"{path}.incorrect_answers")
+        if item_missing:
+            missing.extend(item_missing)
+            continue
+
+        choices = [correct_answer, *incorrect_answers]
+        shuffle(choices)
+        items[index] = {
+            "id": item.get("id"),
+            "question": item.get("question"),
+            "options": choices,
+            "answer_index": choices.index(correct_answer),
+            "explanation": item.get("explanation"),
+        }
+    return normalized, missing
 
 
 def _validate_string_list(

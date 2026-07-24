@@ -106,3 +106,71 @@ def test_extension_contract_rejects_id_already_saved_for_chapter():
         "ch1",
         existing_ids={"mc_1"},
     ) == ["questions.extension[0].id"]
+
+
+def test_materialize_multiple_choice_places_correct_answer_after_server_shuffle():
+    data = question_contract.summary_payload_example()
+    item = data["questions"]["multiple_choice"][0]
+    item.pop("options")
+    item.pop("answer_index")
+    item.update(
+        question="질문",
+        explanation="해설",
+        correct_answer="정답",
+        incorrect_answers=["오답 A", "오답 B"],
+    )
+
+    normalized, missing = question_contract.materialize_multiple_choice_options(
+        data,
+        shuffle_options=lambda values: values.reverse(),
+    )
+
+    assert missing == []
+    assert normalized["questions"]["multiple_choice"][0] == {
+        "id": "mc_1",
+        "question": "질문",
+        "options": ["오답 B", "오답 A", "정답"],
+        "answer_index": 2,
+        "explanation": "해설",
+    }
+    assert "correct_answer" not in normalized["questions"]["multiple_choice"][0]
+    assert "correct_answer" in data["questions"]["multiple_choice"][0]
+
+
+def test_materialize_multiple_choice_rejects_missing_correct_answer():
+    data = question_contract.summary_payload_example()
+    item = data["questions"]["multiple_choice"][0]
+    item.pop("options")
+    item.pop("answer_index")
+    item["incorrect_answers"] = ["오답"]
+
+    _, missing = question_contract.materialize_multiple_choice_options(data)
+
+    assert missing == ["questions.multiple_choice[0].correct_answer"]
+
+
+def test_materialize_multiple_choice_keeps_processing_later_valid_items():
+    data = question_contract.summary_payload_example()
+    invalid_item = data["questions"]["multiple_choice"][0]
+    invalid_item.pop("options")
+    invalid_item.pop("answer_index")
+    invalid_item["incorrect_answers"] = ["오답"]
+    valid_item = {
+        "id": "mc_2",
+        "question": "두 번째 질문",
+        "correct_answer": "두 번째 정답",
+        "incorrect_answers": ["두 번째 오답"],
+        "explanation": "두 번째 해설",
+    }
+    data["questions"]["multiple_choice"].append(valid_item)
+
+    normalized, missing = question_contract.materialize_multiple_choice_options(
+        data,
+        shuffle_options=lambda values: values.reverse(),
+    )
+
+    assert missing == ["questions.multiple_choice[0].correct_answer"]
+    assert normalized["questions"]["multiple_choice"][1]["options"] == [
+        "두 번째 오답",
+        "두 번째 정답",
+    ]
