@@ -16,9 +16,12 @@ from pdf_study.renderer.html_renderer import (
 from pdf_study.renderer.study_loader import _unescape_if_double_escaped
 from .conftest import (
     build_rendered_study,
+    create_test_work,
     fake_extension_result as _fake_extension,
     fake_summary_result as _fake_summary,
+    finalize_test_study,
     scan_with_question_options as _scan,
+    set_test_chapters,
 )
 
 
@@ -209,7 +212,7 @@ def test_extension_question_uses_same_answer_ui_without_reference_block(ko_with_
 
 def test_force_ignores_stale_results_for_pending_chapter(ko_short, tmp_path):
     out = tmp_path / "out"
-    init = server._init_work_impl(
+    init = create_test_work(
         str(ko_short),
         str(out),
         enable_short_answer=False,
@@ -218,7 +221,7 @@ def test_force_ignores_stale_results_for_pending_chapter(ko_short, tmp_path):
     )
     wid = init["data"]["work_id"]
     _scan(wid)
-    set_result = server._set_chapters_impl(
+    set_result = set_test_chapters(
         wid,
         [{"chapter_id": "ch1", "title": "새 챕터", "pdf_pages": [1, 12]}],
         execution_mode="sequential",
@@ -237,7 +240,7 @@ def test_force_ignores_stale_results_for_pending_chapter(ko_short, tmp_path):
         encoding="utf-8",
     )
 
-    rendered = server._finalize_study_impl(wid, "html")
+    rendered = finalize_test_study(wid, "html")
 
     assert rendered["ok"], rendered
     html = (out / "main.html").read_text(encoding="utf-8")
@@ -257,7 +260,7 @@ def test_managed_output_removes_pages_for_removed_chapters(ko_with_toc, tmp_path
     extension = server.save_extension_result(wid, "ch1", _fake_extension("ch1"))
     assert extension["ok"], extension
 
-    rerendered = server._finalize_study_impl(wid, "html")
+    rerendered = finalize_test_study(wid, "html")
 
     assert rerendered["ok"], rerendered
     assert (out / "main.html").exists()
@@ -274,7 +277,7 @@ def test_managed_output_switches_format_without_touching_unrelated_file(
     unrelated = out / "notes.txt"
     unrelated.write_text("keep me", encoding="utf-8")
 
-    switched = server._finalize_study_impl(wid, "md_tui")
+    switched = finalize_test_study(wid, "md_tui")
 
     assert switched["ok"], switched
     assert (out / "book.md").exists()
@@ -291,7 +294,7 @@ def test_progress_fingerprint_preserves_same_html_generation(ko_with_toc, tmp_pa
     progress = out / "progress" / "ch1.json"
     progress.write_text('{"completed":true}', encoding="utf-8")
 
-    rerendered = server._finalize_study_impl(wid, "html")
+    rerendered = finalize_test_study(wid, "html")
 
     assert rerendered["ok"], rerendered
     assert progress.read_text(encoding="utf-8") == '{"completed":true}'
@@ -308,7 +311,7 @@ def test_progress_fingerprint_resets_after_content_change(ko_with_toc, tmp_path)
     saved = server.save_chapter_result(wid, "ch1", changed)
     assert saved["ok"], saved
 
-    rerendered = server._finalize_study_impl(wid, "html")
+    rerendered = finalize_test_study(wid, "html")
 
     assert rerendered["ok"], rerendered
     assert not progress.exists()
@@ -328,7 +331,7 @@ def test_render_rollback_keeps_previous_generation(
 
     monkeypatch.setattr(HtmlRenderer, "render", fail_render)
 
-    failed = server._finalize_study_impl(wid, "html")
+    failed = finalize_test_study(wid, "html")
 
     assert failed["ok"] is False
     assert (out / "index.html").read_bytes() == index_before
@@ -338,7 +341,7 @@ def test_render_rollback_keeps_previous_generation(
 
 def test_managed_output_refuses_to_overwrite_unmanaged_name(ko_short, tmp_path):
     out = tmp_path / "out"
-    init = server._init_work_impl(
+    init = create_test_work(
         str(ko_short),
         str(out),
         enable_short_answer=False,
@@ -347,7 +350,7 @@ def test_managed_output_refuses_to_overwrite_unmanaged_name(ko_short, tmp_path):
     )
     wid = init["data"]["work_id"]
     _scan(wid)
-    set_result = server._set_chapters_impl(
+    set_result = set_test_chapters(
         wid,
         [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}],
         execution_mode="sequential",
@@ -359,7 +362,7 @@ def test_managed_output_refuses_to_overwrite_unmanaged_name(ko_short, tmp_path):
     user_readme = out / "README.md"
     user_readme.write_text("user-owned", encoding="utf-8")
 
-    rendered = server._finalize_study_impl(wid, "html")
+    rendered = finalize_test_study(wid, "html")
 
     assert rendered["ok"] is False
     assert "unmanaged paths" in rendered["error"]
@@ -371,7 +374,7 @@ def test_managed_output_refuses_to_overwrite_unmanaged_broken_symlink(
     ko_short, tmp_path
 ):
     out = tmp_path / "out"
-    init = server._init_work_impl(
+    init = create_test_work(
         str(ko_short),
         str(out),
         enable_short_answer=False,
@@ -380,7 +383,7 @@ def test_managed_output_refuses_to_overwrite_unmanaged_broken_symlink(
     )
     wid = init["data"]["work_id"]
     _scan(wid)
-    set_result = server._set_chapters_impl(
+    set_result = set_test_chapters(
         wid,
         [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}],
         execution_mode="sequential",
@@ -392,7 +395,7 @@ def test_managed_output_refuses_to_overwrite_unmanaged_broken_symlink(
     user_readme = out / "README.md"
     user_readme.symlink_to(out / "missing-user-readme")
 
-    rendered = server._finalize_study_impl(wid, "html")
+    rendered = finalize_test_study(wid, "html")
 
     assert rendered["ok"] is False
     assert "unmanaged paths" in rendered["error"]

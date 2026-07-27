@@ -12,9 +12,10 @@
 선택 정의의 label과 설명은 private Elicitation 메시지 안에서 그대로 유지하고,
 추천을 임의로 붙이거나 여러 선택을 합치면 안 된다.
 
-Elicitation 거절·취소 또는 미지원 세션은 sync 구현을 호출하지 않고 상태를 바꾸지
-않아야 한다. `data.next_step.required_parameters`에는 에이전트가 생성할 값만 넣고
-사용자 선택값은 넣지 않는다.
+Elicitation 거절·취소 또는 미지원 세션은 승인 뒤 처리 본문으로 넘어가거나 상태를
+바꾸지 않아야 한다. 선택형 워크플로와 같은 작업을 수행하는 별도 동기 함수,
+`_impl` 함수, MCP wrapper를 만들면 안 된다. `data.next_step.required_parameters`에는
+에이전트가 생성할 값만 넣고 사용자 선택값은 넣지 않는다.
 
 출력 경로는 단일 요청 workspace나 MCP root 아래 `result/<pdf-name>`으로만
 계산해야 한다. 공개 `output_dir`을 다시 추가하거나 `Path.cwd()`로 폴백하거나,

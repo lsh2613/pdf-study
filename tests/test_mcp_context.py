@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
 from mcp import types
 from mcp.shared.memory import create_connected_server_and_client_session
 import pytest
 
 from pdf_study import server, workspace
+from .conftest import (
+    create_test_work,
+    ElicitationContext,
+    scan_with_question_options,
+)
 
 
 def _assert_no_choice_fallback(value):
@@ -50,55 +54,23 @@ def _assert_no_removed_workflow_inputs(value) -> None:
             assert removed not in value
 
 
-class _ElicitationContext:
-    def __init__(
-        self,
-        *,
-        cwd=None,
-        responses: list[dict] | None = None,
-        elicitation_supported: bool = True,
-    ):
-        workspaces = {} if cwd is None else {str(cwd): {"has_changes": False}}
-        self.request_context = SimpleNamespace(
-            meta={
-                "x-codex-turn-metadata": {
-                    "workspaces": workspaces,
-                },
-            },
-        )
-        self.session = SimpleNamespace(
-            check_client_capability=lambda capability: elicitation_supported,
-        )
-        self._responses = list(responses or [])
-        self.messages: list[str] = []
-
-    async def elicit(self, message, schema):
-        self.messages.append(message)
-        response = dict(self._responses.pop(0))
-        action = response.pop("_action", "accept")
-        if action != "accept":
-            return SimpleNamespace(action=action, data=None)
-        data = schema(**response)
-        return SimpleNamespace(action=action, data=data)
-
-
 def test_choice_tools_fail_closed_without_elicitation(tmp_path, ko_short):
-    ctx = _ElicitationContext(
+    ctx = ElicitationContext(
         cwd=tmp_path,
-        elicitation_supported=False,
+        supported=False,
     )
     calls = [
-        server._mcp_init_work_tool(pdf_path=str(ko_short), ctx=ctx),
-        server._mcp_resume_work_tool(pdf_path=str(ko_short), ctx=ctx),
-        server._mcp_scan_pdf_tool(work_id="missing", ctx=ctx),
-        server._mcp_prepare_ocr_tool(work_id="missing", ctx=ctx),
-        server._mcp_set_chapters_tool(
+        server.init_work(pdf_path=str(ko_short), ctx=ctx),
+        server.resume_work(pdf_path=str(ko_short), ctx=ctx),
+        server.scan_pdf(work_id="missing", ctx=ctx),
+        server.prepare_ocr(work_id="missing", ctx=ctx),
+        server.set_chapters(
             work_id="missing",
             chapters=[],
             ctx=ctx,
         ),
-        server._mcp_finalize_study_tool(work_id="missing", ctx=ctx),
-        server._mcp_cleanup_work_tool(work_id="missing", ctx=ctx),
+        server.finalize_study(work_id="missing", ctx=ctx),
+        server.cleanup_work(work_id="missing", ctx=ctx),
     ]
 
     responses = [asyncio.run(call) for call in calls]
@@ -114,14 +86,17 @@ def test_choice_tools_fail_closed_without_elicitation(tmp_path, ko_short):
     assert not (tmp_path / "result").exists()
 
 
-def test_sync_init_work_never_falls_back_to_mcp_server_cwd(
+def test_init_work_never_falls_back_to_mcp_server_cwd(
     tmp_path, ko_short, monkeypatch,
 ):
     server_cwd = tmp_path / "server-cwd"
     server_cwd.mkdir()
     monkeypatch.chdir(server_cwd)
 
-    response = server._init_work_impl(str(ko_short), "")
+    response = asyncio.run(server.init_work(
+        pdf_path=str(ko_short),
+        ctx=ElicitationContext(),
+    ))
 
     assert response["ok"] is False
     assert response["data"]["required_context"] == ["workspace_or_root"]
@@ -150,7 +125,7 @@ def test_choice_tool_descriptions_never_advertise_removed_inputs():
 def test_public_recovery_guidance_uses_registered_tool_inputs(
     tmp_path, ko_short, monkeypatch,
 ):
-    initialized = server._init_work_impl(
+    initialized = create_test_work(
         str(ko_short),
         str(tmp_path / "out"),
         enable_short_answer=False,
@@ -159,7 +134,7 @@ def test_public_recovery_guidance_uses_registered_tool_inputs(
     )
     work_id = initialized["data"]["work_id"]
 
-    scanned = server._scan_pdf_impl(work_id)
+    scanned = scan_with_question_options(work_id)
     assert scanned["ok"] is True, scanned
     pending = server.get_subagent_prompts(work_id)
     _assert_no_choice_fallback(pending)
@@ -170,7 +145,10 @@ def test_public_recovery_guidance_uses_registered_tool_inputs(
         "prepare_ocr_impl",
         lambda _work_id, _language: {},
     )
-    prepared = server._prepare_ocr_impl(work_id, "korean")
+    prepared = asyncio.run(server.prepare_ocr(
+        work_id=work_id,
+        ctx=ElicitationContext(responses=[{"ocr_language": "korean"}]),
+    ))
     _assert_no_removed_workflow_inputs(prepared["next_action"])
 
     finalize_guidance = server._pending_guidance(
@@ -187,7 +165,7 @@ def test_public_recovery_guidance_uses_registered_tool_inputs(
 def test_scan_toc_with_ocr_filters_private_choice_data(
     tmp_path, ko_short, monkeypatch,
 ):
-    initialized = server._init_work_impl(
+    initialized = create_test_work(
         str(ko_short),
         str(tmp_path / "out"),
         enable_short_answer=False,
@@ -223,7 +201,7 @@ def test_mcp_init_work_uses_single_codex_workspace_as_agent_cwd(
     agent_cwd.mkdir()
     server_cwd.mkdir()
     monkeypatch.chdir(server_cwd)
-    ctx = _ElicitationContext(
+    ctx = ElicitationContext(
         cwd=agent_cwd,
         responses=[{
             "enable_short_answer": False,
@@ -233,7 +211,7 @@ def test_mcp_init_work_uses_single_codex_workspace_as_agent_cwd(
     )
 
     response = asyncio.run(
-        server._mcp_init_work_tool(
+        server.init_work(
             pdf_path=str(ko_short),
             ctx=ctx,
         )
@@ -250,7 +228,7 @@ def test_mcp_init_work_uses_single_codex_workspace_as_agent_cwd(
 def test_mcp_init_work_uses_elicited_question_choices(
     tmp_path, ko_short,
 ):
-    ctx = _ElicitationContext(
+    ctx = ElicitationContext(
         cwd=tmp_path,
         responses=[{
             "enable_short_answer": False,
@@ -260,7 +238,7 @@ def test_mcp_init_work_uses_elicited_question_choices(
     )
 
     response = asyncio.run(
-        server._mcp_init_work_tool(
+        server.init_work(
             pdf_path=str(ko_short),
             ctx=ctx,
         )
@@ -279,7 +257,7 @@ def test_mcp_init_work_uses_elicited_question_choices(
 def test_mcp_init_work_allows_omitted_user_context(
     tmp_path, ko_short,
 ):
-    ctx = _ElicitationContext(
+    ctx = ElicitationContext(
         cwd=tmp_path,
         responses=[{
             "enable_short_answer": False,
@@ -289,7 +267,7 @@ def test_mcp_init_work_allows_omitted_user_context(
     )
 
     response = asyncio.run(
-        server._mcp_init_work_tool(pdf_path=str(ko_short), ctx=ctx)
+        server.init_work(pdf_path=str(ko_short), ctx=ctx)
     )
 
     assert response["ok"] is True
@@ -298,7 +276,7 @@ def test_mcp_init_work_allows_omitted_user_context(
 
 
 def test_mcp_init_work_uses_elicited_user_context(tmp_path, ko_short):
-    ctx = _ElicitationContext(
+    ctx = ElicitationContext(
         cwd=tmp_path,
         responses=[{
             "enable_short_answer": False,
@@ -309,7 +287,7 @@ def test_mcp_init_work_uses_elicited_user_context(tmp_path, ko_short):
     )
 
     response = asyncio.run(
-        server._mcp_init_work_tool(pdf_path=str(ko_short), ctx=ctx)
+        server.init_work(pdf_path=str(ko_short), ctx=ctx)
     )
 
     assert response["ok"] is True
@@ -323,7 +301,7 @@ def test_mcp_init_work_elicits_resume_for_existing_work(
     tmp_path, ko_short,
 ):
     output_dir = tmp_path / "result" / ko_short.stem
-    original = server._init_work_impl(
+    original = create_test_work(
         str(ko_short),
         str(output_dir),
         enable_short_answer=False,
@@ -331,13 +309,13 @@ def test_mcp_init_work_elicits_resume_for_existing_work(
         enable_extension=False,
     )
     original_work_id = original["data"]["work_id"]
-    ctx = _ElicitationContext(
+    ctx = ElicitationContext(
         cwd=tmp_path,
         responses=[{"action": "resume"}],
     )
 
     response = asyncio.run(
-        server._mcp_init_work_tool(
+        server.init_work(
             pdf_path=str(ko_short),
             ctx=ctx,
         )
@@ -352,7 +330,7 @@ def test_mcp_init_work_elicits_resume_for_existing_work(
 
 def test_mcp_init_work_elicits_replace_for_existing_work(tmp_path, ko_short):
     output_dir = tmp_path / "result" / ko_short.stem
-    original = server._init_work_impl(
+    original = create_test_work(
         str(ko_short),
         str(output_dir),
         enable_short_answer=False,
@@ -360,7 +338,7 @@ def test_mcp_init_work_elicits_replace_for_existing_work(tmp_path, ko_short):
         enable_extension=False,
     )
     assert original["ok"] is True
-    ctx = _ElicitationContext(
+    ctx = ElicitationContext(
         cwd=tmp_path,
         responses=[
             {"action": "replace"},
@@ -374,7 +352,7 @@ def test_mcp_init_work_elicits_replace_for_existing_work(tmp_path, ko_short):
     )
 
     response = asyncio.run(
-        server._mcp_init_work_tool(pdf_path=str(ko_short), ctx=ctx)
+        server.init_work(pdf_path=str(ko_short), ctx=ctx)
     )
 
     assert response["ok"] is True
@@ -390,23 +368,23 @@ def test_mcp_resume_work_requires_elicited_confirmation(
     tmp_path, ko_short, monkeypatch,
 ):
     output_dir = tmp_path / "result" / ko_short.stem
-    created = server._init_work_impl(str(ko_short), str(output_dir))
+    created = create_test_work(str(ko_short), str(output_dir))
     assert created["ok"] is True
     called = []
-    original_resume = server._resume_work_impl
+    original_resume = workspace.resume_workspace
 
     def recording_resume(*args, **kwargs):
         called.append((args, kwargs))
         return original_resume(*args, **kwargs)
 
-    monkeypatch.setattr(server, "_resume_work_impl", recording_resume)
-    ctx = _ElicitationContext(
+    monkeypatch.setattr(workspace, "resume_workspace", recording_resume)
+    ctx = ElicitationContext(
         cwd=tmp_path,
         responses=[{"resume_confirmed": False}],
     )
 
     response = asyncio.run(
-        server._mcp_resume_work_tool(pdf_path=str(ko_short), ctx=ctx)
+        server.resume_work(pdf_path=str(ko_short), ctx=ctx)
     )
 
     assert response["ok"] is False
@@ -418,9 +396,9 @@ def test_mcp_resume_work_requires_elicited_confirmation(
 def test_mcp_scan_pdf_uses_elicited_question_choices(
     tmp_path, ko_short,
 ):
-    initialized = server._init_work_impl(str(ko_short), str(tmp_path / "out"))
+    initialized = create_test_work(str(ko_short), str(tmp_path / "out"))
     work_id = initialized["data"]["work_id"]
-    ctx = _ElicitationContext(
+    ctx = ElicitationContext(
         responses=[{
             "enable_short_answer": False,
             "enable_reflection": True,
@@ -429,7 +407,7 @@ def test_mcp_scan_pdf_uses_elicited_question_choices(
     )
 
     response = asyncio.run(
-        server._mcp_scan_pdf_tool(
+        server.scan_pdf(
             work_id=work_id,
             ctx=ctx,
         )
@@ -452,7 +430,7 @@ def test_mcp_scan_pdf_uses_elicited_question_choices(
 def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
     tmp_path, ko_short,
 ):
-    initialized = server._init_work_impl(
+    initialized = create_test_work(
         str(ko_short),
         str(tmp_path / "out"),
         enable_short_answer=False,
@@ -460,9 +438,9 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
         enable_extension=False,
     )
     work_id = initialized["data"]["work_id"]
-    scanned = server._scan_pdf_impl(work_id)
+    scanned = scan_with_question_options(work_id)
     assert scanned["ok"] is True, scanned
-    ctx = _ElicitationContext(
+    ctx = ElicitationContext(
         responses=[
             {
                 "chapter_strategy": "proceed",
@@ -474,7 +452,7 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
     )
 
     response = asyncio.run(
-        server._mcp_set_chapters_tool(
+        server.set_chapters(
             work_id=work_id,
             chapters=[
                 {
@@ -529,7 +507,7 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
 def test_mcp_set_chapters_cancellation_never_changes_state(
     responses, message_count, tmp_path, ko_short,
 ):
-    initialized = server._init_work_impl(
+    initialized = create_test_work(
         str(ko_short),
         str(tmp_path / "out"),
         enable_short_answer=False,
@@ -537,11 +515,11 @@ def test_mcp_set_chapters_cancellation_never_changes_state(
         enable_extension=False,
     )
     work_id = initialized["data"]["work_id"]
-    scanned = server._scan_pdf_impl(work_id)
-    ctx = _ElicitationContext(responses=responses)
+    scanned = scan_with_question_options(work_id)
+    ctx = ElicitationContext(responses=responses)
 
     response = asyncio.run(
-        server._mcp_set_chapters_tool(
+        server.set_chapters(
             work_id=work_id,
             chapters=scanned["data"]["recommendations"]["suggested_chapters"],
             ctx=ctx,
@@ -557,7 +535,7 @@ def test_mcp_set_chapters_cancellation_never_changes_state(
 def test_mcp_extraction_elicitation_forces_ocr_for_garbled_text(
     tmp_path, ko_short,
 ):
-    initialized = server._init_work_impl(
+    initialized = create_test_work(
         str(ko_short),
         str(tmp_path / "ocr-only"),
         enable_short_answer=False,
@@ -566,7 +544,7 @@ def test_mcp_extraction_elicitation_forces_ocr_for_garbled_text(
     )
     work_id = initialized["data"]["work_id"]
     workspace.update_state(work_id, text_quality="garbled")
-    ctx = _ElicitationContext(responses=[{"extraction_mode": "ocr"}])
+    ctx = ElicitationContext(responses=[{"extraction_mode": "ocr"}])
 
     selected = asyncio.run(server._elicit_extraction_mode(ctx, work_id))
 
@@ -574,7 +552,7 @@ def test_mcp_extraction_elicitation_forces_ocr_for_garbled_text(
     assert "OCR" in ctx.messages[0]
     assert "PDF 텍스트 레이어를 사용" not in ctx.messages[0]
 
-    invalid_ctx = _ElicitationContext(responses=[{"extraction_mode": "text"}])
+    invalid_ctx = ElicitationContext(responses=[{"extraction_mode": "text"}])
     with pytest.raises(ValueError):
         asyncio.run(server._elicit_extraction_mode(invalid_ctx, work_id))
 
@@ -582,7 +560,7 @@ def test_mcp_extraction_elicitation_forces_ocr_for_garbled_text(
 def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
     tmp_path, ko_with_toc,
 ):
-    initialized = server._init_work_impl(
+    initialized = create_test_work(
         str(ko_with_toc),
         str(tmp_path / "out-reanalyze"),
         enable_short_answer=False,
@@ -590,10 +568,10 @@ def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
         enable_extension=False,
     )
     work_id = initialized["data"]["work_id"]
-    scanned = server._scan_pdf_impl(work_id)
+    scanned = scan_with_question_options(work_id)
     assert scanned["ok"] is True, scanned
     assert scanned["data"]["recommendations"]["primary_mode"] == "from_outline"
-    ctx = _ElicitationContext(
+    ctx = ElicitationContext(
         responses=[{
             "chapter_strategy": "reanalyze_with_vision",
             "chapters_confirmed": False,
@@ -601,7 +579,7 @@ def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
     )
 
     response = asyncio.run(
-        server._mcp_set_chapters_tool(
+        server.set_chapters(
             work_id=work_id,
             chapters=scanned["data"]["recommendations"]["suggested_chapters"],
             ctx=ctx,
@@ -619,32 +597,37 @@ def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
     assert len(ctx.messages) == 1
 
 
-def test_mcp_finalize_uses_elicited_format(monkeypatch):
+def test_mcp_finalize_uses_elicited_format(monkeypatch, tmp_path, ko_short):
     captured = {}
 
-    def fake_finalize(work_id, output_format="", keep_work_dir=True):
-        captured.update(
-            work_id=work_id,
-            output_format=output_format,
-            keep_work_dir=keep_work_dir,
-        )
-        return server._ok({"format": output_format})
+    class FakeRenderer:
+        def render(self, work_id, output_dir):
+            captured["render"] = (work_id, output_dir)
 
-    monkeypatch.setattr(server, "_finalize_study_impl", fake_finalize)
-    ctx = _ElicitationContext(responses=[{"output_format": "md_tui"}])
+    initialized = create_test_work(ko_short, tmp_path / "out")
+    work_id = initialized["data"]["work_id"]
+    monkeypatch.setitem(server.RENDERERS, "md_tui", FakeRenderer)
+    monkeypatch.setattr(
+        server,
+        "install_rendered_output",
+        lambda selected_work_id, output_format, render: captured.update(
+            work_id=selected_work_id,
+            output_format=output_format,
+        ),
+    )
+    ctx = ElicitationContext(responses=[{"output_format": "md_tui"}])
 
     response = asyncio.run(
-        server._mcp_finalize_study_tool(
-            work_id="work-1",
+        server.finalize_study(
+            work_id=work_id,
             ctx=ctx,
         )
     )
 
     assert response["ok"] is True
     assert captured == {
-        "work_id": "work-1",
+        "work_id": work_id,
         "output_format": "md_tui",
-        "keep_work_dir": True,
     }
     assert "정적 웹사이트 — 브라우저로 열람 + 진도 저장 서버" in ctx.messages[0]
     assert "챕터별 Markdown + 터미널 학습 TUI" in ctx.messages[0]
@@ -657,11 +640,11 @@ def test_mcp_cleanup_requires_elicited_confirmation(monkeypatch):
         called.append(work_id)
         return server._ok({"work_id": work_id})
 
-    monkeypatch.setattr(server, "_cleanup_work_impl", fake_cleanup)
-    ctx = _ElicitationContext(responses=[{"cleanup_confirmed": False}])
+    monkeypatch.setattr(workspace, "cleanup_workspace", fake_cleanup)
+    ctx = ElicitationContext(responses=[{"cleanup_confirmed": False}])
 
     response = asyncio.run(
-        server._mcp_cleanup_work_tool(work_id="work-1", ctx=ctx)
+        server.cleanup_work(work_id="work-1", ctx=ctx)
     )
 
     assert response["ok"] is False
@@ -749,7 +732,7 @@ def test_fastmcp_set_chapters_uses_three_ordered_elicitations(
             raise AssertionError(params.message)
         return types.ElicitResult(action="accept", content=content)
 
-    initialized = server._init_work_impl(
+    initialized = create_test_work(
         str(ko_short),
         str(tmp_path / "round-trip"),
         enable_short_answer=False,
@@ -757,7 +740,7 @@ def test_fastmcp_set_chapters_uses_three_ordered_elicitations(
         enable_extension=False,
     )
     work_id = initialized["data"]["work_id"]
-    scanned = server._scan_pdf_impl(work_id)
+    scanned = scan_with_question_options(work_id)
 
     async def scenario():
         async with create_connected_server_and_client_session(
@@ -795,12 +778,34 @@ def test_fastmcp_static_choice_elicitations_use_supported_schemas(monkeypatch):
         captured["ocr"] = (work_id, ocr_language)
         return server._ok({"ocr_language": ocr_language})
 
-    def fake_finalize_study(work_id, output_format="", keep_work_dir=True):
-        captured["finalize"] = (work_id, output_format, keep_work_dir)
-        return server._ok({"format": output_format})
-
-    monkeypatch.setattr(server, "_prepare_ocr_impl", fake_prepare_ocr)
-    monkeypatch.setattr(server, "_finalize_study_impl", fake_finalize_study)
+    monkeypatch.setattr(server.analysis, "prepare_ocr_impl", fake_prepare_ocr)
+    monkeypatch.setattr(
+        server.workspace,
+        "load_state",
+        lambda _work_id: {
+            "output_dir": "/tmp/pdf-study-finalize-test",
+            "chapters": {},
+            "question_options": {"extension": False},
+        },
+    )
+    monkeypatch.setattr(
+        server.workspace,
+        "get_work_dir",
+        lambda _work_id: "/tmp/pdf-study-finalize-test/.work",
+    )
+    monkeypatch.setattr(server.workspace, "update_phase", lambda *_args: None)
+    monkeypatch.setattr(
+        server,
+        "install_rendered_output",
+        lambda work_id, output_format, _render: captured.update(
+            finalize=(work_id, output_format, True),
+        ),
+    )
+    monkeypatch.setitem(
+        server.RENDERERS,
+        "md_tui",
+        type("FakeRenderer", (), {"render": lambda *_args: None}),
+    )
 
     async def on_elicit(context, params):
         if "OCR로 읽을 PDF의 언어" in params.message:

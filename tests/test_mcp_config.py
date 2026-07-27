@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import subprocess
 from pathlib import Path
@@ -40,8 +41,8 @@ def test_choice_tools_expose_only_non_choice_public_parameters():
     assert properties["cleanup_work"] == {"work_id"}
 
 
-def test_choice_workflows_have_no_direct_python_entrypoints():
-    direct_entrypoints = {
+def test_choice_workflows_have_only_elicitation_python_entrypoints():
+    choice_workflows = {
         "init_work",
         "resume_work",
         "scan_pdf",
@@ -51,8 +52,14 @@ def test_choice_workflows_have_no_direct_python_entrypoints():
         "cleanup_work",
     }
 
-    assert direct_entrypoints.isdisjoint(vars(server))
-    assert direct_entrypoints <= set(_mcp_input_properties())
+    assert choice_workflows <= vars(server).keys()
+    assert choice_workflows <= set(_mcp_input_properties())
+    for name in choice_workflows:
+        entrypoint = vars(server)[name]
+        assert inspect.iscoroutinefunction(entrypoint)
+        assert "ctx" in inspect.signature(entrypoint).parameters
+        assert not hasattr(server, f"_{name}_impl")
+        assert not hasattr(server, f"_mcp_{name}_tool")
 
 
 def test_global_config_uses_home_dir_not_project_dir(tmp_path: Path) -> None:

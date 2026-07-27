@@ -309,6 +309,44 @@ def _pending_guidance(
     )
 
 
+def _resume_response(state: dict[str, Any]) -> dict[str, Any]:
+    """이미 복원한 상태를 공개 resume 응답으로 변환한다."""
+    work_id = state["work_id"]
+    question_setup = _question_setup_payload(state)
+    if question_setup["pending_fields"] or (
+        state.get("page_count") is None
+        and question_setup["user_context_request"]
+    ):
+        return _without_choice_fallback(_ok(
+            {
+                "work_id": work_id,
+                "output_dir": state.get("output_dir"),
+                "current_phase": state.get("current_phase"),
+                "question_options": state.get("question_options"),
+                "summary_pending": [],
+                "extension_pending": [],
+            },
+            next_action=_question_setup_next_action(work_id, question_setup),
+        ))
+
+    pending = workspace.pending_chapters_from_state(state)
+    data = {
+        "work_id": work_id,
+        "output_dir": state.get("output_dir"),
+        "current_phase": state.get("current_phase"),
+        "execution_mode": state.get("execution_mode"),
+        "extraction_mode": state.get("extraction_mode"),
+        "summary_pending": pending["summary_pending"],
+        "extension_pending": pending["extension_pending"],
+    }
+    if _ready_to_finalize(state):
+        data["next_step"] = _finalize_next_step()
+    return _without_choice_fallback(_ok(
+        data,
+        next_action=_pending_guidance(state, work_id),
+    ))
+
+
 def _failed_chapters_from_invalid(invalid: list[dict[str, Any]]) -> list[dict[str, Any]]:
     failed: list[dict[str, Any]] = []
     for item in invalid:
@@ -759,18 +797,11 @@ def _safe(label: str):
 # 1. init_work
 # ---------------------------------------------------------------------------
 
+@mcp.tool(name="init_work")
 @_safe("init_work")
-def _init_work_impl(
+async def init_work(
     pdf_path: str,
-    output_dir: str = "",
-    enable_multiple_choice: bool = True,
-    enable_short_answer: bool | None = None,
-    enable_reflection: bool | None = None,
-    enable_extension: bool | None = None,
-    user_context: str = "",
-    replace_existing: bool = False,
-    _agent_cwd_path: Path | None = None,
-    _user_context_confirmed: bool = False,
+    ctx: Context,
 ) -> dict[str, Any]:
     """워크스페이스를 생성하고 work_id를 발급합니다.
 
@@ -808,83 +839,6 @@ def _init_work_impl(
     확정합니다.
     다음 단계: scan_pdf(work_id)
     """
-    resolved_dir = _resolve_output_dir(
-        output_dir,
-        pdf_path,
-        agent_cwd=_agent_cwd_path,
-    )
-    if resolved_dir is None:
-        return _missing_output_dir(pdf_path)
-
-    if not isinstance(replace_existing, bool):
-        return _err(
-            "replace_existing은 사용자가 기존 작업 교체를 명시적으로 선택했는지 "
-            "나타내는 boolean이어야 합니다.",
-            data={"invalid": ["replace_existing"]},
-        )
-
-    options = {
-        "multiple_choice": enable_multiple_choice,
-        "short_answer": enable_short_answer,
-        "reflection": enable_reflection,
-        "extension": enable_extension,
-    }
-    workspace.validate_workspace_inputs(pdf_path, options, user_context)
-
-    existing = workspace.inspect_output_dir(resolved_dir)
-    if existing["kind"] != "available":
-        if replace_existing and existing["kind"] in {
-            "managed_work", "damaged_managed_work", "managed_output",
-        }:
-            workspace.replace_workspace(resolved_dir)
-        else:
-            return _err(
-                "출력 폴더가 비어 있지 않아 기존 파일을 자동으로 덮어쓰지 않았습니다.",
-                data={
-                    "output_dir": existing["output_dir"],
-                    "existing_work": existing,
-                },
-                next_action=None,
-            )
-
-    work_id = workspace.make_work_id()
-
-    workspace.create_workspace(
-        pdf_path=pdf_path,
-        output_dir=resolved_dir,
-        options=options,
-        user_context=user_context,
-        user_context_confirmed=_user_context_confirmed,
-        work_id=work_id,
-    )
-    state = workspace.load_state(work_id)
-    question_setup = _question_setup_payload(state)
-    needs_user_input = bool(
-        question_setup["pending_fields"] or question_setup["user_context_request"]
-    )
-    return _ok(
-        {
-            "work_id": work_id,
-            "work_dir": str(workspace.get_work_dir(work_id)),
-            "output_dir": resolved_dir,
-            "question_options": state["question_options"],
-            "question_setup": question_setup,
-        },
-        next_action=(
-            _question_setup_next_action(work_id, question_setup)
-            if needs_user_input
-            else f'scan_pdf(work_id="{work_id}", scan_size=30)'
-        ),
-    )
-
-
-@mcp.tool(name="init_work", description=_init_work_impl.__doc__)
-@_safe("init_work")
-async def _mcp_init_work_tool(
-    pdf_path: str,
-    ctx: Context,
-) -> dict[str, Any]:
-    """현재 Codex workspace에 Elicitation으로 확인한 새 작업을 만든다."""
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
@@ -942,10 +896,8 @@ async def _mcp_init_work_tool(
         if action not in allowed_actions:
             raise ValueError("지원하지 않는 기존 작업 처리 방식입니다.")
         if action == "resume":
-            return _without_choice_fallback(_resume_work_impl(
-                output_dir=resolved_dir,
-                _agent_cwd_path=agent_cwd,
-            ))
+            state = workspace.resume_workspace(resolved_dir)
+            return _resume_response(state)
         replace_existing = True
 
     initial_setup = _question_setup_payload({
@@ -965,17 +917,46 @@ async def _mcp_init_work_tool(
     if selected is None:
         return _elicitation_cancelled({"output_dir": resolved_dir})
     user_context = (selected.pop("user_context", None) or "").strip()
-    return _without_choice_fallback(_init_work_impl(
+    options = {
+        "multiple_choice": True,
+        "short_answer": selected["enable_short_answer"],
+        "reflection": selected["enable_reflection"],
+        "extension": selected["enable_extension"],
+    }
+    workspace.validate_workspace_inputs(pdf_path, options, user_context)
+
+    existing = workspace.inspect_output_dir(resolved_dir)
+    if existing["kind"] != "available":
+        if replace_existing and existing["kind"] in {
+            "managed_work", "damaged_managed_work", "managed_output",
+        }:
+            workspace.replace_workspace(resolved_dir)
+        else:
+            return _err(
+                "출력 폴더가 비어 있지 않아 기존 파일을 자동으로 덮어쓰지 않았습니다.",
+                data={
+                    "output_dir": existing["output_dir"],
+                    "existing_work": existing,
+                },
+                next_action=None,
+            )
+
+    work_id = workspace.create_workspace(
         pdf_path=pdf_path,
         output_dir=resolved_dir,
-        enable_multiple_choice=True,
-        enable_short_answer=selected["enable_short_answer"],
-        enable_reflection=selected["enable_reflection"],
-        enable_extension=selected["enable_extension"],
+        options=options,
         user_context=user_context,
-        replace_existing=replace_existing,
-        _agent_cwd_path=agent_cwd,
-        _user_context_confirmed=True,
+        user_context_confirmed=True,
+    )
+    state = workspace.load_state(work_id)
+    return _without_choice_fallback(_ok(
+        {
+            "work_id": work_id,
+            "work_dir": str(workspace.get_work_dir(work_id)),
+            "output_dir": resolved_dir,
+            "question_options": state["question_options"],
+        },
+        next_action=f'scan_pdf(work_id="{work_id}", scan_size=30)',
     ))
 
 
@@ -983,11 +964,11 @@ async def _mcp_init_work_tool(
 # 1b. resume_work
 # ---------------------------------------------------------------------------
 
+@mcp.tool(name="resume_work")
 @_safe("resume_work")
-def _resume_work_impl(
-    output_dir: str = "",
-    pdf_path: str = "",
-    _agent_cwd_path: Path | None = None,
+async def resume_work(
+    pdf_path: str,
+    ctx: Context,
 ) -> dict[str, Any]:
     """이전에 시작했던 작업을 디스크에서 재개합니다 (서버 재시작 후 등).
 
@@ -1001,61 +982,6 @@ def _resume_work_impl(
     다음 단계: 남은 챕터가 있으면 get_subagent_prompts(work_id)로 워크플로를
     받아 pending 챕터만 처리, 없으면 바로 finalize_study(work_id).
     """
-    if not (output_dir or "").strip() and not (pdf_path or "").strip():
-        return _err("output_dir 또는 pdf_path 중 하나는 필요합니다.")
-    resolved = _resolve_output_dir(
-        output_dir,
-        pdf_path,
-        agent_cwd=_agent_cwd_path,
-    )
-    if resolved is None:
-        return _missing_output_dir(pdf_path)
-
-    state = workspace.resume_workspace(resolved)
-    work_id = state["work_id"]
-    question_setup = _question_setup_payload(state)
-    if question_setup["pending_fields"] or (
-        state.get("page_count") is None and question_setup["user_context_request"]
-    ):
-        return _ok(
-            {
-                "work_id": work_id,
-                "output_dir": state.get("output_dir"),
-                "current_phase": state.get("current_phase"),
-                "question_options": state.get("question_options"),
-                "question_setup": question_setup,
-                "summary_pending": [],
-                "extension_pending": [],
-            },
-            next_action=_question_setup_next_action(work_id, question_setup),
-        )
-
-    pending = workspace.pending_chapters_from_state(state)
-    data = {
-        "work_id": work_id,
-        "output_dir": state.get("output_dir"),
-        "current_phase": state.get("current_phase"),
-        "execution_mode": state.get("execution_mode"),
-        "extraction_mode": state.get("extraction_mode"),
-        "summary_pending": pending["summary_pending"],
-        "extension_pending": pending["extension_pending"],
-    }
-    if _ready_to_finalize(state):
-        data["next_step"] = _finalize_next_step()
-
-    return _ok(
-        data,
-        next_action=_pending_guidance(state, work_id),
-    )
-
-
-@mcp.tool(name="resume_work", description=_resume_work_impl.__doc__)
-@_safe("resume_work")
-async def _mcp_resume_work_tool(
-    pdf_path: str,
-    ctx: Context,
-) -> dict[str, Any]:
-    """현재 Codex workspace의 고정 출력 작업을 확인 후 재개한다."""
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
@@ -1083,26 +1009,24 @@ async def _mcp_resume_work_tool(
                     "existing_work": existing,
                     "selected_action": None,
                 })
-    return _without_choice_fallback(_resume_work_impl(
-        output_dir=resolved or "",
-        pdf_path=pdf_path,
-        _agent_cwd_path=agent_cwd,
-    ))
+    if resolved is None:
+        return _missing_output_dir(pdf_path)
+
+    state = workspace.resume_workspace(resolved)
+    return _resume_response(state)
 
 
 # ---------------------------------------------------------------------------
 # 2. scan_pdf
 # ---------------------------------------------------------------------------
 
+@mcp.tool(name="scan_pdf")
 @_safe("scan_pdf")
-def _scan_pdf_impl(
+async def scan_pdf(
     work_id: str,
+    ctx: Context,
     scan_size: int = 30,
     force_vision: bool = False,
-    enable_short_answer: bool | None = None,
-    enable_reflection: bool | None = None,
-    enable_extension: bool | None = None,
-    user_context: str | None = None,
 ) -> dict[str, Any]:
     """PDF 메타 + 챕터 경계 소스(내장 목차 또는 목차 후보 이미지) + offset.
 
@@ -1132,13 +1056,25 @@ def _scan_pdf_impl(
     챕터 구성·범위, 본문 추출 방식, 실행 방식은 set_chapters 호출 중 서버가 각각
     별도의 Elicitation으로 확인합니다.
     """
+    capability_error = _elicitation_required(ctx)
+    if capability_error is not None:
+        return capability_error
     state = workspace.load_state(work_id)
+    setup = _question_setup_payload(state)
+    selected: dict[str, Any] = {}
+    if setup["pending_fields"] or setup["user_context_request"]:
+        selected = await _elicit_question_setup(ctx, setup)
+        if selected is None:
+            return _elicitation_cancelled({"question_setup": setup})
+    enable_short_answer = selected.get("enable_short_answer")
+    enable_reflection = selected.get("enable_reflection")
+    enable_extension = selected.get("enable_extension")
+    user_context = selected.get("user_context")
     supplied = {
         "enable_short_answer": enable_short_answer,
         "enable_reflection": enable_reflection,
         "enable_extension": enable_extension,
     }
-    setup = _question_setup_payload(state)
     missing = [
         field for field in setup["pending_fields"]
         if supplied.get(field) is None
@@ -1152,11 +1088,10 @@ def _scan_pdf_impl(
     if missing or invalid:
         return _err(
             "문제 유형 선택이 빠졌거나 형식이 올바르지 않아 PDF를 스캔하지 않았습니다. "
-            "서버가 제공한 선택지를 그대로 보여주고 사용자의 명시적 답을 받으세요.",
+            "같은 scan_pdf 호출을 다시 실행해 사용자의 명시적 답을 받으세요.",
             data={
                 "missing": missing,
                 "invalid": invalid,
-                "question_setup": setup,
             },
             next_action=_question_setup_next_action(work_id, setup),
         )
@@ -1173,7 +1108,6 @@ def _scan_pdf_impl(
         setup = _question_setup_payload(state)
         return _err(
             str(e),
-            data={"question_setup": setup},
             next_action=(
                 _question_setup_next_action(work_id, setup)
                 if setup["pending_fields"] or setup["user_context_request"]
@@ -1216,44 +1150,16 @@ def _scan_pdf_impl(
             "book_info={...})를 호출하면 서버가 챕터 범위·본문 추출·실행 방식 "
             "Elicitation을 차례로 엽니다."
         )
-    return _ok(data, next_action=next_action)
-
-
-@mcp.tool(name="scan_pdf", description=_scan_pdf_impl.__doc__)
-@_safe("scan_pdf")
-async def _mcp_scan_pdf_tool(
-    work_id: str,
-    ctx: Context,
-    scan_size: int = 30,
-    force_vision: bool = False,
-) -> dict[str, Any]:
-    """미정 문제 유형을 MCP elicitation으로 직접 확인한 뒤 스캔한다."""
-    capability_error = _elicitation_required(ctx)
-    if capability_error is not None:
-        return capability_error
-    setup = _question_setup_payload(workspace.load_state(work_id))
-    selected: dict[str, Any] = {}
-    if setup["pending_fields"] or setup["user_context_request"]:
-        selected = await _elicit_question_setup(ctx, setup)
-        if selected is None:
-            return _elicitation_cancelled({"question_setup": setup})
-    return _without_choice_fallback(_scan_pdf_impl(
-        work_id=work_id,
-        scan_size=scan_size,
-        force_vision=force_vision,
-        enable_short_answer=selected.get("enable_short_answer"),
-        enable_reflection=selected.get("enable_reflection"),
-        enable_extension=selected.get("enable_extension"),
-        user_context=selected.get("user_context"),
-    ))
+    return _without_choice_fallback(_ok(data, next_action=next_action))
 
 
 # ---------------------------------------------------------------------------
 # 3. prepare_ocr / scan_toc_with_ocr
 # ---------------------------------------------------------------------------
 
+@mcp.tool(name="prepare_ocr")
 @_safe("prepare_ocr")
-def _prepare_ocr_impl(work_id: str, ocr_language: str = "") -> dict[str, Any]:
+async def prepare_ocr(work_id: str, ctx: Context) -> dict[str, Any]:
     """PaddleOCR CPU 모델을 준비합니다.
 
     공개 MCP 입력은 work_id뿐이며 서버가 한국어/영어를 form Elicitation으로
@@ -1262,26 +1168,6 @@ def _prepare_ocr_impl(work_id: str, ocr_language: str = "") -> dict[str, Any]:
     다음 단계: scan_toc_with_ocr(work_id) 또는 set_chapters(work_id, chapters,
     book_info). set_chapters가 본문 추출 방식과 실행 방식을 Elicitation으로 확인합니다.
     """
-    if ocr_language not in analysis.ocr.OCR_LANGUAGE_MODELS:
-        return _err(
-            "내부 OCR 언어가 확정되지 않았거나 지원되지 않습니다.",
-        )
-    data = analysis.prepare_ocr_impl(work_id, ocr_language)
-    data["ocr_language"] = ocr_language
-    return _ok(data, next_action=(
-        f'scan_toc_with_ocr(work_id="{work_id}") 또는 '
-        f'set_chapters(work_id="{work_id}", chapters=..., book_info=...)를 호출하세요. '
-        "set_chapters가 본문 추출 방식과 실행 방식을 Elicitation으로 확인합니다."
-    ))
-
-
-@mcp.tool(name="prepare_ocr", description=_prepare_ocr_impl.__doc__)
-@_safe("prepare_ocr")
-async def _mcp_prepare_ocr_tool(
-    work_id: str,
-    ctx: Context,
-) -> dict[str, Any]:
-    """OCR 언어를 MCP elicitation으로 직접 확인한 뒤 모델을 준비한다."""
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
@@ -1299,9 +1185,13 @@ async def _mcp_prepare_ocr_tool(
         choice["value"] for choice in _OCR_LANGUAGE_CHOICES
     }:
         raise ValueError("지원하지 않는 OCR 언어입니다.")
-    return _without_choice_fallback(
-        _prepare_ocr_impl(work_id=work_id, ocr_language=ocr_language),
-    )
+    data = analysis.prepare_ocr_impl(work_id, ocr_language)
+    data["ocr_language"] = ocr_language
+    return _without_choice_fallback(_ok(data, next_action=(
+        f'scan_toc_with_ocr(work_id="{work_id}") 또는 '
+        f'set_chapters(work_id="{work_id}", chapters=..., book_info=...)를 호출하세요. '
+        "set_chapters가 본문 추출 방식과 실행 방식을 Elicitation으로 확인합니다."
+    )))
 
 
 @mcp.tool()
@@ -1343,13 +1233,12 @@ def scan_toc_with_ocr(work_id: str) -> dict[str, Any]:
 # 4. set_chapters
 # ---------------------------------------------------------------------------
 
+@mcp.tool(name="set_chapters")
 @_safe("set_chapters")
-def _set_chapters_impl(
+async def set_chapters(
     work_id: str,
     chapters: list[dict[str, Any]],
-    execution_mode: str = "",
-    extraction_mode: str = "",
-    ocr_language: str = "",
+    ctx: Context,
     book_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """챕터 구조 + 처리 모드를 확정하고 챕터별 본문을 추출합니다.
@@ -1375,105 +1264,6 @@ def _set_chapters_impl(
       본문 추출 Elicitation에서 OCR 방식만 허용합니다.
     다음 단계: get_subagent_prompts(work_id)
     """
-    if execution_mode not in processing_mode_contract.VALID_EXECUTION_MODES or \
-            extraction_mode not in processing_mode_contract.VALID_EXTRACTION_MODES:
-        # 공개 wrapper가 Elicitation 값을 항상 주므로 여기서는 내부 불변식만 검사한다.
-        try:
-            tq = workspace.load_state(work_id).get("text_quality")
-        except Exception:
-            tq = None
-        return _err(
-            processing_mode_contract.invalid_mode_message(tq),
-            data=processing_mode_contract.invalid_mode_data(tq),
-        )
-
-    # text 모드 가드: 텍스트 레이어가 깨졌거나(garbled) 사실상 없으면(no_text_layer)
-    # 라이브러리 추출 본문이 쓰레기가 된다 → OCR로 강제 전환하도록 거부한다.
-    # scan_pdf가 이미 20p 샘플로 text_quality(mojibake 판정 포함)를 계산해 state에
-    # 저장해 두므로 페이지를 다시 읽지 않고 그 값만 본다.
-    if extraction_mode == "text":
-        tq = workspace.load_state(work_id).get("text_quality")
-        if tq in ("garbled", "no_text_layer"):
-            reason = (
-                "텍스트 레이어 인코딩이 깨져 있어(mojibake)"
-                if tq == "garbled"
-                else "텍스트 레이어가 거의 없어"
-            )
-            return _err(
-                f"이 PDF는 {reason} text 모드 추출 결과를 신뢰할 수 없습니다 "
-                f"(text_quality={tq}). 같은 set_chapters 호출을 다시 실행해 본문 추출 "
-                "Elicitation에서 OCR 방식을 선택하세요. PaddleOCR CPU로 본문을 "
-                "선계산합니다.",
-                data={
-                    "text_quality": tq,
-                    "forced_extraction_mode": "ocr",
-                    "execution_mode": execution_mode,
-                },
-            )
-    elif extraction_mode == "ocr":
-        selected_language = ocr_language or workspace.load_state(work_id).get("ocr_language")
-        if selected_language not in analysis.ocr.OCR_LANGUAGE_MODELS:
-            return _err(
-                "OCR 본문을 처리하려면 prepare_ocr의 OCR 언어 Elicitation을 먼저 "
-                "완료해야 합니다.",
-                data={
-                    "execution_mode": execution_mode,
-                    "extraction_mode": "ocr",
-                },
-                next_action=(
-                    f'prepare_ocr(work_id="{work_id}") 후 '
-                    "같은 set_chapters 호출을 다시 실행하세요."
-                ),
-            )
-        if not analysis._ocr_models_cached_for_language(selected_language):
-            return _err(
-                "OCR 모델 캐시가 없어 본문 OCR 선계산을 시작하지 않았습니다. "
-                "prepare_ocr(work_id)를 먼저 호출해 모델 다운로드/로드를 사용자가 볼 수 "
-                "있는 단계에서 수행하세요.",
-                data={
-                    "ocr_cache": analysis._ocr_cache_status_for_language(selected_language),
-                    "forced_next_step": "prepare_ocr",
-                    "ocr_language": selected_language,
-                },
-                next_action=f'prepare_ocr(work_id="{work_id}")',
-            )
-
-    data = analysis.set_chapters_impl(
-        work_id, chapters, execution_mode, extraction_mode,
-        book_info=book_info,
-        ocr_language=(ocr_language or workspace.load_state(work_id).get("ocr_language") or "korean"),
-    )
-    failed_chapters = data.get("failed_chapters") or []
-    if extraction_mode == "ocr" and failed_chapters:
-        return _err(
-            "OCR 본문 선처리 중 실패한 챕터가 있어 sub-agent 처리로 넘어갈 수 없습니다. "
-            "data.failed_chapters의 chapter_id, failed_pages, error를 확인한 뒤 "
-            "PDF/페이지 범위/OCR 환경을 복구하고 set_chapters를 다시 호출하세요.",
-            data=data,
-        )
-
-    n_skip = sum(1 for c in data["chapters"] if c.get("skipped"))
-    n_body = data["chapter_count"] - n_skip
-    return _ok(data, next_action=(
-        f"본문 챕터 {n_body}개 등록"
-        + (f"({n_skip}개는 skip=비본문)" if n_skip else "")
-        + f". 다음: get_subagent_prompts(work_id=\"{work_id}\")로 요약/문제 "
-        "프롬프트와 chapter_ids·workflow를 받으세요. 이후 챕터 처리는 반드시 "
-        "**등록된 chapter_id(ch1·ch2…)** 로만 get_chapter_content를 호출하세요 — "
-        "'p11-p18' 같은 페이지 범위 문자열을 chapter_id로 쓰지 마세요(특정 페이지를 "
-        "보려면 scan_pdf의 toc_page_images 경로를 직접 여세요)."
-    ))
-
-
-@mcp.tool(name="set_chapters", description=_set_chapters_impl.__doc__)
-@_safe("set_chapters")
-async def _mcp_set_chapters_tool(
-    work_id: str,
-    chapters: list[dict[str, Any]],
-    ctx: Context,
-    book_info: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """챕터, 추출 방식, 실행 방식을 각각 elicitation으로 확인한 뒤 확정한다."""
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
@@ -1517,13 +1307,94 @@ async def _mcp_set_chapters_tool(
                 workspace.load_state(work_id).get("text_quality"),
             ),
         })
-    return _without_choice_fallback(_set_chapters_impl(
-        work_id=work_id,
-        chapters=chapters,
-        execution_mode=execution_mode,
-        extraction_mode=extraction_mode,
+    if execution_mode not in processing_mode_contract.VALID_EXECUTION_MODES or \
+            extraction_mode not in processing_mode_contract.VALID_EXTRACTION_MODES:
+        # 앞선 Elicitation이 값을 보장하므로 여기서는 실행 전 불변식만 검사한다.
+        try:
+            tq = workspace.load_state(work_id).get("text_quality")
+        except Exception:
+            tq = None
+        return _err(
+            processing_mode_contract.invalid_mode_message(tq),
+            data=processing_mode_contract.invalid_mode_data(tq),
+        )
+
+    # text 모드 가드: 텍스트 레이어가 깨졌거나(garbled) 사실상 없으면(no_text_layer)
+    # 라이브러리 추출 본문이 쓰레기가 된다 → OCR로 강제 전환하도록 거부한다.
+    # scan_pdf가 이미 20p 샘플로 text_quality(mojibake 판정 포함)를 계산해 state에
+    # 저장해 두므로 페이지를 다시 읽지 않고 그 값만 본다.
+    if extraction_mode == "text":
+        tq = workspace.load_state(work_id).get("text_quality")
+        if tq in ("garbled", "no_text_layer"):
+            reason = (
+                "텍스트 레이어 인코딩이 깨져 있어(mojibake)"
+                if tq == "garbled"
+                else "텍스트 레이어가 거의 없어"
+            )
+            return _err(
+                f"이 PDF는 {reason} text 모드 추출 결과를 신뢰할 수 없습니다 "
+                f"(text_quality={tq}). 같은 set_chapters 호출을 다시 실행해 본문 추출 "
+                "Elicitation에서 OCR 방식을 선택하세요. PaddleOCR CPU로 본문을 "
+                "선계산합니다.",
+                data={
+                    "text_quality": tq,
+                    "forced_extraction_mode": "ocr",
+                    "execution_mode": execution_mode,
+                },
+            )
+    elif extraction_mode == "ocr":
+        selected_language = workspace.load_state(work_id).get("ocr_language")
+        if selected_language not in analysis.ocr.OCR_LANGUAGE_MODELS:
+            return _err(
+                "OCR 본문을 처리하려면 prepare_ocr의 OCR 언어 Elicitation을 먼저 "
+                "완료해야 합니다.",
+                data={
+                    "execution_mode": execution_mode,
+                    "extraction_mode": "ocr",
+                },
+                next_action=(
+                    f'prepare_ocr(work_id="{work_id}") 후 '
+                    "같은 set_chapters 호출을 다시 실행하세요."
+                ),
+            )
+        if not analysis._ocr_models_cached_for_language(selected_language):
+            return _err(
+                "OCR 모델 캐시가 없어 본문 OCR 선계산을 시작하지 않았습니다. "
+                "prepare_ocr(work_id)를 먼저 호출해 모델 다운로드/로드를 사용자가 볼 수 "
+                "있는 단계에서 수행하세요.",
+                data={
+                    "ocr_cache": analysis._ocr_cache_status_for_language(selected_language),
+                    "forced_next_step": "prepare_ocr",
+                    "ocr_language": selected_language,
+                },
+                next_action=f'prepare_ocr(work_id="{work_id}")',
+            )
+
+    data = analysis.set_chapters_impl(
+        work_id, chapters, execution_mode, extraction_mode,
         book_info=book_info,
-    ))
+        ocr_language=(workspace.load_state(work_id).get("ocr_language") or "korean"),
+    )
+    failed_chapters = data.get("failed_chapters") or []
+    if extraction_mode == "ocr" and failed_chapters:
+        return _err(
+            "OCR 본문 선처리 중 실패한 챕터가 있어 sub-agent 처리로 넘어갈 수 없습니다. "
+            "data.failed_chapters의 chapter_id, failed_pages, error를 확인한 뒤 "
+            "PDF/페이지 범위/OCR 환경을 복구하고 set_chapters를 다시 호출하세요.",
+            data=data,
+        )
+
+    n_skip = sum(1 for c in data["chapters"] if c.get("skipped"))
+    n_body = data["chapter_count"] - n_skip
+    return _without_choice_fallback(_ok(data, next_action=(
+        f"본문 챕터 {n_body}개 등록"
+        + (f"({n_skip}개는 skip=비본문)" if n_skip else "")
+        + f". 다음: get_subagent_prompts(work_id=\"{work_id}\")로 요약/문제 "
+        "프롬프트와 chapter_ids·workflow를 받으세요. 이후 챕터 처리는 반드시 "
+        "**등록된 chapter_id(ch1·ch2…)** 로만 get_chapter_content를 호출하세요 — "
+        "'p11-p18' 같은 페이지 범위 문자열을 chapter_id로 쓰지 마세요(특정 페이지를 "
+        "보려면 scan_pdf의 toc_page_images 경로를 직접 여세요)."
+    )))
 
 
 # ---------------------------------------------------------------------------
@@ -1827,11 +1698,11 @@ def list_pending_chapters(work_id: str) -> dict[str, Any]:
 # 10. finalize_study
 # ---------------------------------------------------------------------------
 
+@mcp.tool(name="finalize_study")
 @_safe("finalize_study")
-def _finalize_study_impl(
+async def finalize_study(
     work_id: str,
-    output_format: str = "",
-    keep_work_dir: bool = True,
+    ctx: Context,
 ) -> dict[str, Any]:
     """학습 자료를 고정 결과 폴더에 렌더링합니다.
 
@@ -1848,10 +1719,21 @@ def _finalize_study_impl(
       불가능한 환경이면 평문 모드로 폴백(항상 실행). 진도는 각 챕터
       progress.json에 직접 저장(서버 불필요).
     """
-    if not output_format:
-        return _err(
-            "내부 출력 형식이 확정되지 않았습니다.",
-        )
+    capability_error = _elicitation_required(ctx)
+    if capability_error is not None:
+        return capability_error
+    message = (
+        "최종 학습 자료 형식을 선택하세요.\n"
+        f"{_choice_lines([dict(choice) for choice in _OUTPUT_FORMAT_CHOICES])}"
+    )
+    result = await ctx.elicit(message=message, schema=_OutputFormatSelection)
+    if result.action != "accept" or result.data is None:
+        return _elicitation_cancelled({"work_id": work_id})
+    output_format = result.data.output_format
+    if output_format not in {
+        choice["value"] for choice in _OUTPUT_FORMAT_CHOICES
+    }:
+        raise ValueError("지원하지 않는 출력 형식입니다.")
     renderer_cls = RENDERERS.get(output_format)
     if renderer_cls is None:
         return _err(
@@ -1874,15 +1756,11 @@ def _finalize_study_impl(
     workspace.update_phase(work_id, "rendering", "completed")
 
     work_dir = workspace.get_work_dir(work_id)
-    if not keep_work_dir:
-        workspace.cleanup_workspace(work_id)
 
     # 중간 데이터(.work) 정리 안내 — 두 포맷 공통
     work_cleanup = (
         "\n\n[작업 데이터 정리] 중간 작업 폴더(.work/: 페이지 이미지·raw·상태 파일)가 "
-        "보존되어 있습니다"
-        + (" (현재 keep_work_dir=False라 이미 삭제됨)." if not keep_work_dir
-           else f" ({work_dir}).")
+        f"보존되어 있습니다 ({work_dir})."
         + f" cleanup_work(work_id=\"{work_id}\")를 호출하면 서버가 삭제 여부 "
         "Elicitation을 열고, 승인된 경우에만 .work/를 제거합니다(재실행 시 캐시로 "
         "쓰려면 보존)."
@@ -1904,13 +1782,12 @@ def _finalize_study_impl(
         data = {
             "output_dir": str(output_dir),
             "format": output_format,
-            "work_dir_kept": keep_work_dir,
+            "work_dir_kept": True,
             "launch_command": launch_cmd,
             "entry_script": "study_tui.py",
             "python": py,
+            "cleanup_work": cleanup_action,
         }
-        if keep_work_dir:
-            data["cleanup_work"] = cleanup_action
         if omitted_chapters:
             data["omitted_chapters"] = omitted_chapters
         next_action = (
@@ -1928,7 +1805,7 @@ def _finalize_study_impl(
             + omitted_notice
             + work_cleanup
         )
-        return _ok(data, next_action=next_action)
+        return _without_choice_fallback(_ok(data, next_action=next_action))
 
     # html — 정적 사이트 + 진도 API 서버(study_html.py). stdlib만 쓰므로 어떤
     # python으로도 동작하지만, 일관성을 위해 같은 인터프리터를 안내한다.
@@ -1937,7 +1814,7 @@ def _finalize_study_impl(
     data = {
             "output_dir": str(output_dir),
             "format": output_format,
-            "work_dir_kept": keep_work_dir,
+            "work_dir_kept": True,
             "launch_command": launch_cmd,
             "python": py,
             "entry_page": entry,
@@ -1947,11 +1824,11 @@ def _finalize_study_impl(
                 "windows": "start_study.bat",
             },
             "auto_port_on_script_launch": True,
-            **({"cleanup_work": cleanup_action} if keep_work_dir else {}),
+            "cleanup_work": cleanup_action,
     }
     if omitted_chapters:
         data["omitted_chapters"] = omitted_chapters
-    return _ok(
+    return _without_choice_fallback(_ok(
         data,
         next_action=(
             f"학습 자료가 {output_dir}에 만들어졌습니다.\n"
@@ -1963,35 +1840,6 @@ def _finalize_study_impl(
             + omitted_notice
             + work_cleanup
         ),
-    )
-
-
-@mcp.tool(name="finalize_study", description=_finalize_study_impl.__doc__)
-@_safe("finalize_study")
-async def _mcp_finalize_study_tool(
-    work_id: str,
-    ctx: Context,
-) -> dict[str, Any]:
-    """최종 형식을 MCP elicitation으로 확인한 뒤 렌더링한다."""
-    capability_error = _elicitation_required(ctx)
-    if capability_error is not None:
-        return capability_error
-    message = (
-        "최종 학습 자료 형식을 선택하세요.\n"
-        f"{_choice_lines([dict(choice) for choice in _OUTPUT_FORMAT_CHOICES])}"
-    )
-    result = await ctx.elicit(message=message, schema=_OutputFormatSelection)
-    if result.action != "accept" or result.data is None:
-        return _elicitation_cancelled({"work_id": work_id})
-    output_format = result.data.output_format
-    if output_format not in {
-        choice["value"] for choice in _OUTPUT_FORMAT_CHOICES
-    }:
-        raise ValueError("지원하지 않는 출력 형식입니다.")
-    return _without_choice_fallback(_finalize_study_impl(
-        work_id=work_id,
-        output_format=output_format,
-        keep_work_dir=True,
     ))
 
 
@@ -1999,30 +1847,14 @@ async def _mcp_finalize_study_tool(
 # 11. cleanup_work
 # ---------------------------------------------------------------------------
 
+@mcp.tool(name="cleanup_work")
 @_safe("cleanup_work")
-def _cleanup_work_impl(work_id: str) -> dict[str, Any]:
+async def cleanup_work(work_id: str, ctx: Context) -> dict[str, Any]:
     """완료된 학습 결과는 유지하고 해당 작업의 `.work` 중간 데이터만 삭제합니다.
 
     `finalize_study`가 성공해 렌더링이 완료된 작업에만 사용할 수 있습니다. 결과 파일,
     manifest, 사용자 파일은 건드리지 않으며 렌더링도 다시 실행하지 않습니다.
     """
-    data = workspace.cleanup_workspace(work_id)
-    return _ok(
-        data,
-        next_action=(
-            "중간 작업 데이터(.work/)만 삭제했습니다. 최종 학습 자료와 기존 진도는 "
-            "그대로 사용할 수 있습니다."
-        ),
-    )
-
-
-@mcp.tool(name="cleanup_work", description=_cleanup_work_impl.__doc__)
-@_safe("cleanup_work")
-async def _mcp_cleanup_work_tool(
-    work_id: str,
-    ctx: Context,
-) -> dict[str, Any]:
-    """중간 작업 삭제를 MCP elicitation으로 확인한 뒤 실행한다."""
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
@@ -2040,7 +1872,14 @@ async def _mcp_cleanup_work_tool(
             "work_id": work_id,
             "cleanup_confirmed": False,
         })
-    return _without_choice_fallback(_cleanup_work_impl(work_id=work_id))
+    data = workspace.cleanup_workspace(work_id)
+    return _without_choice_fallback(_ok(
+        data,
+        next_action=(
+            "중간 작업 데이터(.work/)만 삭제했습니다. 최종 학습 자료와 기존 진도는 "
+            "그대로 사용할 수 있습니다."
+        ),
+    ))
 
 
 # ---------------------------------------------------------------------------

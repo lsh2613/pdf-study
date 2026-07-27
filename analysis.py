@@ -1,7 +1,8 @@
 """scan_pdf / set_chapters 통합 로직.
 
-이 모듈은 pdf/* + workspace를 묶어 메인 LLM이 호출하기 쉬운
-형태로 다듬는다. MCP 도구는 server.py에서 thin wrapper로 노출.
+이 모듈은 pdf/* + workspace를 묶어 PDF 스캔, OCR, 챕터 본문 준비에 필요한
+실행 primitive를 제공한다. 등록 MCP Elicitation과 워크플로 orchestration은
+server.py가 소유한다.
 """
 from __future__ import annotations
 

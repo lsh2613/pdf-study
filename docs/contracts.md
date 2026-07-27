@@ -22,12 +22,12 @@
 응답에도 `choices`, `user_choice_required`, `user_choice_instruction` 같은 구조화
 fallback이 없다. Elicitation을 지원하지 않는 세션은
 `data.required_capability="elicitation.form"`으로 상태 변경 없이 실패한다.
-거절·취소도 sync 구현을 호출하지 않는다.
+거절·취소도 선택 뒤의 실행 본문으로 넘어가지 않는다.
 
-선택을 소비하는 동기 구현은 공개 Python API가 아니다. `pdf_study.server`는 아래
-MCP 도구 이름과 같은 직접 실행 속성을 노출하지 않으며, 클라이언트는 모듈을 import해
-내부 구현을 호출하는 대신 MCP 세션으로 도구를 호출해야 한다. 내부 구현 이름과
-시그니처는 외부 계약이나 호환 대상이 아니다.
+선택을 소비하는 각 워크플로는 form Elicitation과 승인 후 실행을 하나의 등록된
+async 함수에서 처리한다. `pdf_study.server`에는 같은 작업을 선택 인자로 바로
+실행하는 별도 `_impl` 함수나 별도 MCP wrapper가 없다. 클라이언트는 모듈의 하위
+primitive를 조합하지 않고 MCP 세션으로 아래 도구를 호출해야 한다.
 
 선택을 포함하는 공개 MCP 스키마는 다음과 같다.
 
@@ -80,7 +80,7 @@ workspace를 하나로 식별할 수 없는 실패 응답은
 
 `set_chapters(work_id, chapters, book_info)`는 챕터 구성·범위, text/OCR,
 sequential/parallel을 세 개의 순차 Elicitation으로 확인하고 모두 승인된 뒤에만
-sync 구현을 호출한다. text 품질이 신뢰 불가면 추출 form은 OCR만 허용한다.
+처리 상태를 변경한다. text 품질이 신뢰 불가면 추출 form은 OCR만 허용한다.
 `pdf_pages=[start,end]`는 필수 1-based inclusive 범위이고 `source_pages`는 선택적
 표시 메타다. 입력 전체를 무부작용으로 검증한 뒤 모드·챕터·phase를 한 잠금 구간에서
 확정한다. OCR은 `prepare_ocr`에 저장된 언어를 사용하며 모델 캐시가 없으면

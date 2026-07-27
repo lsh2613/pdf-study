@@ -22,7 +22,7 @@
 
 원인: PaddleOCR 첫 실행은 모델 다운로드와 모델 로드가 필요할 수 있다. 이 작업이 `scan_pdf` 안에 숨어 있으면 장시간 대기의 이유가 드러나지 않는다.
 
-대응: `scan_pdf`에서는 PaddleOCR 모델 다운로드, 모델 로드, OCR 실행을 하지 않는다. 첫 모델 다운로드는 `prepare_ocr`에서만 수행하고, 목차 이미지 OCR은 `scan_toc_with_ocr`에서 수행한다. 모델 캐시가 이미 있으면 `scan_toc_with_ocr`와 `set_chapters(extraction_mode="ocr")`의 내부 모델 로드는 허용한다.
+대응: `scan_pdf`에서는 PaddleOCR 모델 다운로드, 모델 로드, OCR 실행을 하지 않는다. 첫 모델 다운로드는 `prepare_ocr`에서만 수행하고, 목차 이미지 OCR은 `scan_toc_with_ocr`에서 수행한다. 모델 캐시가 이미 있으면 `scan_toc_with_ocr`와 `set_chapters`의 본문 추출 Elicitation에서 OCR을 선택한 흐름의 내부 모델 로드는 허용한다.
 
 ## Elicitation 선택지 경계
 
@@ -31,7 +31,7 @@
 
 원인: 응답 지시나 일반 도구 인자는 실제 사람의 답에서 왔는지 서버가 검증할 수 없다.
 
-대응: 선택값은 MCP 비동기 wrapper가 여는 form Elicitation에서만 받는다. 공개
+대응: 선택값은 등록된 MCP async 함수가 여는 form Elicitation에서만 받는다. 공개
 스키마에서 선택 파라미터를 제거하고, 공개 응답에서도 `choices`,
 `user_choice_required`, `user_choice_instruction`, `question_setup`,
 `ocr_language_setup` 같은 fallback을 제거한다. 선택 정의는 Elicitation 메시지를
@@ -49,16 +49,18 @@ text/OCR, 순차/병렬, 출력 형식을 임의로 정한다.
 모듈 속성으로 공개되어 있으면 Python 직접 호출은 비동기 MCP 래퍼와 form을 거치지
 않는다.
 
-대응: 선택을 소비하는 7개 워크플로 이름은 MCP 도구 등록 이름으로만 유지하고,
-`pdf_study.server`의 공개 Python 속성에서는 제거한다. 내부 동기 구현은 private
-이름을 사용하며 문서나 클라이언트 계약에서 직접 실행 방법으로 안내하지 않는다.
-회귀 테스트는 7개 공개 Python 이름이 없으면서 MCP 도구 이름과 스키마는 남아 있는지
-함께 확인한다.
+대응: 선택을 소비하는 7개 워크플로는 각각 등록된 async MCP 함수 하나로만
+구현한다. 이 함수 안에서 capability 확인, form Elicitation, 응답 검증, 승인 후
+실행을 연속 처리한다. 같은 작업을 선택 인자로 바로 수행하는 `_impl` 함수나 별도
+MCP wrapper는 만들지 않는다. 회귀 테스트는 7개 등록 함수가 async이고 `ctx`를
+요구하며, 대응하는 `_{name}_impl` 속성이 없고 공개 MCP 스키마에는 선택 인자가
+없는지 함께 확인한다.
 
-한계: underscore나 모듈 private 이름은 OS 보안 경계가 아니다. 동일 사용자 권한으로
-임의 Python·셸·파일 쓰기가 가능한 에이전트를 반드시 막아야 한다면 MCP 서버와
-결과 폴더를 별도 OS 사용자 또는 샌드박스로 분리해야 한다. 내부 토큰, 환경 변수,
-call-stack 검사는 그런 권한에 대한 강제 수단으로 취급하지 않는다.
+한계: 이 구조는 동일한 선택형 워크플로의 직접 호출 우회를 제거하지만 OS 보안
+경계는 아니다. 동일 사용자 권한으로 임의 Python·셸·파일 쓰기가 가능한 에이전트를
+반드시 막아야 한다면 MCP 서버와 결과 폴더를 별도 OS 사용자 또는 샌드박스로
+분리해야 한다. 하위 primitive, 내부 토큰, 환경 변수, call-stack 검사는 그런
+권한에 대한 강제 수단으로 취급하지 않는다.
 
 ## 에이전트가 필수 선택을 대신 결정
 
@@ -67,17 +69,16 @@ call-stack 검사는 그런 권한에 대한 강제 수단으로 취급하지 �
 원인: 응답 문구는 에이전트 행동 지침일 뿐, 일반 도구 인자가 실제 사람의 답에서
 왔는지 서버가 검증할 수 없다.
 
-대응: MCP 전용 비동기 도구 래퍼가
-문제 유형, OCR 언어, 챕터 구성·범위와 처리 방식, 출력 형식, 기존 작업 재개·교체와
-`.work` 정리를 실행 직전에 묻는다. 선택 파라미터 자체가 공개 입력에 없으며
-elicitation 응답만 sync 구현에 전달한다. 거절·취소 또는 미지원 세션이면 sync
-구현을 호출하지 않는다. 새 작업 form에는 계산된 절대 출력 폴더를 안내하되 별도
-확인 boolean은 요구하지 않는다.
+대응: 등록된 async MCP 함수가 문제 유형, OCR 언어, 챕터 구성·범위와 처리 방식,
+출력 형식, 기존 작업 재개·교체와 `.work` 정리를 실행 직전에 묻고, 같은 함수
+안에서 승인 후 처리까지 이어간다. 선택 파라미터 자체가 공개 입력에 없으며
+거절·취소 또는 미지원 세션이면 처리 본문을 실행하지 않는다. 새 작업 form에는
+계산된 절대 출력 폴더를 안내하되 별도 확인 boolean은 요구하지 않는다.
 
 `set_chapters`는 `[챕터 구성과 범위]`, `[본문 추출 방식]`, `[실행 방식]`의 세 form을
 순서대로 연다. 앞선 form의 승인값은 메모리에만 두고 세 form이 모두 승인된 뒤에만
-sync 구현을 한 번 호출한다. 따라서 두 번째나 세 번째 form에서 취소해도 rollback할
-상태 변경이 없다. FastMCP form schema는 primitive 필드만 허용하므로 문자열 선택은
+처리 상태를 변경한다. 따라서 두 번째나 세 번째 form에서 취소해도 rollback할 상태
+변경이 없다. FastMCP form schema는 primitive 필드만 허용하므로 문자열 선택은
 `str` 필드의 JSON Schema `enum`으로 표시하고, 수신값을 서버 허용 목록으로 다시
 검증한다.
 
@@ -89,13 +90,12 @@ sync 구현을 한 번 호출한다. 따라서 두 번째나 세 번째 form에�
 원인: MCP 서버 프로세스의 `Path.cwd()`는 호출별 agent cwd가 아니다. 에이전트가
 간헐적으로 절대 `output_dir`을 넣을 때만 원하는 경로가 사용되어 결과가 흔들린다.
 
-대응: MCP 래퍼는 요청 메타의 단일 Codex workspace를 우선 사용하고, 없으면 단일
+대응: 등록된 MCP 함수는 요청 메타의 단일 Codex workspace를 우선 사용하고, 없으면 단일
 MCP root를 사용한다. 공개 `output_dir` 없이 그 아래 `result/<pdf-name>`을 계산한다.
 workspace가 없거나 여러 개라 모호하면 서버 cwd로 폴백하지 않고 상태 변경 없이
 실패한다. 실패 응답은 필요한 세션 context가 `workspace_or_root`임을 표시하고,
 클라이언트가 정확히 하나의 root를 노출한 뒤 같은 공개 호출을 재시도하도록
-안내한다. sync 구현도 호출자 workspace를 명시적으로 주입받지 않은 빈·상대 경로를
-거부한다.
+안내한다.
 
 ## 챕터 설정 검증과 처리 상태
 

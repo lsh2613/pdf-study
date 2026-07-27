@@ -14,26 +14,17 @@ import pytest
 
 from pdf_study import server, workspace
 from pdf_study import analysis
+from .conftest import (
+    create_test_work,
+    finalize_test_study,
+    scan_with_question_options as _scan,
+    set_test_chapters as _sc,
+)
 
 
 def _setup(tmp_path, pdf):
-    r = server._init_work_impl(str(pdf), str(tmp_path / "out"))
+    r = create_test_work(pdf, tmp_path / "out")
     return r["data"]["work_id"], tmp_path / "out"
-
-
-def _scan(wid):
-    return server._scan_pdf_impl(
-        wid,
-        enable_short_answer=True,
-        enable_reflection=True,
-        enable_extension=True,
-    )
-
-
-def _sc(wid, chapters):
-    """set_chapters 호출 — 모드는 본문 처리용 기본값으로 고정."""
-    return server._set_chapters_impl(wid, chapters,
-                               execution_mode="sequential", extraction_mode="text")
 
 
 def test_skip_marks_status_skipped(tmp_path, ko_with_toc):
@@ -107,7 +98,7 @@ def test_skip_chapter_not_rendered(tmp_path, ko_with_toc):
             "questions": {"multiple_choice": [], "short_answer": [], "reflection": []},
         })
     # extension 미완료 상태여도 완료분만 렌더하고 누락을 응답으로 알린다.
-    fin = server._finalize_study_impl(wid, "html")
+    fin = finalize_test_study(wid, "html")
     assert fin["ok"], fin
 
     # 멀티 챕터로 렌더 (skip 제외 후에도 2개 남음)

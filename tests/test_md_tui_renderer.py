@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import json
 
-from pdf_study import server
 from pdf_study.renderer.md_tui_renderer import _book_md, _summary_md
-from .conftest import build_rendered_study
+from .conftest import build_rendered_study, finalize_test_study
 
 
 def _build_multi(ko_with_toc, tmp_path, *, opts=None):
@@ -119,7 +118,7 @@ def test_progress_fingerprint_preserves_same_md_tui_generation(ko_with_toc, tmp_
     progress = out / "ch1" / "progress.json"
     progress.write_text('{"completed":true}', encoding="utf-8")
 
-    rerendered = server._finalize_study_impl(wid, "md_tui")
+    rerendered = finalize_test_study(wid, "md_tui")
 
     assert rerendered["ok"], rerendered
     assert progress.read_text(encoding="utf-8") == '{"completed":true}'

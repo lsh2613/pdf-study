@@ -6,13 +6,15 @@
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from .fixtures.build_fixtures import FIXTURES_DIR, ensure_fixtures
-from pdf_study import question_contract, server
+from pdf_study import question_contract, server, workspace
 
 
 def pytest_configure(config):
@@ -44,15 +46,154 @@ def scanned_empty(fixtures_dir) -> Path:
     return fixtures_dir / "scanned_empty.pdf"
 
 
+class ElicitationContext:
+    """등록된 MCP 도구를 테스트에서 직접 실행하기 위한 form 응답 context."""
+
+    def __init__(self, *, cwd: Path | None = None, responses=None, supported=True):
+        workspaces = {} if cwd is None else {str(cwd): {"has_changes": False}}
+        self.request_context = SimpleNamespace(
+            meta={"x-codex-turn-metadata": {"workspaces": workspaces}},
+        )
+        self.session = SimpleNamespace(
+            check_client_capability=lambda _capability: supported,
+        )
+        self._responses = list(responses or [])
+        self.messages: list[str] = []
+
+    async def elicit(self, message, schema):
+        self.messages.append(message)
+        response = dict(self._responses.pop(0))
+        action = response.pop("_action", "accept")
+        if action != "accept":
+            return SimpleNamespace(action=action, data=None)
+        return SimpleNamespace(action=action, data=schema(**response))
+
+
+def create_test_work(pdf_path: Path, output_dir: Path, **options) -> dict:
+    """선택형 MCP를 우회하지 않고 하위 저장 primitive로 테스트 상태만 준비한다."""
+    question_options = {
+        "multiple_choice": options.pop("enable_multiple_choice", True),
+        "short_answer": options.pop("enable_short_answer", None),
+        "reflection": options.pop("enable_reflection", None),
+        "extension": options.pop("enable_extension", None),
+    }
+    user_context = options.pop("user_context", "")
+    user_context_confirmed = options.pop("_user_context_confirmed", False)
+    replace_existing = options.pop("replace_existing", False)
+    if options:
+        raise TypeError(f"unsupported test setup options: {sorted(options)}")
+    try:
+        workspace.validate_workspace_inputs(
+            str(pdf_path),
+            question_options,
+            user_context,
+        )
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        return server._err(f"{type(exc).__name__}: {exc}")
+    existing = workspace.inspect_output_dir(output_dir)
+    if existing["kind"] != "available":
+        if replace_existing and existing["kind"] in {
+            "managed_work", "damaged_managed_work", "managed_output",
+        }:
+            workspace.replace_workspace(output_dir)
+        else:
+            return server._err(
+                "출력 폴더가 비어 있지 않아 기존 파일을 자동으로 덮어쓰지 않았습니다.",
+                data={
+                    "output_dir": existing["output_dir"],
+                    "existing_work": existing,
+                },
+            )
+    work_id = workspace.create_workspace(
+        pdf_path=str(pdf_path),
+        output_dir=str(output_dir),
+        options=question_options,
+        user_context=user_context,
+        user_context_confirmed=user_context_confirmed,
+    )
+    state = workspace.load_state(work_id)
+    return server._ok({
+        "work_id": work_id,
+        "work_dir": str(workspace.get_work_dir(work_id)),
+        "output_dir": str(output_dir),
+        "question_options": state["question_options"],
+    })
+
+
 def scan_with_question_options(work_id: str) -> dict:
     """미정인 문제 유형을 활성화해 렌더 테스트용 스캔을 실행한다."""
-    options = server.workspace.load_state(work_id)["question_options"]
-    return server._scan_pdf_impl(
-        work_id,
-        enable_short_answer=True if options.get("short_answer") is None else None,
-        enable_reflection=True if options.get("reflection") is None else None,
-        enable_extension=True if options.get("extension") is None else None,
+    setup = server._question_setup_payload(workspace.load_state(work_id))
+    selected = {
+        field: True
+        for field in setup["pending_fields"]
+    }
+    if setup["user_context_request"]:
+        selected["user_context"] = ""
+    return asyncio.run(
+        server.scan_pdf(
+            work_id=work_id,
+            ctx=ElicitationContext(responses=[selected] if selected else []),
+        ),
     )
+
+
+def set_test_chapters(
+    work_id: str,
+    chapters: list[dict],
+    *,
+    execution_mode: str = "sequential",
+    extraction_mode: str = "text",
+    book_info: dict | None = None,
+) -> dict:
+    """등록된 set_chapters의 세 Elicitation을 승인해 테스트 챕터를 구성한다."""
+    if extraction_mode == "ocr":
+        state = workspace.load_state(work_id)
+        if state.get("ocr_language") is None:
+            # OCR 자체를 검증하는 테스트는 worker를 먼저 대역하므로, 여기서는
+            # prepare_ocr의 별도 계약 대신 필요한 선행 상태만 준비한다.
+            workspace.update_state(work_id, ocr_language="korean")
+    return asyncio.run(server.set_chapters(
+        work_id=work_id,
+        chapters=chapters,
+        book_info=book_info,
+        ctx=ElicitationContext(responses=[
+            {"chapter_strategy": "proceed", "chapters_confirmed": True},
+            {"extraction_mode": extraction_mode},
+            {"execution_mode": execution_mode},
+        ]),
+    ))
+
+
+def prepare_test_ocr(work_id: str, language: str = "korean") -> dict:
+    return asyncio.run(server.prepare_ocr(
+        work_id=work_id,
+        ctx=ElicitationContext(responses=[{"ocr_language": language}]),
+    ))
+
+
+def finalize_test_study(work_id: str, output_format: str) -> dict:
+    return asyncio.run(server.finalize_study(
+        work_id=work_id,
+        ctx=ElicitationContext(responses=[{"output_format": output_format}]),
+    ))
+
+
+def cleanup_test_work(work_id: str) -> dict:
+    return asyncio.run(server.cleanup_work(
+        work_id=work_id,
+        ctx=ElicitationContext(responses=[{"cleanup_confirmed": True}]),
+    ))
+
+
+def resume_test_work(pdf_path: Path, cwd: Path) -> dict:
+    """고정 출력 경로의 기존 작업을 등록된 resume_work로 복원한다."""
+    return asyncio.run(server.resume_work(
+        pdf_path=str(pdf_path),
+        ctx=ElicitationContext(
+            cwd=cwd,
+            responses=[{"resume_confirmed": True}],
+        ),
+    ))
 
 
 def fake_summary_result(
@@ -120,11 +261,12 @@ def build_rendered_study(
     summary_kwargs: dict | None = None,
 ) -> tuple[str, Path, list[dict]]:
     """실제 MCP 저장 흐름을 거쳐 지정한 형식의 렌더 결과를 만든다."""
-    result = server._init_work_impl(str(pdf_path), str(tmp_path / "out"), **(options or {}))
+    output_dir = tmp_path / "out"
+    result = create_test_work(pdf_path, output_dir, **(options or {}))
     work_id = result["data"]["work_id"]
     scanned = scan_with_question_options(work_id)
     chapter_defs = chapters or scanned["data"]["recommendations"]["suggested_chapters"]
-    configured = server._set_chapters_impl(
+    configured = set_test_chapters(
         work_id,
         chapter_defs,
         execution_mode="sequential",
@@ -149,6 +291,6 @@ def build_rendered_study(
                 ),
             )
             assert extension["ok"], extension
-    finalized = server._finalize_study_impl(work_id, output_format)
+    finalized = finalize_test_study(work_id, output_format)
     assert finalized["ok"], finalized
-    return work_id, tmp_path / "out", chapter_defs
+    return work_id, output_dir, chapter_defs
