@@ -161,8 +161,9 @@ Markdown 포함을 검증한 뒤에만 완료 처리한다. 글자 수나 원문
 
 대응: 원문은 content map, 요약 작성과 독립 검토까지만 전달한다. 검토 통과 뒤 기본
 문제 생성 단계에는 `summary`, `key_points`, `source_char_count`만 전달한다. 확장
-문제는 `get_chapter_summary`가 같은 세 필드만 반환하며 원문, content map, 검토
-내부 정보는 노출하지 않는다. `source_char_count`는 문제 개수 상한 계산에만 쓴다.
+문제는 `get_chapter_summary`가 챕터 식별 메타와 함께 같은 세 입력 필드를 반환하며
+원문, content map, 검토 내부 정보는 노출하지 않는다. `source_char_count`는 문제
+개수 상한 계산에만 쓴다.
 
 ## 결과 파일과 상태 저장 순서
 
