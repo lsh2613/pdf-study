@@ -810,6 +810,14 @@ def _saved_question_ids(path: Path) -> set[str]:
     return question_contract.question_ids(data.get("questions"))
 
 
+def get_chapter_summary(work_id: str, chapter_id: str) -> dict[str, Any]:
+    """저장된 챕터 요약과 핵심 포인트를 반환한다."""
+    path = summaries_dir(work_id) / f"{chapter_id}.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"chapter summary not found: {chapter_id}")
+    return _read_json(path)
+
+
 def save_chapter_result(
     work_id: str,
     chapter_id: str,

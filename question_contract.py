@@ -6,6 +6,8 @@ import random
 import re
 from typing import Any, Callable
 
+from . import summary_contract
+
 
 BASIC_QUESTION_TYPES = ("multiple_choice", "short_answer", "reflection")
 
@@ -27,7 +29,7 @@ class QuestionContractError(ValueError):
 
 
 def summary_payload_example() -> dict[str, Any]:
-    return copy.deepcopy({
+    result = {
         "summary": "요약",
         "key_points": ["핵심 포인트 1", "핵심 포인트 2"],
         "questions": {
@@ -49,12 +51,17 @@ def summary_payload_example() -> dict[str, Any]:
                 "model_answer": "...",
             }],
         },
-    })
+    }
+    result.update(summary_contract.quality_payload_example())
+    return copy.deepcopy(result)
 
 
 def agent_summary_payload_example() -> dict[str, Any]:
     """생성 agent가 반환할 객관식 정답·오답 분리 예시."""
     example = summary_payload_example()
+    # 내용 목록과 검토 결과는 별도 단계에서 생성한 뒤 최종 저장 payload에 합친다.
+    example.pop("content_map", None)
+    example.pop("summary_review", None)
     multiple_choice = example["questions"]["multiple_choice"][0]
     multiple_choice.pop("options")
     multiple_choice.pop("answer_index")

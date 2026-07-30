@@ -1123,6 +1123,29 @@ def test_get_subagent_prompts_ignores_missing_raw_when_all_results_completed(
     assert "save_extension_result" not in response["next_action"]
 
 
+def test_get_subagent_prompts_extension_only_uses_saved_summary_without_raw(
+    tmp_path, ko_short,
+):
+    wid = _init(
+        str(ko_short), str(tmp_path / "out_extension_summary"), enable_extension=True,
+    )["data"]["work_id"]
+    _scan(wid)
+    result = _sc(
+        wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}],
+    )
+    assert result["ok"], result
+    assert server.save_chapter_result(wid, "ch1", _result())["ok"] is True
+    (workspace.chapters_raw_dir(wid) / "ch1.json").unlink()
+
+    response = server.get_subagent_prompts(wid)
+
+    assert response["ok"] is True, response
+    assert response["data"]["summary_pending_chapter_ids"] == []
+    assert response["data"]["extension_pending_chapter_ids"] == ["ch1"]
+    assert "get_chapter_summary" in response["data"]["workflow_instructions"]
+    assert "get_chapter_summary" in response["next_action"]
+
+
 def test_get_subagent_prompts_rejects_work_without_chapter_setup(tmp_path, ko_short):
     wid = _init(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     _scan(wid)
@@ -1233,6 +1256,39 @@ def test_get_chapter_content_rejects_invalid_raw(
     assert expected in r["error"]
 
 
+def test_get_chapter_summary_returns_only_question_basis(tmp_path, ko_short):
+    wid = _init(str(ko_short), str(tmp_path / "out_summary_basis"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    result = _result()
+    assert server.save_chapter_result(wid, "ch1", result)["ok"] is True
+
+    response = server.get_chapter_summary(wid, "ch1")
+
+    assert response["ok"] is True, response
+    assert response["data"]["summary"] == result["summary"]
+    assert response["data"]["key_points"] == result["key_points"]
+    assert response["data"]["source_char_count"] > 0
+    assert "text" not in response["data"]
+    assert "content_map" not in response["data"]
+    assert "summary_review" not in response["data"]
+    assert "extension_prompt" in response["next_action"]
+    state = workspace.load_state(wid)
+    assert state["chapters"]["ch1"]["extension_status"] == "in_progress"
+
+
+def test_get_chapter_summary_requires_completed_saved_summary(tmp_path, ko_short):
+    wid = _init(str(ko_short), str(tmp_path / "out_missing_summary"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+
+    response = server.get_chapter_summary(wid, "ch1")
+
+    assert response["ok"] is False
+    assert "not completed" in response["error"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["extension_status"] == "pending"
+
+
 def test_mark_chapter_in_progress_guards_done_and_missing(tmp_path, ko_short):
     """in_progress 마킹은 completed/skipped를 안 건드리고, 없는 챕터는 조용히 무시."""
     wid = _init(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
@@ -1262,6 +1318,79 @@ def test_save_chapter_result_rejects_missing_summary(tmp_path, ko_short):
     assert r["ok"] is False
     assert "summary" in r["data"]["missing"]
     # 거부됐으므로 completed로 넘어가지 않는다
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+
+
+def test_save_chapter_result_requires_semantic_content_map_and_review(
+    tmp_path, ko_short,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+
+    data = _result()
+    data.pop("content_map")
+    data.pop("summary_review")
+    response = server.save_chapter_result(wid, "ch1", data)
+
+    assert response["ok"] is False
+    assert response["data"]["missing"] == ["content_map", "summary_review"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+    assert not (workspace.summaries_dir(wid) / "ch1.json").exists()
+    assert not (workspace.quiz_dir(wid) / "ch1.json").exists()
+
+
+def test_save_chapter_result_rejects_review_with_uncovered_meaning(
+    tmp_path, ko_short,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+
+    data = _result()
+    data["summary_review"]["status"] = "needs_revision"
+    data["summary_review"]["covered_point_ids"] = []
+    data["summary_review"]["missing_significant_content"] = ["핵심 예외 조건"]
+    response = server.save_chapter_result(wid, "ch1", data)
+
+    assert response["ok"] is False
+    assert "summary_review.status" in response["data"]["missing"]
+    assert "summary_review.covered_point_ids" in response["data"]["missing"]
+    assert "summary_review.missing_significant_content" in response["data"]["missing"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+
+
+def test_save_chapter_result_rejects_missing_explicit_subchapter_heading(
+    tmp_path, ko_short,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+
+    data = _result(summary="## 1.1 첫 절\n첫 절만 반영")
+    content_map = data["content_map"]
+    content_map["has_explicit_subchapters"] = True
+    content_map["sections"][0].update(
+        heading="1.1 첫 절",
+        explicit_subchapter=True,
+    )
+    content_map["sections"].append({
+        "id": "section_2",
+        "heading": "1.2 둘째 절",
+        "explicit_subchapter": True,
+        "important_points": [{
+            "id": "point_2",
+            "content": "둘째 절 핵심",
+            "significance": "둘째 절의 핵심 결론",
+        }],
+    })
+    data["summary_review"]["covered_section_ids"].append("section_2")
+    data["summary_review"]["covered_point_ids"].append("point_2")
+
+    response = server.save_chapter_result(wid, "ch1", data)
+
+    assert response["ok"] is False
+    assert "content_map.sections[1].heading" in response["data"]["missing"]
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
 
 

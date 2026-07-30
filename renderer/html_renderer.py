@@ -281,21 +281,70 @@ def _book_info_header(book_info: dict[str, Any]) -> str:
     )
 
 
-def _chapter_nav_links(chapters: list[dict[str, Any]], index: int, show_index_link: bool) -> str:
-    parts: list[str] = []
-    if index > 0:
-        prev = chapters[index - 1]["chapter_id"]
-        parts.append(f'<a href="{_esc(prev)}.html">← 이전 챕터</a>')
-    else:
-        parts.append("<span></span>")
-    if show_index_link:
-        parts.append('<a href="index.html">목차</a>')
-    if index < len(chapters) - 1:
-        nxt = chapters[index + 1]["chapter_id"]
-        parts.append(f'<a href="{_esc(nxt)}.html">다음 챕터 →</a>')
-    else:
-        parts.append("<span></span>")
-    return '<nav class="chapter-nav">' + "".join(parts) + "</nav>"
+def _chapter_controls(
+    chapters: list[dict[str, Any]],
+    index: int,
+    *,
+    show_navigation: bool,
+) -> str:
+    """스크롤을 따라오는 챕터 이동·완료 통합 컨트롤."""
+    navigation = ""
+    if show_navigation:
+        if index > 0:
+            prev = chapters[index - 1]["chapter_id"]
+            prev_control = (
+                f'<a class="chapter-control" href="{_esc(prev)}.html" '
+                'aria-label="이전 챕터">'
+                '<span class="control-icon" aria-hidden="true">←</span>'
+                '<span class="control-label">이전 챕터</span>'
+                '</a>'
+            )
+        else:
+            prev_control = (
+                '<span class="chapter-control is-disabled" aria-disabled="true">'
+                '<span class="control-icon" aria-hidden="true">←</span>'
+                '<span class="control-label">이전 챕터</span>'
+                '</span>'
+            )
+
+        if index < len(chapters) - 1:
+            nxt = chapters[index + 1]["chapter_id"]
+            next_control = (
+                f'<a class="chapter-control" href="{_esc(nxt)}.html" '
+                'aria-label="다음 챕터">'
+                '<span class="control-icon" aria-hidden="true">→</span>'
+                '<span class="control-label">다음 챕터</span>'
+                '</a>'
+            )
+        else:
+            next_control = (
+                '<span class="chapter-control is-disabled" aria-disabled="true">'
+                '<span class="control-icon" aria-hidden="true">→</span>'
+                '<span class="control-label">다음 챕터</span>'
+                '</span>'
+            )
+
+        navigation = (
+            '<nav class="chapter-controls-nav" aria-label="챕터 이동">'
+            f'{prev_control}'
+            '<a class="chapter-control" href="index.html" aria-label="목차">'
+            '<span class="control-icon" aria-hidden="true">☰</span>'
+            '<span class="control-label">목차</span>'
+            '</a>'
+            f'{next_control}'
+            '</nav>'
+            '<div class="control-divider" aria-hidden="true"></div>'
+        )
+
+    return (
+        '<aside class="chapter-controls" aria-label="챕터 도구">'
+        f'{navigation}'
+        '<button type="button" class="chapter-control complete-btn" aria-pressed="false">'
+        '<span class="check control-icon" aria-hidden="true"></span>'
+        '<span class="label control-label">이 챕터 완료로 표시</span>'
+        '</button>'
+        '</aside>'
+    )
 
 
 def _summary_section(summary: dict[str, Any]) -> str:
@@ -413,16 +462,6 @@ def _chapter_body(
         ext_items = ((extension.get("questions") or {}).get("extension") or [])
         sections.append(_extension_section(ext_items))
 
-    # 챕터 끝에 명시적 완료 토글
-    sections.append(
-        '<section class="completion-control">'
-        '<button type="button" class="complete-btn" aria-pressed="false">'
-        '<span class="check" aria-hidden="true"></span>'
-        '<span class="label">이 챕터 완료로 표시</span>'
-        '</button>'
-        '</section>'
-    )
-
     return "".join(sections)
 
 
@@ -475,7 +514,12 @@ def _page_shell(
     data_attrs = f'data-page="{_esc(page_kind)}"'
     if chapter_id:
         data_attrs += f' data-chapter-id="{_esc(chapter_id)}"'
-    body_class = "has-sidebar" if sidebar_html else ""
+    body_classes: list[str] = []
+    if sidebar_html:
+        body_classes.append("has-sidebar")
+    if page_kind == "chapter":
+        body_classes.append("has-chapter-controls")
+    body_class = " ".join(body_classes)
     return (
         f'<!DOCTYPE html><html lang="{_esc(lang)}"><head>'
         '<meta charset="utf-8">'
@@ -544,7 +588,7 @@ class HtmlRenderer(Renderer):
             ch = chapters[0]
             body = _book_info_header(book_info) + (
                 '<article>' + _chapter_body(ch, opts, page_offset=page_offset) + '</article>'
-            )
+            ) + _chapter_controls(chapters, 0, show_navigation=False)
             html_text = _page_shell(
                 lang="ko",
                 title=str(book_title),
@@ -574,9 +618,8 @@ class HtmlRenderer(Renderer):
                 cid = ch["chapter_id"]
                 ch_title = (ch.get("summary") or {}).get("title") or ch["meta"].get("title") or cid
                 article_body = (
-                    _chapter_nav_links(chapters, i, show_index_link=True)
-                    + '<article>' + _chapter_body(ch, opts, page_offset=page_offset) + '</article>'
-                    + _chapter_nav_links(chapters, i, show_index_link=True)
+                    '<article>' + _chapter_body(ch, opts, page_offset=page_offset) + '</article>'
+                    + _chapter_controls(chapters, i, show_navigation=True)
                 )
                 (output_dir / f"{cid}.html").write_text(
                     _page_shell(

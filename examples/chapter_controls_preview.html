@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDF Study · 챕터 컨트롤 미리보기</title>
+  <link rel="stylesheet" href="../templates/html/style.css">
+  <style>
+    .preview-note {
+      margin: 0 0 2rem;
+      padding: .85rem 1rem;
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      background: var(--accent-soft);
+      color: var(--fg);
+      font-size: .9rem;
+    }
+    .preview-toast {
+      position: fixed;
+      left: 50%;
+      bottom: 1rem;
+      z-index: 10;
+      max-width: calc(100vw - 2rem);
+      padding: .6rem .9rem;
+      border-radius: 999px;
+      background: var(--fg);
+      color: var(--bg);
+      font-size: .85rem;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, .5rem);
+      transition: opacity .15s ease, transform .15s ease;
+    }
+    .preview-toast.is-visible {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    @media (max-width: 1280px) {
+      .preview-toast { bottom: 6.5rem; }
+    }
+  </style>
+</head>
+<body class="has-sidebar has-chapter-controls">
+  <button class="sidebar-toggle" type="button"
+          aria-label="목차 토글" aria-controls="sidebar" aria-expanded="false">☰</button>
+
+  <aside class="sidebar" id="sidebar" aria-label="챕터 목차">
+    <a class="sidebar-book" href="#chapter-start">실전 데이터베이스 설계</a>
+    <nav class="sidebar-chapters">
+      <a class="sidebar-link is-completed" data-chapter="ch1" href="#chapter-start">
+        <span class="sidebar-check" aria-hidden="true"></span>
+        <span class="sidebar-title">1장 데이터 모델의 기초</span>
+      </a>
+      <a class="sidebar-link is-active" data-chapter="ch2"
+         href="#chapter-start" aria-current="page">
+        <span class="sidebar-check" aria-hidden="true"></span>
+        <span class="sidebar-title">2장 정규화와 무결성</span>
+      </a>
+      <a class="sidebar-link" data-chapter="ch3" href="#chapter-start">
+        <span class="sidebar-check" aria-hidden="true"></span>
+        <span class="sidebar-title">3장 트랜잭션과 동시성</span>
+      </a>
+      <a class="sidebar-link" data-chapter="ch4" href="#chapter-start">
+        <span class="sidebar-check" aria-hidden="true"></span>
+        <span class="sidebar-title">4장 인덱스 설계</span>
+      </a>
+    </nav>
+  </aside>
+  <div class="sidebar-scrim" hidden></div>
+
+  <main data-page="chapter" data-chapter-id="ch2">
+    <p class="preview-note">
+      미리보기입니다. 페이지를 스크롤하면 오른쪽 컨트롤이 함께 따라옵니다.
+      화면 폭이 좁아지면 컨트롤은 하단 도크로 바뀝니다.
+    </p>
+
+    <article id="chapter-start">
+      <h1>2장 정규화와 무결성</h1>
+      <p class="page-range">PDF p.31–58 · 원문 p.17–44</p>
+
+      <section id="summary">
+        <h2>요약</h2>
+        <p>
+          정규화는 데이터 중복을 줄이고 삽입·수정·삭제 이상을 방지하기 위해
+          릴레이션을 구조적으로 분해하는 과정이다. 중요한 점은 테이블을 무조건
+          작게 나누는 것이 아니라, 업무 규칙을 함수적 종속성으로 표현한 뒤
+          손실 없는 분해와 종속성 보존을 함께 검토하는 데 있다.
+        </p>
+        <h3>함수적 종속성</h3>
+        <p>
+          속성 집합 X의 값이 정해질 때 속성 집합 Y의 값이 하나로 결정된다면
+          <code>X → Y</code>라고 표현한다. 후보키와 비주요 속성 사이의 종속성을
+          구분하면 현재 릴레이션이 어떤 정규형을 만족하는지 판단할 수 있다.
+        </p>
+        <blockquote>
+          정규화의 목적은 중복 제거 자체가 아니라 데이터의 의미와 제약을
+          일관되게 유지하는 것이다.
+        </blockquote>
+        <h3>정규형의 단계</h3>
+        <table>
+          <thead>
+            <tr><th>정규형</th><th>핵심 조건</th><th>주로 제거하는 문제</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1NF</td><td>속성값의 원자성</td><td>반복 그룹</td></tr>
+            <tr><td>2NF</td><td>부분 함수 종속 제거</td><td>복합키 일부에 대한 종속</td></tr>
+            <tr><td>3NF</td><td>이행 함수 종속 제거</td><td>비주요 속성 간 종속</td></tr>
+            <tr><td>BCNF</td><td>모든 결정자가 후보키</td><td>후보키 관련 이상</td></tr>
+          </tbody>
+        </table>
+        <p>
+          실제 설계에서는 읽기 성능이나 집계 비용 때문에 반정규화를 선택할 수도
+          있다. 이때는 중복 데이터의 갱신 책임, 검증 방법, 장애 시 복구 절차를
+          명시해야 한다.
+        </p>
+      </section>
+
+      <section id="key-points">
+        <h2>핵심 포인트</h2>
+        <ul>
+          <li>함수적 종속성은 업무 규칙을 데이터 구조로 번역하는 도구다.</li>
+          <li>분해 후 원래 정보를 복원할 수 있는지 확인해야 한다.</li>
+          <li>반정규화는 성능상의 선택이며 무결성 관리 비용을 동반한다.</li>
+        </ul>
+      </section>
+
+      <section id="mc">
+        <h2>객관식</h2>
+        <p class="mc-summary">객관식 정답 <strong>0</strong> / 1</p>
+        <div class="question mc">
+          <p class="q-prompt">
+            제3정규형이 주로 제거하려는 종속성은 무엇인가요?
+          </p>
+          <div class="options">
+            <label><input type="radio" name="preview-mc"><span>다치 종속</span></label>
+            <label><input type="radio" name="preview-mc"><span>이행 함수 종속</span></label>
+            <label><input type="radio" name="preview-mc"><span>조인 종속</span></label>
+            <label><input type="radio" name="preview-mc"><span>포함 종속</span></label>
+          </div>
+        </div>
+      </section>
+
+      <section id="sa">
+        <h2>단답형</h2>
+        <div class="question text">
+          <p class="q-prompt">손실 없는 분해가 필요한 이유를 한 문장으로 적어보세요.</p>
+          <textarea placeholder="여기에 답변을 입력하세요"></textarea>
+          <button type="button" class="reveal">모범답안 보기</button>
+        </div>
+      </section>
+
+      <section id="ex">
+        <h2>확장형</h2>
+        <div class="question text">
+          <p class="q-prompt">
+            조회 성능 때문에 반정규화를 적용해야 하는 상황을 하나 만들고,
+            데이터 일관성을 지키기 위한 운영 규칙을 제안해보세요.
+          </p>
+          <textarea placeholder="여기에 답변을 입력하세요"></textarea>
+        </div>
+      </section>
+    </article>
+
+    <aside class="chapter-controls" aria-label="챕터 도구">
+      <nav class="chapter-controls-nav" aria-label="챕터 이동">
+        <a class="chapter-control preview-nav" href="#previous" aria-label="이전 챕터">
+          <span class="control-icon" aria-hidden="true">←</span>
+          <span class="control-label">이전 챕터</span>
+        </a>
+        <a class="chapter-control preview-nav" href="#toc" aria-label="목차">
+          <span class="control-icon" aria-hidden="true">☰</span>
+          <span class="control-label">목차</span>
+        </a>
+        <a class="chapter-control preview-nav" href="#next" aria-label="다음 챕터">
+          <span class="control-icon" aria-hidden="true">→</span>
+          <span class="control-label">다음 챕터</span>
+        </a>
+      </nav>
+      <div class="control-divider" aria-hidden="true"></div>
+      <button type="button" class="chapter-control complete-btn" aria-pressed="false">
+        <span class="check control-icon" aria-hidden="true"></span>
+        <span class="label control-label">이 챕터 완료로 표시</span>
+      </button>
+    </aside>
+  </main>
+
+  <div class="preview-toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      const completeButton = document.querySelector(".complete-btn");
+      const currentChapter = document.querySelector(".sidebar-link.is-active");
+      const toast = document.querySelector(".preview-toast");
+      let toastTimer;
+
+      const showToast = (message) => {
+        toast.textContent = message;
+        toast.classList.add("is-visible");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 1600);
+      };
+
+      completeButton.addEventListener("click", () => {
+        const completed = completeButton.getAttribute("aria-pressed") !== "true";
+        completeButton.setAttribute("aria-pressed", completed ? "true" : "false");
+        completeButton.querySelector(".label").textContent =
+          completed ? "완료 표시됨 (다시 누르면 취소)" : "이 챕터 완료로 표시";
+        currentChapter.classList.toggle("is-completed", completed);
+        showToast(completed ? "2장을 완료로 표시했습니다." : "2장의 완료 표시를 취소했습니다.");
+      });
+
+      document.querySelectorAll(".preview-nav").forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          showToast(`${link.textContent.trim()} 버튼입니다. 실제 결과에서는 해당 페이지로 이동합니다.`);
+        });
+      });
+
+      const sidebar = document.getElementById("sidebar");
+      const toggle = document.querySelector(".sidebar-toggle");
+      const scrim = document.querySelector(".sidebar-scrim");
+      const closeSidebar = () => {
+        sidebar.classList.remove("is-open");
+        toggle.setAttribute("aria-expanded", "false");
+        scrim.hidden = true;
+      };
+      toggle.addEventListener("click", () => {
+        const open = !sidebar.classList.contains("is-open");
+        sidebar.classList.toggle("is-open", open);
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        scrim.hidden = !open;
+      });
+      scrim.addEventListener("click", closeSidebar);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeSidebar();
+      });
+    })();
+  </script>
+</body>
+</html>

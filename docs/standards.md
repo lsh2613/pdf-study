@@ -23,7 +23,7 @@ Elicitation 거절·취소 또는 미지원 세션은 승인 뒤 처리 본문�
 결과 조회 도구는 같은 고정 result 루트의 직접 하위 디렉터리만 반환하고 상태를
 변경하면 안 된다.
 
-`get_subagent_prompts`는 요약과 확장 결과의 실제 pending 챕터 목록을 분리해 반환해야 한다. `completed`·`skipped`는 done, `pending`·`failed`·`in_progress`는 pending으로 판정하고, 확장 문제가 비활성이면 `extension_pending_chapter_ids`는 항상 빈 목록이어야 한다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합만 담고, raw 검증과 workflow·`next_action`은 완료 챕터를 제외한 이 처리 대상과 실제 pending 결과 유형에만 적용해야 한다.
+`get_subagent_prompts`는 요약과 확장 결과의 실제 pending 챕터 목록을 분리해 반환해야 한다. `completed`·`skipped`는 done, `pending`·`failed`·`in_progress`는 pending으로 판정하고, 확장 문제가 비활성이면 `extension_pending_chapter_ids`는 항상 빈 목록이어야 한다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합만 담는다. raw 검증은 원문이 필요한 summary pending에만 적용하고, extension-only pending은 완료된 저장 요약을 검증한다. workflow·`next_action`은 완료 챕터를 제외한 실제 pending 결과 유형과 그 유형에 필요한 입력 조회만 안내해야 한다.
 
 ## 상태 저장
 

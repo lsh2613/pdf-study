@@ -51,7 +51,9 @@ sequential/parallel 실행 방식을 세 번의 독립된 elicitation으로 순�
 `source_pages`는 표시 메타로만 보존한다. text 모드는 본문 텍스트를 추출하고 OCR
 모드는 PaddleOCR CPU로 읽어 `chapters_raw`의 `text`와 `char_count`를 만든다.
 
-`get_subagent_prompts`는 처리 모드와 학습자 정보에 맞는 한국어 프롬프트와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 돌려준다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이며, raw 본문 검증도 이 처리 대상 합집합에만 적용되어 이미 완료된 챕터의 예전 raw 상태가 재개를 막지 않는다. 각 챕터 처리자는 `get_chapter_content`로 입력을 한 번 받고, 해당 챕터가 요약 pending 목록에 있을 때만 요약·핵심 포인트·활성 기본 문제를 `save_chapter_result`로 저장한다. 확장 pending 목록에 있을 때만 같은 본문과 학습자 정보를 받은 확장 프롬프트가 외부 검색 없이 응용 문제를 만들고 `save_extension_result`가 저장한다. 두 저장 도구는 공통 문제 계약으로 ID 문자·챕터 내 유일성·본문 길이별 최대 개수를 검증하고, 저장 잠금 안에서도 다른 결과 유형과의 ID 충돌을 다시 확인한다. workflow와 `next_action`도 실제로 남은 결과 유형만 안내한다.
+`get_subagent_prompts`는 처리 모드와 학습자 정보에 맞는 한국어 프롬프트와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 돌려준다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이다. 요약 pending 챕터는 `get_chapter_content`의 전체 text에서 먼저 의미 보존 `content_map`을 만들고, 그 목록으로 요약 초안을 작성한 뒤 별도 검토가 원문·목록·초안을 대조한다. 검토가 `needs_revision`이면 보완하고, 모든 section·important point가 반영돼 중요한 누락·왜곡이 없는 `passed` 요약만 다음 단계로 넘긴다. 기본 문제 생성기에는 원문과 content map을 전달하지 않고 검토를 통과한 `summary`, `key_points`와 개수 상한용 `source_char_count`만 전달한다. 두 결과와 검토 근거를 합쳐 `save_chapter_result`로 저장한다. 명시적인 서브 챕터 heading도 저장 경계에서 최종 Markdown 포함 여부를 확인한다. 이 품질 판정에는 고정 글자 수를 사용하지 않는다.
+
+확장 pending 챕터는 완료된 요약을 `get_chapter_summary`로 받아 외부 검색 없이 응용 문제를 만들고 `save_extension_result`가 저장한다. 두 저장 도구는 공통 문제 계약으로 ID 문자·챕터 내 유일성·본문 길이별 최대 개수를 검증하고, 저장 잠금 안에서도 다른 결과 유형과의 ID 충돌을 다시 확인한다. workflow와 `next_action`도 실제로 남은 결과 유형만 안내한다.
 
 `list_pending_chapters`가 남은 요약 또는 확장 문제를 확인한다. 챕터 설정이 완료되고
 모두 끝나면 선택 파라미터 없는 `finalize_study`를 다음 단계로 반환한다.
@@ -76,13 +78,15 @@ flowchart TD
     G0 --> P["get_subagent_prompts"]
 
     P --> Q["chapter_ids = 두 pending 목록의 합집합"]
-    Q --> R["get_chapter_content"]
-    R --> S{"요약 pending?"}
-    S -->|예| S0["save_chapter_result"]
+    Q --> S{"요약 pending?"}
+    S -->|예| R["get_chapter_content: 원문"]
+    R --> R0["content map → 요약 → 원문 대조 검토"]
+    R0 --> R1["요약만 → 기본 문제"]
+    R1 --> S0["save_chapter_result"]
     S -->|아니오| S1{"확장 pending?"}
     S0 --> S1
 
-    S1 -->|예| T["같은 본문 + extension_prompt"]
+    S1 -->|예| T["get_chapter_summary → 요약만 + extension_prompt"]
     T --> U["save_extension_result"]
     U --> V["list_pending_chapters"]
     S1 -->|아니오| V

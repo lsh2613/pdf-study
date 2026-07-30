@@ -135,13 +135,34 @@ cwd는 경로 계산에 참여하지 않는다. `list_study_results`는 같은 �
 
 대응: 서버 경계에서 활성 문제 유형별 필수값을 검사한 뒤에만 `completed`로 바꾼다. 새 문제 유형이나 저장 스키마를 추가하면 누락 검사를 먼저 확장해야 한다.
 
+요약 문자열과 핵심 포인트가 비어 있지 않은 것만으로는 의미 보존을 확인할 수 없다.
+요약 전에는 챕터 전체에서 `content_map`을 만들고, 명시적인 서브 챕터는 각각
+section으로 보존한다. 요약 후에는 원문·content map·초안을 대조한
+`summary_review`가 모든 section과 important point를 coverage로 확인하고 중요한
+누락·왜곡이 없을 때만 `passed`가 된다. 서버는 이 증거와 명시적 서브 챕터 heading의
+Markdown 포함을 검증한 뒤에만 완료 처리한다. 글자 수나 원문 대비 압축률은 문서별
+정보 밀도를 반영하지 못하므로 품질 게이트로 사용하지 않는다.
+
 ## 재개 시 완료 결과 재처리
 
 증상: 일부 챕터의 요약이나 확장 문제만 남은 작업을 재개했는데 모든 non-skip 챕터를 다시 읽고 두 결과를 모두 저장하라는 안내가 나온다. 완료 챕터의 raw 파일이 사라졌을 때 남은 작업과 무관한 검증 오류로 재개가 막힐 수도 있다.
 
 원인: 처리 대상을 하나의 전체 챕터 목록으로 만들면 요약 pending과 확장 pending이 서로 다른 상태를 표현할 수 없고, raw 검증과 다음 작업 안내도 완료 여부를 구분하지 못한다.
 
-대응: 한 상태 스냅샷에서 `summary_pending_chapter_ids`와 `extension_pending_chapter_ids`를 각각 계산하고, 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합으로 만든다. raw 검증은 이 합집합에만 적용한다. workflow, `get_subagent_prompts`와 챕터별·전체 `next_action`은 실제로 남은 결과 유형의 save 도구만 안내한다. 변경 후에는 두 pending 집합이 다른 재개, 완료 챕터 raw 누락, 확장 비활성, 모든 결과 완료를 함께 확인한다.
+대응: 한 상태 스냅샷에서 `summary_pending_chapter_ids`와 `extension_pending_chapter_ids`를 각각 계산하고, 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합으로 만든다. raw 검증은 원문이 필요한 summary pending에만 적용한다. 요약은 완료되고 extension만 pending이면 raw를 다시 요구하지 않고 저장된 `summary`, `key_points`, `source_char_count`를 검증한다. workflow, `get_subagent_prompts`와 챕터별·전체 `next_action`은 실제로 남은 결과 유형의 save 도구와 올바른 입력 조회 도구만 안내한다. 변경 후에는 두 pending 집합이 다른 재개, extension-only에서 raw 누락, 저장 요약 누락, 확장 비활성, 모든 결과 완료를 함께 확인한다.
+
+## 문제 생성에 원문이 다시 섞임
+
+증상: 요약본을 복습하기 위한 문제인데도 요약에서 생략한 원문 세부 정보가 문제,
+보기, 정답이나 해설에 나타난다.
+
+원인: 같은 생성 단계나 sub-agent에 원문과 요약을 함께 전달하면 문제 프롬프트가
+요약 근거 제한을 적어도 모델이 원문의 세부 내용을 다시 사용할 수 있다.
+
+대응: 원문은 content map, 요약 작성과 독립 검토까지만 전달한다. 검토 통과 뒤 기본
+문제 생성 단계에는 `summary`, `key_points`, `source_char_count`만 전달한다. 확장
+문제는 `get_chapter_summary`가 같은 세 필드만 반환하며 원문, content map, 검토
+내부 정보는 노출하지 않는다. `source_char_count`는 문제 개수 상한 계산에만 쓴다.
 
 ## 결과 파일과 상태 저장 순서
 

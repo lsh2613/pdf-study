@@ -15,7 +15,14 @@ from mcp import types
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
-from . import analysis, processing_mode_contract, prompts, question_contract, workspace
+from . import (
+    analysis,
+    processing_mode_contract,
+    prompts,
+    question_contract,
+    summary_contract,
+    workspace,
+)
 from .renderer import RENDERERS
 from .renderer.output_manager import install_rendered_output
 
@@ -193,6 +200,60 @@ def _ensure_save_target(state: dict[str, Any], chapter_id: str) -> None:
         raise ValueError(f"chapter is skipped: {chapter_id}")
 
 
+def _chapter_summary_basis(
+    work_id: str,
+    chapter_id: str,
+    state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """문제 생성에 노출할 저장 요약만 검증해 반환한다."""
+    state = state or workspace.load_state(work_id)
+    _ensure_save_target(state, chapter_id)
+    entry = state["chapters"][chapter_id]
+    if entry.get("summary_status") != "completed":
+        raise RuntimeError(f"chapter summary is not completed: {chapter_id}")
+
+    saved = workspace.get_chapter_summary(work_id, chapter_id)
+    summary = saved.get("summary")
+    key_points = saved.get("key_points")
+    source_char_count = entry.get("char_count")
+    if not isinstance(summary, str) or not summary.strip():
+        raise RuntimeError(f"chapter summary is blank: {chapter_id}")
+    if (
+        not isinstance(key_points, list)
+        or not key_points
+        or any(not isinstance(item, str) or not item.strip() for item in key_points)
+    ):
+        raise RuntimeError(f"chapter key_points are invalid: {chapter_id}")
+    if type(source_char_count) is not int:
+        raise RuntimeError(f"chapter char_count is invalid: {chapter_id}")
+
+    result = {
+        "chapter_id": chapter_id,
+        "summary": summary,
+        "key_points": key_points,
+        "source_char_count": source_char_count,
+    }
+    if isinstance(saved.get("title"), str):
+        result["title"] = saved["title"]
+    elif isinstance(entry.get("title"), str):
+        result["title"] = entry["title"]
+    return result
+
+
+def _invalid_extension_summary_bases(
+    work_id: str,
+    state: dict[str, Any],
+    chapter_ids: set[str],
+) -> list[dict[str, str]]:
+    invalid: list[dict[str, str]] = []
+    for chapter_id in sorted(chapter_ids):
+        try:
+            _chapter_summary_basis(work_id, chapter_id, state)
+        except (KeyError, FileNotFoundError, RuntimeError, ValueError) as exc:
+            invalid.append({"chapter_id": chapter_id, "error": str(exc)})
+    return invalid
+
+
 def _pending_kinds(state: dict[str, Any], chapter_id: str) -> list[str]:
     pending = workspace.pending_chapters_from_state(state)
     kinds: list[str] = []
@@ -263,19 +324,22 @@ def _pending_guidance(
         actions: list[str] = []
         if "summary" in kinds:
             actions.append(
-                "summarizer_prompt 스키마대로 요약·문제를 만들어 "
+                "content_map_prompt → summary_prompt → review_prompt → "
+                "basic_question_prompt 순서로 요약을 먼저 확정하고, 문제 단계에는 "
+                "요약·핵심 포인트만 전달한 뒤 "
                 f'save_chapter_result(work_id="{work_id}", '
                 f'chapter_id="{chapter_id}", data=...)로 저장하세요'
             )
         if "extension" in kinds:
             actions.append(
-                "같은 text와 extension_prompt로 확장 문제를 만들어 "
+                "요약 저장 후 get_chapter_summary로 요약만 받아 extension_prompt로 "
+                "확장 문제를 만들어 "
                 f'save_extension_result(work_id="{work_id}", '
                 f'chapter_id="{chapter_id}", data=...)로 저장하세요'
             )
         if actions:
             return (
-                f"이 챕터({chapter_id})의 text를 읽고 "
+                f"이 챕터({chapter_id})에서 "
                 + ". ".join(actions)
                 + f'. 완료 후 list_pending_chapters(work_id="{work_id}")로 '
                 "전체 누락을 확인하세요."
@@ -305,15 +369,17 @@ def _pending_guidance(
     instructions: list[str] = []
     if summary_pending:
         instructions.append(
-            f"summary_pending={summary_pending}는 summarizer_prompt로 생성해 "
-            "save_chapter_result로 저장하세요"
+            f"summary_pending={summary_pending}는 content_map_prompt → "
+            "summary_prompt → review_prompt로 요약을 확정한 뒤 "
+            "basic_question_prompt에는 요약만 전달하고 save_chapter_result로 "
+            "함께 저장하세요"
         )
     else:
         instructions.append(f"summary_pending={summary_pending}")
     if extension_pending:
         instructions.append(
-            f"extension_pending={extension_pending}는 extension_prompt로 생성해 "
-            "save_extension_result로 저장하세요"
+            f"extension_pending={extension_pending}는 get_chapter_summary의 요약만 "
+            "extension_prompt에 전달해 save_extension_result로 저장하세요"
         )
     else:
         instructions.append(f"extension_pending={extension_pending}")
@@ -405,7 +471,7 @@ _QUESTION_SETUP_DEFS = (
             {
                 "value": True,
                 "label": "주관식 문제 포함",
-                "desc": "본문 근거를 설명하는 서술형 검증 문제를 만듭니다.",
+                "desc": "요약 근거를 설명하는 서술형 검증 문제를 만듭니다.",
             },
             {
                 "value": False,
@@ -1325,8 +1391,9 @@ async def set_chapters(
 def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
     """챕터 본문을 반환합니다 (extraction_mode에 따라 형태가 다름).
 
-    - text 모드: `text`(본문)를 반환. sub-agent는 text를 읽고 요약/문제를 만드세요.
+    - text 모드: `text`(본문)를 반환. sub-agent는 text를 요약 생성·검토에만 씁니다.
     - ocr 모드: set_chapters에서 PaddleOCR CPU로 선계산한 `text`를 반환합니다.
+    문제 생성에는 get_chapter_summary의 저장 요약만 사용합니다.
     """
     raw = analysis.get_chapter_content_impl(work_id, chapter_id)
     # 본문을 받아간 시점 = 요약 처리 시작 → 진행 모니터링용 in_progress 마킹
@@ -1336,7 +1403,34 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 5. get_subagent_prompts
+# 5. get_chapter_summary
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+@_safe("get_chapter_summary")
+def get_chapter_summary(work_id: str, chapter_id: str) -> dict[str, Any]:
+    """문제 생성용으로 검증된 요약·핵심 포인트와 원문 글자 수만 반환합니다.
+
+    원문 text는 반환하지 않습니다. summary_status가 completed가 아니거나 저장된
+    요약이 없거나 비어 있으면 실패합니다.
+    """
+    state = workspace.load_state(work_id)
+    basis = _chapter_summary_basis(work_id, chapter_id, state)
+    workspace.mark_chapter_in_progress(work_id, chapter_id, kind="extension")
+    return _ok(
+        basis,
+        next_action=(
+            "이 응답의 summary·key_points·source_char_count만 extension_prompt에 "
+            "전달해 확장 문제를 만든 뒤 "
+            f'save_extension_result(work_id="{work_id}", '
+            f'chapter_id="{chapter_id}", data=...)로 저장하세요. 원문 text를 다시 '
+            "읽거나 전달하지 마세요."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. get_subagent_prompts
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -1371,18 +1465,19 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
             ),
         )
     pending = workspace.pending_chapters_from_state(state)
-    pending_ids = set(pending["summary_pending"]) | set(pending["extension_pending"])
+    summary_pending_ids = set(pending["summary_pending"])
     invalid = analysis.validate_chapter_raw_inputs(
         work_id,
         state,
-        chapter_ids=pending_ids,
+        chapter_ids=summary_pending_ids,
     )
     if invalid:
         failed_chapters = _failed_chapters_from_invalid(invalid)
         return _err(
             "sub-agent 입력 raw 본문이 준비되지 않았거나 손상됐습니다. "
-            "각 pending 챕터(처리 대상)는 chapters_raw/{chapter_id}.json에 비어 있지 않은 "
-            "text와 정확한 char_count가 있어야 합니다. OCR 실패 챕터는 먼저 "
+            "각 summary pending 챕터는 chapters_raw/{chapter_id}.json에 비어 있지 않은 "
+            "text와 정확한 char_count가 있어야 합니다. 확장 문제만 남은 챕터는 "
+            "저장된 요약을 사용합니다. OCR 실패 챕터는 먼저 "
             "set_chapters/OCR 단계를 복구한 뒤 다시 호출하세요.",
             data={
                 "extraction_mode": state.get("extraction_mode"),
@@ -1390,6 +1485,31 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
                 "failed_chapters": failed_chapters,
                 "required_fields": ["chapter_raw.text", "chapter_raw.char_count"],
             },
+        )
+    extension_only_ids = set(pending["extension_pending"]) - summary_pending_ids
+    invalid_summary_bases = _invalid_extension_summary_bases(
+        work_id,
+        state,
+        extension_only_ids,
+    )
+    if invalid_summary_bases:
+        return _err(
+            "확장 문제의 입력 요약이 준비되지 않았거나 손상됐습니다. 확장 문제는 "
+            "원문이 아니라 completed 상태의 저장된 summary와 key_points를 기준으로 "
+            "생성해야 합니다.",
+            data={
+                "invalid_chapters": invalid_summary_bases,
+                "required_fields": [
+                    "summary_status=completed",
+                    "summary",
+                    "key_points",
+                    "source_char_count",
+                ],
+            },
+            next_action=(
+                "해당 챕터의 요약·기본 문제를 먼저 정상 저장한 뒤 "
+                f'get_subagent_prompts(work_id="{work_id}")를 다시 호출하세요.'
+            ),
         )
     book_info = workspace.load_book_info(work_id)
     data = prompts.build_prompts(state, book_info)
@@ -1404,21 +1524,24 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
     pending_actions: list[str] = []
     if summary_pending:
         pending_actions.append(
-            f"summary_pending_chapter_ids({summary_pending})는 summarizer_prompt로 "
-            "생성해 save_chapter_result로 저장하세요"
+            f"summary_pending_chapter_ids({summary_pending})는 content_map_prompt → "
+            "summary_prompt → review_prompt로 요약을 확정한 뒤 "
+            "basic_question_prompt에는 요약만 전달하고, 합친 결과를 "
+            "save_chapter_result로 저장하세요"
         )
     if extension_pending:
         pending_actions.append(
-            f"extension_pending_chapter_ids({extension_pending})는 extension_prompt로 "
-            "생성해 save_extension_result로 저장하세요"
+            f"extension_pending_chapter_ids({extension_pending})는 "
+            "get_chapter_summary의 요약만 extension_prompt에 전달해 생성하고 "
+            "save_extension_result로 저장하세요"
         )
     return _ok(data, next_action=(
         f"workflow_instructions를 따라 chapter_ids({data['chapter_ids']})를 순회하세요. "
         + ". ".join(pending_actions)
         + ". 각 챕터는 두 목록의 포함 여부에 따른 "
         "결과별 action만 수행합니다. chapter_id는 반드시 위 목록의 값(ch1·ch2…)을 쓰고, "
-        "페이지 범위 문자열은 "
-        "쓰지 마세요. mode가 'ocr'이어도 set_chapters에서 선계산된 text를 읽습니다."
+        "페이지 범위 문자열은 쓰지 마세요. mode가 'ocr'이어도 선계산된 text는 "
+        "요약 생성·검토까지만 사용하며 문제 생성 단계에는 전달하지 않습니다."
     ))
 
 
@@ -1435,9 +1558,11 @@ def save_chapter_result(
 ) -> dict[str, Any]:
     """summarizer sub-agent의 챕터 결과 JSON을 저장합니다.
 
-    스키마는 get_subagent_prompts의 summarizer_prompt에 명시. 동시성 안전.
+    스키마와 생성 순서는 get_subagent_prompts의 content_map_prompt,
+    summary_prompt, review_prompt, basic_question_prompt에 명시. 동시성 안전.
 
-    저장 전 prompts.py의 기본 결과 JSON 스키마와 활성 문제 유형을 검증한다.
+    저장 전 의미 coverage 증거, prompts.py의 기본 결과 JSON 스키마와 활성 문제
+    유형을 검증한다.
     하나라도 어긋나면 completed로 마킹하지 않고 ok=False로 거부 — "모두 성공"이라
     단정했지만 실제로 누락된 결과가 조용히 completed 되는 것을 막는다.
     """
@@ -1469,13 +1594,16 @@ def save_chapter_result(
     missing = question_contract.missing_summary_fields(
         data_to_save, options, chapter_id, char_count=char_count,
     )
+    missing.extend(summary_contract.missing_summary_quality_fields(data_to_save))
+    missing = list(dict.fromkeys(missing))
     if missing:
         return _err(
             f"챕터 결과에 필수 값이 비었거나 누락됐습니다: {missing}. "
-            "요약(summary)·핵심포인트(key_points)와 활성화된 문제 유형을 모두 채워 "
+            "요약(summary)·핵심포인트(key_points)·활성 문제와 함께, 전체 본문에서 "
+            "작성한 content_map 및 누락·왜곡 없이 passed된 summary_review를 채워 "
             f'save_chapter_result(work_id="{work_id}", chapter_id="{chapter_id}", '
-            "data=...)로 다시 저장하세요. (모두 성공했다고 단정하기 전에 각 필드를 "
-            "직접 확인하세요.)",
+            "data=...)로 다시 저장하세요. review가 needs_revision이면 먼저 요약을 "
+            "보완하고 전체 text와 다시 대조하세요.",
             data={"missing": missing, "chapter_id": chapter_id},
         )
     try:

@@ -37,7 +37,12 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
 ## 반드시 지킬 일
 
 - PDF 학습 요청은 일반 요약으로 처리하지 않는다. 기본 흐름은 `init_work → scan_pdf → set_chapters → get_subagent_prompts → save_* → list_pending_chapters → finalize_study`다. 내장 목차가 없거나 목차 재분석이 필요하면 `scan_pdf` 뒤에 `prepare_ocr → scan_toc_with_ocr`를 거쳐 챕터를 구성한 다음 `set_chapters`로 간다.
-- `get_subagent_prompts`의 `summary_pending_chapter_ids`와 `extension_pending_chapter_ids`는 실제 남은 결과를 각각 담고, 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합만 담는다. 상태 판정은 `completed`·`skipped`만 done, `pending`·`failed`·`in_progress`는 pending이며, 확장 문제가 비활성이면 `extension_pending_chapter_ids`는 항상 빈 목록이다. 완료 챕터는 raw 검증과 처리·저장 안내에서 제외하며 workflow와 `next_action`은 실제 pending 결과 유형만 안내해야 한다.
+- `get_subagent_prompts`의 `summary_pending_chapter_ids`와 `extension_pending_chapter_ids`는 실제 남은 결과를 각각 담고, 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합만 담는다. 상태 판정은 `completed`·`skipped`만 done, `pending`·`failed`·`in_progress`는 pending이며, 확장 문제가 비활성이면 `extension_pending_chapter_ids`는 항상 빈 목록이다. raw 검증은 summary pending에만 적용하고 extension-only pending은 저장 요약을 검증한다. 완료 챕터는 처리·저장 안내에서 제외하며 workflow와 `next_action`은 실제 pending 결과 유형만 안내해야 한다.
+- 요약 품질을 고정 글자 수나 원문 대비 압축률로 판단하지 않는다. 요약 전 챕터
+  전체의 유의미한 내용을 `content_map`으로 정리하고, 명시적인 서브 챕터가 있으면
+  모든 제목과 section을 보존한다. 요약 후 원문·content map·초안을 대조한
+  `summary_review`가 모든 section·important point coverage와 중요 누락·왜곡 부재를
+  확인한 `passed` 결과만 완료로 저장한다.
 - `init_work`는 단답형·주관식·확장형 문제 선택과 선택적 학습자 정보를 같은 MCP form elicitation으로 직접 받는다. 사용자가 form을 승인하기 전에는 작업을 만들거나 PDF 스캔으로 넘어가지 않는다. 객관식만 기존 호환을 위해 기본 활성이다.
 - `init_work`가 고정 출력 폴더의 기존 관리 작업을 발견하면 `resume`, `replace`를 form elicitation으로 직접 확인한다. `replace`는 사용자의 명시적 선택을 받은 뒤에만 같은 등록 함수 안에서 실행한다. 관리되지 않은 파일이 있으면 실패한다. 렌더 결과 정리는 `.pdf-study-manifest.json`에 기록된 관리 경로에 한정하며 다른 사용자 파일을 삭제하거나 덮어쓰면 안 된다.
 - 챕터 경계는 PDF 북마크 또는 목차 페이지 이미지로만 정한다. PDF 텍스트를 긁어 목차를 추정하는 코드를 추가하면 안 된다. `scan_pdf`는 목차 후보 이미지를 렌더할 뿐 OCR 모델을 준비하거나 실행하지 않는다.
@@ -47,7 +52,7 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
 - 사용자 선택값은 MCP form elicitation 응답으로만 받는다. 선택 파라미터와 구조화 fallback을 MCP 공개 계약에 다시 추가하면 안 된다. Elicitation 미지원 세션은 상태를 바꾸지 않고 실패해야 한다.
 - 선택이 필요한 워크플로는 Elicitation과 승인 후 실행을 등록된 async MCP 함수 하나에서 처리한다. 같은 작업을 선택 인자로 직접 실행하는 별도 동기 함수, `_impl` 함수, MCP wrapper를 다시 추가하면 안 된다.
 - 출력 폴더는 `server.py`가 위치한 MCP 서버 프로젝트 루트 아래 `result/<pdf-name>`으로만 계산한다. MCP 서버 프로세스 cwd, 요청 workspace, MCP file root, 에이전트가 준 `output_dir`을 사용하면 안 된다. 결과 위치 조회는 입력 없는 `list_study_results`가 같은 고정 `result/*`의 절대 경로를 반환하는 방식으로 제공한다.
-- 확장 문제는 외부 검색 없이 챕터 본문과 학습자 정보만으로 만든다. 검색 도구나 HTTP 검색 클라이언트를 다시 추가하려면 별도의 보안·계약 결정을 먼저 기록해야 한다.
+- 모든 기본·확장 문제는 의미 보존 검토를 통과한 챕터의 `summary`와 `key_points`만 내용 근거로 만든다. 원문은 내용 목록·요약 생성·검토까지만 사용하고 문제 생성 단계에는 전달하지 않는다. 원문 글자 수는 문제 개수 상한 계산에만 사용한다. 확장 문제는 외부 검색 없이 요약과 학습자 정보만으로 만들며, 검색 도구나 HTTP 검색 클라이언트를 다시 추가하려면 별도의 보안·계약 결정을 먼저 기록해야 한다.
 - `.work/state.json`은 잠금이 걸린 `workspace.py` 헬퍼로만 바꾼다. 직접 read-modify-write를 넣으면 병렬 처리에서 상태가 깨진다.
 - `set_chapters`는 스캔 여부, 처리 모드, 챕터 정의와 책 정보 준비를 상태 변경 없이 먼저 검증한다. 검증된 모드·챕터와 처리 시작 phase는 하나의 잠금 구간에서 확정하고, 이후 본문 추출 실패는 새 설정의 `chapter_processing=failed`로 남긴다. 같은 작업의 `set_chapters` 전체 처리는 직렬화하며 책 정보 rollback 실패를 숨기면 안 된다.
 

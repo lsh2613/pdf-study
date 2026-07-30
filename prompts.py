@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from . import question_contract, workspace
+from . import question_contract, summary_contract, workspace
 
 
 # ---------------------------------------------------------------------------
@@ -19,9 +19,9 @@ QUESTION_SCALES_TABLE = """
 | 10,000–25,000  | 7 | 3 | 2 | 2 |
 | 25,000+        | 10 | 4 | 3 | 3 |
 
-위 표는 생성해야 하는 목표치가 아니라 **최대 개수**입니다. 본문에서 충분히 좋은
+위 표는 생성해야 하는 목표치가 아니라 **최대 개수**입니다. 요약에서 충분히 좋은
 문제를 만들 근거가 부족하면 더 적게 생성하세요. 최대 개수를 맞추기 위해 중복되거나
-사소하거나 본문 근거가 약한 문제를 억지로 채우지 마세요.
+사소하거나 요약 근거가 약한 문제를 억지로 채우지 마세요.
 
 비활성화된 유형은 0개로 두세요 (재분배 없음).
 """.strip()
@@ -50,23 +50,75 @@ summary는 **마크다운**으로 작성하세요. 렌더러가 그대로 마크
 
 
 # ---------------------------------------------------------------------------
+# 의미 보존 요약 기준
+#   길이로 품질을 대신 판단하지 않고, 원문 성격에 맞는 중요 정보의 coverage를
+#   먼저 만들고 최종 요약을 독립적으로 검토한다.
+# ---------------------------------------------------------------------------
+SEMANTIC_COMPLETENESS_GUIDELINES = """\
+[의미 보존 기준]
+이 결과는 짧은 초록이 아니라 원문을 읽은 뒤 복습할 수 있는 **학습 자료**입니다.
+특정 글자 수나 압축률을 목표로 삼지 마세요. 원문의 전달 방식과 정보 밀도에 맞춰
+필요한 만큼 충분히 설명하세요.
+
+- 먼저 content_map에 정리된 모든 section과 important point를 반영하세요.
+- 원문에 명시적인 서브 챕터가 있으면 제목과 계층을 반드시 summary에 드러내고,
+  각 서브 챕터의 유의미한 내용을 해당 섹션에서 설명하세요.
+- 명시적인 서브 챕터가 없으면 챕터 전체의 논리와 흐름을 유지하면서 실제 주제나
+  의미 단락을 가독성 좋은 섹션으로 구성하세요. 새 챕터 경계를 만들지는 마세요.
+- 문서 성격에 따라 핵심 주장, 개념과 정의, 원리와 인과관계, 절차와 선후관계,
+  조건과 예외, 비교와 트레이드오프, 근거와 대표 사례, 주의사항 중 실제로 중요한
+  요소를 보존하세요.
+- 반복, 장식적 문장, 같은 의미의 중복 사례는 줄일 수 있지만 서로 다른 의미,
+  전제, 예외, 단계, 판단 근거를 짧게 만들기 위해 삭제하지 마세요.
+- content_map 항목을 이름만 나열하지 말고 학습자가 이해할 수 있도록 관계와 맥락을
+  설명하세요.""".strip()
+
+
+CONTENT_MAP_GUIDELINES = """\
+[내용 목록 작성 기준]
+요약문을 쓰기 전에 챕터 text 전체를 읽고, 빠뜨리면 의미 전달이 손상되는 내용을
+content_map으로 정리하세요. 이 단계에서 요약 분량을 줄이거나 결론 몇 개만 고르지
+마세요.
+
+- 원문에 명시적인 서브 챕터가 있으면 `has_explicit_subchapters=true`로 두고,
+  모든 서브 챕터를 원래 순서대로 각각 sections 항목으로 만드세요. 원문 제목을
+  heading에 보존하고 `explicit_subchapter=true`로 표시하세요.
+- 명시적인 서브 챕터가 없으면 `has_explicit_subchapters=false`로 두고, 챕터 전체를
+  나타내는 sections 항목 하나만 만드세요. 그 안의 important_points가 챕터 전체의
+  유의미한 내용을 담당합니다.
+- 교재·기술 문서는 개념, 정의, 구조, 동작 원리, 설정, 절차, 비교, 조건, 예외,
+  장애·주의점과 대표 예시를 살피세요.
+- 논증·보고서는 주장, 근거, 전제, 반론, 한계와 결론을 살피세요.
+- 역사·서사 문서는 인물·사건, 관계, 원인과 결과, 전환점과 주제를 살피세요.
+- 위 분류를 억지로 모두 채우지 말고 실제 원문의 의미 전달 방식에 맞추세요.
+- section id와 point id는 영문자·숫자·`_`·`-`만 사용하고 챕터 안에서 각각
+  중복되지 않게 만드세요.
+- important point의 content에는 보존할 내용을, significance에는 그것이 중요한
+  이유를 구체적으로 적으세요. 중요 항목 수에는 고정 상한이나 목표가 없습니다.""".strip()
+
+
+# ---------------------------------------------------------------------------
 # 기본 문제 작성 기준
-#   기본 문제는 현재 챕터 본문으로 검증 가능한 학습 확인용 문제다.
+#   기본 문제는 먼저 만든 요약으로 검증 가능한 학습 확인용 문제다.
 # ---------------------------------------------------------------------------
 BASIC_QUESTION_GUIDELINES = """\
-[기본 문제 작성 기준]
-- 모든 객관식/단답형/주관식 문제는 현재 챕터 본문만으로 정답, 해설,
+[기본 문제 작성 기준 — 요약만 사용]
+- 모든 객관식/단답형/주관식 문제는 먼저 확정한 summary와 key_points만으로 정답, 해설,
   model_answer를 유추하고 검증할 수 있어야 합니다.
+- 원문 본문을 함께 받았더라도 문제를 만들 때는 다시 참조하지 마세요. summary 또는
+  key_points에 명시되지 않은 원문의 세부 사실을 문제·보기·정답·해설에 넣지 마세요.
 - 외부 지식, 일반 상식, 다른 챕터 내용, 보이지 않는 이미지 정보를 알아야
   답할 수 있는 문제는 만들지 마세요.
 - PDF에 포함된 그림, 도표, 이미지의 시각 정보에 의존하는 문제는 만들지 마세요.
   최종 학습 자료에는 이미지가 포함되지 않습니다.
-- 본문 text에 그림 설명이나 캡션이 들어 있더라도, 그 텍스트만으로 충분히
-  답할 수 있을 때만 문제로 만드세요.
-- reflection도 기본 문제입니다. 개인 의견 토론이 아니라 본문 근거를 바탕으로
-  답할 수 있는 검증형 주관식으로 만드세요.
+- 요약에 그림 설명이나 캡션 내용이 들어 있더라도, 요약 텍스트만으로 충분히 답할 수
+  있을 때만 문제로 만드세요.
+- reflection도 기본 문제입니다. 개인 의견 토론이 아니라 요약 근거를 바탕으로
+  요약에서 답할 수 있는 검증형 주관식으로 만드세요.
 - 학습자 컨텍스트는 난이도, 용어 수준, 예시의 친숙도, 문제 관점을 조정하는 데
-  사용하되, 위의 본문 근거 제한보다 우선하지 않습니다.""".strip()
+  사용하되, 위의 요약 근거 제한보다 우선하지 않습니다.
+- 요약에 좋은 문제를 만들 근거가 부족하면 문제 수를 줄이세요. 원문에서 근거를
+  보충해 최대 개수를 채우면 안 됩니다.""".strip()
 
 
 # ---------------------------------------------------------------------------
@@ -74,17 +126,19 @@ BASIC_QUESTION_GUIDELINES = """\
 #   확장 문제는 PDF 개념에서 출발해 현실 맥락으로 사고를 넓힌다.
 # ---------------------------------------------------------------------------
 EXTENSION_GUIDELINES = """\
-[확장 문제 작성 기준]
-- 단순 회상이나 정의 암기 문제가 아니라, PDF 챕터의 핵심 개념을 현실 맥락,
+[확장 문제 작성 기준 — 요약만 사용]
+- 단순 회상이나 정의 암기 문제가 아니라, 챕터 요약의 핵심 개념을 현실 맥락,
   실무 적용, 경험 기반 판단 상황, 사회적·기술적 이슈와 연결하는 응용 문제를
   만드세요.
 - 꼭 하나의 정답으로 닫히지 않아도 됩니다. 다만 model_answer는 반드시 포함하고,
   좋은 답안의 방향, 핵심 근거, 균형 잡힌 관점, 한계나 반론을 담으세요.
-- 현실 사례나 가상 상황을 쓰더라도 PDF 챕터와의 연결이 분명해야 합니다.
+- 현실 사례나 가상 상황을 쓰더라도 챕터 요약과의 연결이 분명해야 합니다.
 - 학습자 컨텍스트를 반영해 난이도와 현실 맥락을 고르세요. 초심자에게는 생활
   예시를, 실무자에게는 운영·설계·의사결정 관점을 더 사용할 수 있습니다.
-- 외부 검색이나 외부 자료 수집 도구를 사용하지 마세요. 함께 전달받은 챕터 본문과
-  학습자 컨텍스트만으로 문제를 만드세요.
+- 외부 검색이나 외부 자료 수집 도구를 사용하지 마세요. 입력으로 받은 summary,
+  key_points와 학습자 컨텍스트만으로 문제를 만드세요.
+- 원문 text를 받거나 다시 읽지 마세요. summary 또는 key_points에 없는 원문 세부
+  사실을 문제나 model_answer의 근거로 사용하지 마세요.
 - 최신 사실이나 별도 출처를 알아야만 답할 수 있는 문제 대신, 필요한 상황과 조건을
   question 안에 충분히 제시해 스스로 완결된 문제를 만드세요.""".strip()
 
@@ -109,9 +163,95 @@ get_chapter_content가 제공한 text가 PaddleOCR CPU로 미리 읽은 챕터 �
 # Summarizer 템플릿
 # ---------------------------------------------------------------------------
 
-_SUMMARIZER = """\
+_CONTENT_MAP = """\
+당신은 PDF 학습 자료의 내용 보존을 담당하는 분석자입니다.
+get_chapter_content가 제공한 챕터 text 전체를 읽고, 최종 요약에서 빠뜨리면 안 되는
+내용 목록을 한국어로 작성하세요. 아직 요약문이나 문제를 만들지 마세요.
+
+[책 정보]
+{book_info_block}
+
+[학습자 컨텍스트]
+{user_context_block}
+
+{input_mode_block}
+
+{content_map_guidelines_block}
+
+[출력 형식 — JSON]
+반드시 다음 스키마의 JSON 객체 하나만 반환하세요. 코드펜스는 사용하지 마세요.
+
+{content_map_json_example}
+"""
+
+_SUMMARY = """\
 당신은 PDF 학습 자료를 만드는 어시스턴트입니다.
-원문 언어와 무관하게 주어진 챕터 본문을 읽고 한국어로 ① 요약 ② 핵심 포인트 ③ 검증 문제를 생성하세요.
+원문 언어와 무관하게 주어진 챕터 text와 별도 분석자가 만든 content_map을 함께 읽고
+한국어 summary와 key_points의 초안을 생성하세요. 문제는 만들지 마세요.
+문제 생성기는 검토를 통과한 이 요약만 입력으로 받아 별도로 실행됩니다.
+
+[책 정보]
+{book_info_block}
+
+[학습자 컨텍스트]
+{user_context_block}
+
+{input_mode_block}
+
+{summary_format_block}
+
+{semantic_completeness_block}
+
+[출력 형식 — JSON]
+반드시 다음 스키마의 **JSON 객체 하나만** 반환하세요. 객체 전체를 감싸는
+코드펜스(```)는 금지하지만, summary 값 **안에서는** 마크다운(코드블록 포함)을
+자유롭게 쓰세요. summary의 줄바꿈은 **실제 줄바꿈(개행)**으로 넣으세요 —
+`\\n` 같은 글자를 직접 타이핑하지 마세요(JSON 직렬화는 도구가 알아서 합니다).
+summary에는 한국어 요약을 넣으세요.
+
+{summary_only_json_example}
+
+아직 save_chapter_result를 호출하지 마세요. review_prompt가 text·content_map·이
+초안을 대조해 `passed`를 반환한 뒤에만 basic_question_prompt로 넘어갑니다.
+"""
+
+
+_BASIC_QUESTIONS = """\
+당신은 검토를 통과한 챕터 요약으로 학습 확인 문제를 만드는 어시스턴트입니다.
+입력으로 전달받은 summary와 key_points만 읽으세요. 원문 text나 content_map은
+입력으로 받거나 참조하지 마세요.
+
+[학습자 컨텍스트]
+{user_context_block}
+
+[활성화된 기본 문제 유형]
+{enabled_basic_types_block}
+
+[원문 글자 수별 최대 문제 개수]
+입력에 함께 전달된 source_char_count를 아래 표에 적용하세요. 글자 수는 문제 개수
+상한 계산에만 사용하고 문제 내용의 근거로 사용하지 마세요.
+{scales_table}
+
+{question_guidelines_block}
+
+[출력 형식 — JSON]
+반드시 다음 스키마의 JSON 객체 하나만 반환하세요. 객관식은 `correct_answer`에 정답
+하나, `incorrect_answers`에 오답 보기 배열을 넣으세요. `options`와 `answer_index`는
+넣지 말고 정답 위치도 정하지 마세요. 서버가 저장할 때 한 번만 배치합니다.
+
+{basic_questions_json_example}
+
+비활성화된 유형은 해당 키를 빈 배열([])로 두고 키 자체는 유지하세요.
+"""
+
+
+# 기존 클라이언트가 summarizer_prompt만 읽어도 요약 기반 문제를 만들도록 유지하는
+# 결합 프롬프트다. 새 workflow는 summary_prompt와 basic_question_prompt를 분리한다.
+_SUMMARIZER_COMPAT = """\
+당신은 PDF 학습 자료를 만드는 어시스턴트입니다.
+주어진 챕터 text와 content_map으로 먼저 summary와 key_points를 작성해 확정하세요.
+그 다음 원문과 content_map을 다시 참조하지 말고, 방금 확정한 summary와 key_points만
+근거로 객관식/단답형/주관식 문제를 만드세요.
 
 [책 정보]
 {book_info_block}
@@ -129,23 +269,50 @@ _SUMMARIZER = """\
 
 {summary_format_block}
 
+{semantic_completeness_block}
+
 {question_guidelines_block}
 
 [출력 형식 — JSON]
-반드시 다음 스키마의 **JSON 객체 하나만** 반환하세요. 객체 전체를 감싸는
-코드펜스(```)는 금지하지만, summary 값 **안에서는** 마크다운(코드블록 포함)을
-자유롭게 쓰세요. summary의 줄바꿈은 **실제 줄바꿈(개행)**으로 넣으세요 —
-`\\n` 같은 글자를 직접 타이핑하지 마세요(JSON 직렬화는 도구가 알아서 합니다).
-summary에는 한국어 요약을 넣으세요.
-
-객관식은 `correct_answer`에 정답 하나, `incorrect_answers`에 오답 보기 배열을
-넣으세요. 객관식의 `options`와 `answer_index`는 넣지 말고 정답 위치도 정하지 마세요.
-서버가 저장할 때 보기 순서와 answer_index를 한 번만 배치합니다.
+반드시 다음 스키마의 **JSON 객체 하나만** 반환하세요. summary와 key_points를 먼저
+완성한 뒤 questions를 채우세요. summary 값 안에서는 마크다운을 사용할 수 있습니다.
+객관식은 `correct_answer`와 `incorrect_answers`를 사용하고 `options`와
+`answer_index`는 넣지 마세요. 정답 위치는 서버가 저장할 때 배치합니다.
 
 {summary_json_example}
 
-비활성화된 유형은 해당 키를 빈 배열([])로 두세요. 키 자체는 유지.
-저장은 save_chapter_result(work_id, chapter_id, <이 JSON>)로 보냅니다.
+비활성화된 유형은 해당 키를 빈 배열([])로 두세요. 키 자체는 유지합니다.
+새 workflow에서는 이 호환 프롬프트 대신 summary_prompt와 basic_question_prompt를
+분리해 사용합니다.
+"""
+
+
+_SUMMARY_REVIEW = """\
+당신은 PDF 학습 요약의 독립 검토자입니다.
+챕터 text 전체, content_map, 작성된 요약·핵심 포인트 초안을 직접 비교하세요.
+형식이 채워졌다는 이유로 통과시키지 말고 의미 보존 여부를 판단하세요.
+
+[검토 기준]
+- content_map의 모든 section과 important point가 실제 요약에 의미 있게 반영됐는가
+- 명시적인 서브 챕터가 있으면 모든 제목과 내용이 원래 계층에 맞게 드러나는가
+- 서브 챕터가 없으면 챕터 전체의 핵심 흐름과 유의미한 정보가 반영됐는가
+- 핵심 주장·개념·관계·절차·조건·예외·근거·사례·주의점 중 원문에서 중요한
+  내용이 과도한 압축으로 사라지지 않았는가
+- 원문의 의미가 단순화 과정에서 왜곡되거나 잘못 연결되지 않았는가
+- 특정 글자 수나 원문 대비 비율은 통과 기준으로 사용하지 않습니다.
+
+중요 누락이나 왜곡이 하나라도 있으면 `status`를 `needs_revision`으로 두고
+missing_significant_content 또는 distortions에 구체적으로 적으세요. 작성자가 그
+피드백을 반영해 초안을 고친 뒤 검토를 다시 수행해야 합니다.
+
+모든 section과 point가 실제로 반영되고 중요한 누락·왜곡이 없을 때만 아래와 같이
+`passed`를 반환하세요. covered id에는 content_map의 모든 id를 정확히 한 번씩
+넣으세요.
+
+[출력 형식 — JSON]
+반드시 다음 스키마의 JSON 객체 하나만 반환하세요. 코드펜스는 사용하지 마세요.
+
+{summary_review_json_example}
 """
 
 
@@ -155,11 +322,8 @@ summary에는 한국어 요약을 넣으세요.
 
 _EXTENSION = """\
 당신은 챕터 학습을 한 단계 확장하는 어시스턴트입니다.
-함께 전달받은 챕터 본문과 학습자 컨텍스트를 바탕으로 챕터와 연결되는
-응용/심화 문제를 만듭니다. 외부 검색이나 별도 자료 수집은 하지 않습니다.
-
-[책 정보]
-{book_info_block}
+get_chapter_summary가 반환한 summary와 key_points, source_char_count만 입력으로
+받아 응용/심화 문제를 만듭니다. 원문 text를 받거나 읽지 마세요.
 
 [학습자 컨텍스트]
 {user_context_block}
@@ -188,12 +352,22 @@ WORKFLOW_INSTRUCTIONS_SEQUENTIAL = """\
 한 챕터씩 처리하세요.
 1) chapter_ids에서 다음 chapter_id를 고르고, summary_pending_chapter_ids와
    extension_pending_chapter_ids 양쪽의 포함 여부를 확인
-2) get_chapter_content(work_id, chapter_id)로 본문을 한 번만 받기
-3) summary_pending_chapter_ids에 있으면 summarizer_prompt로 생성한 결과를
-   save_chapter_result(work_id, chapter_id, data)로 저장
-4) extension_pending_chapter_ids에 있으면 같은 본문과 extension_prompt로 생성한 결과를
+2) summary_pending_chapter_ids에 있으면 다음 순서를 지키기
+   a. get_chapter_content(work_id, chapter_id)로 원문 text와 char_count 받기
+   b. content_map_prompt로 text 전체의 유의미한 내용 목록 작성
+   c. text와 content_map을 summary_prompt에 전달해 summary·key_points 초안 작성
+   d. 가능하면 작성자와 분리된 검토자가 review_prompt로 text·content_map·초안 대조
+   e. needs_revision이면 피드백을 반영해 초안을 고치고 다시 검토(최대 2회)
+   f. passed이면 별도 문제 생성 단계에 원문 text와 content_map을 전달하지 말고,
+      summary·key_points·source_char_count만 basic_question_prompt에 전달
+   g. 요약, 문제, content_map, summary_review를 하나의 payload로 합쳐
+      save_chapter_result(work_id, chapter_id, data)로 저장
+   검토가 통과하지 않으면 불완전한 초안을 저장하지 않기
+3) extension_pending_chapter_ids에 있으면 요약 저장이 끝난 뒤
+   get_chapter_summary(work_id, chapter_id)를 호출하고, 반환된 summary·key_points·
+   source_char_count만 extension_prompt에 전달해 만든 결과를
    save_extension_result(work_id, chapter_id, data)로 저장
-5) 두 목록 중 실제로 포함된 요청된 결과 유형만 저장하고 다음 챕터로 진행
+4) 두 목록 중 실제로 포함된 요청된 결과 유형만 저장하고 다음 챕터로 진행
 실패 시 1회 재시도. 그래도 실패하면 다음 챕터로.
 chapter_ids는 두 pending 목록의 자연 정렬된 합집합입니다.
 """
@@ -202,11 +376,17 @@ WORKFLOW_INSTRUCTIONS_PARALLEL = """\
 최대 5개 챕터를 동시에 sub-agent로 디스패치하세요.
 - 각 sub-agent는 chapter_id가 summary_pending_chapter_ids와
   extension_pending_chapter_ids에 각각 포함되는지 먼저 확인합니다.
-- get_chapter_content는 챕터당 한 번만 호출해 본문을 공유합니다.
-- summary_pending_chapter_ids에 있으면 summarizer_prompt 결과만
-  save_chapter_result로 저장합니다.
-- extension_pending_chapter_ids에 있으면 extension_prompt 결과만
-  save_extension_result로 저장합니다. 외부 검색은 사용하지 않습니다.
+- summary pending이면 챕터별로 get_chapter_content → content_map_prompt →
+  summary_prompt → review_prompt 순서를 지킵니다. review가 needs_revision이면
+  피드백을 반영해 최대 2회 다시 검토합니다. passed이면 원문과 content_map을 제외한
+  summary·key_points·source_char_count만 별도 basic_question_prompt에 전달합니다.
+  요약·문제·검증 근거를 합쳐 save_chapter_result로 저장하고, 검토가 통과하지 않으면
+  저장하지 않습니다.
+- extension pending이면 같은 챕터의 요약 저장이 끝난 뒤 get_chapter_summary를
+  호출합니다. 반환된 summary·key_points·source_char_count만 extension_prompt에
+  전달해 save_extension_result로 저장합니다. 외부 검색은 사용하지 않습니다.
+- 한 챕터 안의 요약 → 기본 문제 → 요약 저장 → 확장 문제 의존 순서를 지키고,
+  서로 다른 챕터만 최대 5개까지 병렬 처리합니다.
 - 두 목록 중 실제로 포함된 요청된 결과 유형만 저장하세요.
 - save_*는 서버가 동시성을 보장하므로 결과 도착 순서대로 호출 가능합니다.
 - 5개 배치 완료 후 다음 5개 시작.
@@ -255,13 +435,20 @@ def _format_enabled_types(opts: dict[str, bool]) -> str:
     return "\n".join(lines)
 
 
+def _format_enabled_basic_types(opts: dict[str, bool]) -> str:
+    return "\n".join(
+        line for line in _format_enabled_types(opts).splitlines()
+        if "확장형" not in line
+    )
+
+
 def _format_user_context(uc: str) -> str:
     if not uc:
         return "(제공되지 않음)"
     return (
         uc
         + "\n위 컨텍스트를 고려해 난이도, 표현 수준, 예시, 문제 관점을 맞추세요. "
-        "단, PDF 본문 근거 제한을 약화하지 마세요."
+        "단, 요약 또는 원문 등 현재 단계의 근거 제한을 약화하지 마세요."
     )
 
 
@@ -271,7 +458,11 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     Returns:
         {
             "mode": "sequential" | "parallel",
-            "summarizer_prompt": str,
+            "content_map_prompt": str,
+            "summary_prompt": str,
+            "basic_question_prompt": str,
+            "summarizer_prompt": str,        # 기존 클라이언트 호환용 결합 프롬프트
+            "review_prompt": str,
             "extension_prompt": str | None,   # extension 비활성이면 None
             "workflow_instructions": str,
             "chapter_ids": [str, ...],
@@ -288,19 +479,67 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     book_info_block = _format_book_info_block(book_info)
     user_context_block = _format_user_context(user_context)
     enabled_types_block = _format_enabled_types(opts)
+    enabled_basic_types_block = _format_enabled_basic_types(opts)
     input_mode_block = INPUT_MODE_OCR if ocr_mode else INPUT_MODE_TEXT
     summary_json_example = json.dumps(
         question_contract.agent_summary_payload_example(), ensure_ascii=False, indent=2,
     )
-    summarizer_prompt = _SUMMARIZER.format(
+    summary_only_json_example = json.dumps(
+        {
+            "summary": "## 개요\n한국어 마크다운 요약",
+            "key_points": ["핵심 포인트 1", "핵심 포인트 2"],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    basic_questions_json_example = json.dumps(
+        {
+            "questions": question_contract.agent_summary_payload_example()["questions"],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    content_map_json_example = json.dumps(
+        summary_contract.content_map_example(), ensure_ascii=False, indent=2,
+    )
+    summary_review_json_example = json.dumps(
+        summary_contract.summary_review_example(), ensure_ascii=False, indent=2,
+    )
+    content_map_prompt = _CONTENT_MAP.format(
+        book_info_block=book_info_block,
+        user_context_block=user_context_block,
+        input_mode_block=input_mode_block,
+        content_map_guidelines_block=CONTENT_MAP_GUIDELINES,
+        content_map_json_example=content_map_json_example,
+    )
+    summary_prompt = _SUMMARY.format(
+        book_info_block=book_info_block,
+        user_context_block=user_context_block,
+        input_mode_block=input_mode_block,
+        summary_format_block=SUMMARY_FORMAT,
+        semantic_completeness_block=SEMANTIC_COMPLETENESS_GUIDELINES,
+        summary_only_json_example=summary_only_json_example,
+    )
+    basic_question_prompt = _BASIC_QUESTIONS.format(
+        user_context_block=user_context_block,
+        enabled_basic_types_block=enabled_basic_types_block,
+        scales_table=QUESTION_SCALES_TABLE,
+        question_guidelines_block=BASIC_QUESTION_GUIDELINES,
+        basic_questions_json_example=basic_questions_json_example,
+    )
+    summarizer_prompt = _SUMMARIZER_COMPAT.format(
         book_info_block=book_info_block,
         user_context_block=user_context_block,
         enabled_types_block=enabled_types_block,
         scales_table=QUESTION_SCALES_TABLE,
         input_mode_block=input_mode_block,
         summary_format_block=SUMMARY_FORMAT,
+        semantic_completeness_block=SEMANTIC_COMPLETENESS_GUIDELINES,
         question_guidelines_block=BASIC_QUESTION_GUIDELINES,
         summary_json_example=summary_json_example,
+    )
+    review_prompt = _SUMMARY_REVIEW.format(
+        summary_review_json_example=summary_review_json_example,
     )
 
     extension_prompt: str | None = None
@@ -309,7 +548,6 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
             question_contract.extension_payload_example(), ensure_ascii=False, indent=2,
         )
         extension_prompt = _EXTENSION.format(
-            book_info_block=book_info_block,
             user_context_block=user_context_block,
             scales_table=QUESTION_SCALES_TABLE,
             extension_guidelines_block=EXTENSION_GUIDELINES,
@@ -324,8 +562,8 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     if ocr_mode:
         ocr_note = (
             "[OCR 모드] get_chapter_content는 set_chapters에서 PaddleOCR CPU로 "
-            "선계산한 본문 text를 돌려줍니다. 각 챕터의 text를 읽고 요약/문제를 "
-            "생성하세요.\n\n"
+            "선계산한 본문 text를 돌려줍니다. 원문 text는 요약 생성·검토에만 "
+            "사용하고 문제 생성 단계에는 전달하지 마세요.\n\n"
         )
         workflow = ocr_note + workflow
 
@@ -343,7 +581,11 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     return {
         "mode": mode,
         "extraction_mode": "ocr" if ocr_mode else "text",
+        "content_map_prompt": content_map_prompt,
+        "summary_prompt": summary_prompt,
+        "basic_question_prompt": basic_question_prompt,
         "summarizer_prompt": summarizer_prompt,
+        "review_prompt": review_prompt,
         "extension_prompt": extension_prompt,
         "workflow_instructions": workflow,
         "chapter_ids": chapter_ids,

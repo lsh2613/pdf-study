@@ -8,6 +8,10 @@
   --correct: #15803d;
   --wrong: #b91c1c;
   --card: #ffffff;
+  --content-width: 79.2ch;
+  --sidebar-width: 260px;
+  --chapter-controls-width: 10.5rem;
+  --chapter-controls-gap: 2rem;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -38,7 +42,7 @@ body {
 }
 
 main, header.book-info {
-  max-width: 72ch;
+  max-width: var(--content-width);
   margin: 0 auto;
   padding: 2rem 1.25rem;
 }
@@ -47,7 +51,7 @@ main, header.book-info {
 .sidebar {
   position: fixed;
   inset: 0 auto 0 0;
-  width: 260px;
+  width: var(--sidebar-width);
   padding: 1.25rem 1rem;
   overflow-y: auto;
   background: var(--card);
@@ -125,16 +129,8 @@ main, header.book-info {
   z-index: 4;
 }
 
-/* 데스크탑: 사이드바 옆 본문 확보 */
-@media (min-width: 901px) {
-  body.has-sidebar main,
-  body.has-sidebar header.book-info {
-    margin-left: 260px;
-  }
-}
-
-/* 모바일: 사이드바를 슬라이드 패널로 */
-@media (max-width: 900px) {
+/* 본문을 중앙에 둘 공간이 부족하면 사이드바를 슬라이드 패널로 전환한다. */
+@media (max-width: 1280px) {
   body.has-sidebar main {
     padding-top: 3.75rem; /* 토글 버튼 영역 확보 */
   }
@@ -214,19 +210,6 @@ nav.chapter-list {
 }
 .chapter-link.is-completed .status-text { color: var(--correct); }
 
-nav.chapter-nav {
-  display: flex;
-  justify-content: space-between;
-  gap: .5rem;
-  margin: 1rem 0 1.5rem;
-  font-size: .9rem;
-}
-nav.chapter-nav a {
-  color: var(--accent);
-  text-decoration: none;
-}
-nav.chapter-nav a:hover { text-decoration: underline; }
-
 article > section {
   margin: 2rem 0;
 }
@@ -270,9 +253,6 @@ article ul, article ol { padding-left: 1.4rem; }
   border-left: 3px solid var(--accent);
   color: var(--muted);
 }
-
-/* floating 완료 버튼이 마지막 콘텐츠를 가리지 않도록 하단 여백 확보 */
-main { padding-bottom: 5rem; }
 
 .question {
   border: 1px solid var(--border);
@@ -332,37 +312,92 @@ main { padding-bottom: 5rem; }
 }
 .mc-summary strong { color: var(--fg); }
 
-/* 챕터 완료 토글 — 스크롤과 무관하게 항상 보이는 floating 버튼(우하단).
-   좌측 사이드바·좌상단 토글과 겹치지 않는 유일한 빈 코너. */
-.completion-control {
+/* 챕터 이동·완료 통합 컨트롤 — 데스크탑에서는 우측에서 스크롤을 따라간다. */
+.chapter-controls {
   position: fixed;
-  right: 1.25rem;
-  bottom: 1.25rem;
+  top: 50%;
+  right: max(
+    1rem,
+    calc(
+      (100vw - var(--content-width)) / 2
+      - var(--chapter-controls-width)
+      - var(--chapter-controls-gap)
+    )
+  );
+  transform: translateY(-50%);
   z-index: 6;
-  margin: 0;
-}
-.complete-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: .5rem;
-  padding: .65rem 1.25rem;
+  width: var(--chapter-controls-width);
+  padding: .5rem;
   background: var(--card);
-  color: inherit;
-  border: 1.5px solid var(--border);
-  border-radius: 999px;
-  font: inherit;
-  cursor: pointer;
-  box-shadow: 0 2px 10px rgba(0,0,0,.18);
-  transition: background .15s ease, border-color .15s ease, color .15s ease;
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.16);
+  backdrop-filter: blur(10px);
 }
-.complete-btn:hover { border-color: var(--accent); }
-.complete-btn .check {
-  width: 18px; height: 18px;
-  border: 1.5px solid var(--border);
-  border-radius: 50%;
+.chapter-controls-nav {
+  display: grid;
+  gap: .35rem;
+}
+.chapter-control {
+  width: 100%;
+  min-height: 2.6rem;
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .55rem .65rem;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-size: .88rem;
+  line-height: 1.25;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.chapter-control:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.chapter-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.chapter-control.is-disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: .45;
+}
+.chapter-control.is-disabled:hover {
+  background: transparent;
+  color: var(--muted);
+}
+.control-icon {
+  width: 1.25rem;
+  flex: 0 0 1.25rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-size: 1rem;
+}
+.control-label { flex: 1; }
+.control-divider {
+  height: 1px;
+  margin: .5rem .2rem;
+  background: var(--border);
+}
+.complete-btn {
+  font-weight: 600;
+}
+.complete-btn .check {
+  width: 18px;
+  height: 18px;
+  flex-basis: 18px;
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
   font-size: .8rem;
   color: transparent;
 }
@@ -377,3 +412,54 @@ main { padding-bottom: 5rem; }
   color: var(--correct);
 }
 .complete-btn[aria-pressed="true"] .check::before { content: "✓"; }
+
+/* 우측 도구가 본문을 가릴 수 있는 폭에서는 하단 도크로 바꾼다. */
+@media (max-width: 1280px) {
+  body.has-chapter-controls main { padding-bottom: 7rem; }
+  .chapter-controls {
+    top: auto;
+    right: max(.75rem, env(safe-area-inset-right));
+    bottom: max(.75rem, env(safe-area-inset-bottom));
+    left: max(.75rem, env(safe-area-inset-left));
+    width: auto;
+    transform: none;
+    display: flex;
+    align-items: stretch;
+    gap: .35rem;
+    padding: .4rem;
+  }
+  .chapter-controls-nav {
+    display: flex;
+    flex: 1;
+    gap: .2rem;
+  }
+  .chapter-control {
+    min-width: 0;
+    justify-content: center;
+    padding: .5rem;
+    text-align: center;
+  }
+  .chapter-controls-nav .chapter-control { flex: 1; }
+  .control-divider {
+    width: 1px;
+    height: auto;
+    margin: .2rem;
+  }
+  .complete-btn { flex: 1.25; }
+  .control-icon { display: none; }
+  .complete-btn .check { display: inline-flex; }
+}
+
+@media (max-width: 560px) {
+  .chapter-controls { gap: .15rem; }
+  .chapter-control {
+    min-height: 2.8rem;
+    padding: .45rem .3rem;
+    font-size: .76rem;
+  }
+  .complete-btn .check { display: none; }
+  .complete-btn .control-label {
+    overflow: hidden;
+    white-space: nowrap;
+  }
+}

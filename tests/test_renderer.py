@@ -100,7 +100,7 @@ def test_multi_chapter_generates_index_and_chapter_pages(ko_with_toc, tmp_path):
 def test_chapter_page_has_sidebar_with_current_active(ko_with_toc, tmp_path):
     _, out, chs = _build_multi(ko_with_toc, tmp_path)
     html = (out / "ch2.html").read_text(encoding="utf-8")
-    assert 'class="has-sidebar"' in html
+    assert 'class="has-sidebar has-chapter-controls"' in html
     assert '<aside class="sidebar"' in html
     # is-active는 자기 챕터만
     assert html.count("sidebar-link is-active") == 1
@@ -125,12 +125,34 @@ def test_index_page_has_no_sidebar(ko_with_toc, tmp_path):
     assert "progress-text" not in idx
 
 
-def test_chapter_page_has_complete_button(ko_with_toc, tmp_path):
+def test_chapter_page_has_single_floating_control_group(ko_with_toc, tmp_path):
     _, out, _ = _build_multi(ko_with_toc, tmp_path)
     html = (out / "ch1.html").read_text(encoding="utf-8")
-    assert 'class="completion-control"' in html
-    assert 'class="complete-btn"' in html
+    assert html.count('class="chapter-controls"') == 1
+    controls = html.split('<aside class="chapter-controls"', 1)[1].split("</aside>", 1)[0]
+    assert "이전 챕터" in controls
+    assert 'href="index.html"' in controls
+    assert "목차" in controls
+    assert 'href="ch2.html"' in controls
+    assert "다음 챕터" in controls
+    assert 'class="chapter-control complete-btn"' in controls
     assert 'aria-pressed="false"' in html
+    assert 'class="chapter-nav"' not in html
+
+
+def test_chapter_controls_disable_unavailable_edges(ko_with_toc, tmp_path):
+    _, out, chs = _build_multi(ko_with_toc, tmp_path)
+    first = (out / f'{chs[0]["chapter_id"]}.html').read_text(encoding="utf-8")
+    last = (out / f'{chs[-1]["chapter_id"]}.html').read_text(encoding="utf-8")
+
+    assert (
+        '<span class="chapter-control is-disabled" aria-disabled="true">'
+        '<span class="control-icon" aria-hidden="true">←</span>'
+    ) in first
+    assert (
+        '<span class="chapter-control is-disabled" aria-disabled="true">'
+        '<span class="control-icon" aria-hidden="true">→</span>'
+    ) in last
 
 
 def test_disabled_question_types_omit_sections(ko_with_toc, tmp_path):
@@ -421,16 +443,34 @@ def test_single_chapter_has_no_sidebar(ko_short, tmp_path):
 def test_single_chapter_still_has_complete_button(ko_short, tmp_path):
     _, out = _build_single(ko_short, tmp_path)
     mh = (out / "main.html").read_text(encoding="utf-8")
-    assert 'class="complete-btn"' in mh
+    assert 'class="chapter-control complete-btn"' in mh
 
 
-def test_complete_button_is_floating_fixed(ko_with_toc, tmp_path):
-    """완료 버튼이 스크롤과 무관하게 보이도록 .completion-control이 fixed여야 한다."""
+def test_chapter_controls_are_floating_fixed(ko_with_toc, tmp_path):
+    """통합 컨트롤이 스크롤과 무관하게 보이도록 fixed여야 한다."""
     _, out, _ = _build_multi(ko_with_toc, tmp_path)
     css = (out / "assets" / "style.css").read_text(encoding="utf-8")
-    # .completion-control 블록이 position: fixed 를 포함
-    block = css.split(".completion-control", 1)[1].split("}", 1)[0]
+    block = css.split(".chapter-controls", 1)[1].split("}", 1)[0]
     assert "position: fixed" in block
+
+
+def test_chapter_content_is_centered_and_controls_follow_content_edge(
+    ko_with_toc, tmp_path
+):
+    _, out, _ = _build_multi(ko_with_toc, tmp_path)
+    css = (out / "assets" / "style.css").read_text(encoding="utf-8")
+    content_block = css.split("main, header.book-info", 1)[1].split("}", 1)[0]
+    controls_block = css.split(".chapter-controls", 1)[1].split("}", 1)[0]
+
+    assert "--content-width: 79.2ch" in css
+    assert "--chapter-controls-gap: 2rem" in css
+    assert "max-width: var(--content-width)" in content_block
+    assert "margin: 0 auto" in content_block
+    assert "margin-left: 260px" not in css
+    assert "(100vw - var(--content-width)) / 2" in controls_block
+    assert "- var(--chapter-controls-width)" in controls_block
+    assert "- var(--chapter-controls-gap)" in controls_block
+    assert "@media (max-width: 1280px)" in css
 
 
 # ---------------------------- 요약 마크다운 (그림 없음) ----------------------------

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from pdf_study import prompts, question_contract
+from pdf_study import prompts, question_contract, summary_contract
 
 
 def _state(**overrides):
@@ -27,15 +27,22 @@ def test_prompt_contract_is_korean_only():
     out = prompts.build_prompts(_state())
 
     assert "language" not in out
-    assert "JSON 객체 하나만" in out["summarizer_prompt"]
-    assert "한국어 요약" in out["summarizer_prompt"]
+    assert "JSON 객체 하나만" in out["summary_prompt"]
+    assert "한국어 마크다운 요약" in out["summary_prompt"]
 
 
 def test_prompts_embed_agent_question_examples(monkeypatch):
     monkeypatch.setattr(
         question_contract,
         "agent_summary_payload_example",
-        lambda: {"contract_probe": True},
+        lambda: {
+            "contract_probe": True,
+            "questions": {
+                "multiple_choice": [],
+                "short_answer": [],
+                "reflection": [],
+            },
+        },
     )
 
     prompt = prompts.build_prompts(_state())["summarizer_prompt"]
@@ -43,8 +50,28 @@ def test_prompts_embed_agent_question_examples(monkeypatch):
     assert '"contract_probe": true' in prompt
 
 
+def test_prompts_embed_separate_content_map_and_review_examples(monkeypatch):
+    monkeypatch.setattr(
+        summary_contract,
+        "content_map_example",
+        lambda: {"content_map_probe": True},
+    )
+    monkeypatch.setattr(
+        summary_contract,
+        "summary_review_example",
+        lambda: {"review_probe": True},
+    )
+
+    out = prompts.build_prompts(_state())
+
+    assert '"content_map_probe": true' in out["content_map_prompt"]
+    assert '"review_probe": true' in out["review_prompt"]
+    assert "content_map_probe" not in out["summarizer_prompt"]
+    assert "review_probe" not in out["summarizer_prompt"]
+
+
 def test_summarizer_prompt_assigns_answer_placement_to_server():
-    prompt = prompts.build_prompts(_state())["summarizer_prompt"]
+    prompt = prompts.build_prompts(_state())["basic_question_prompt"]
 
     assert '"correct_answer"' in prompt
     assert '"incorrect_answers"' in prompt
@@ -84,7 +111,11 @@ def test_user_context_and_book_info_are_injected():
     for value in ("학부생 대상", "테스트 책", "샘플 저자", "샘플 출판", "데이터베이스 개론서"):
         assert value in out["summarizer_prompt"]
     assert "문제 관점" in out["summarizer_prompt"]
+    assert "학부생 대상" in out["basic_question_prompt"]
     assert "문제 관점" in out["extension_prompt"]
+    for value in ("테스트 책", "샘플 저자", "샘플 출판", "데이터베이스 개론서"):
+        assert value not in out["basic_question_prompt"]
+        assert value not in out["extension_prompt"]
 
 
 def test_workflow_instructions_branch_by_execution_mode():
@@ -149,6 +180,23 @@ def test_summary_format_requires_markdown_subchapters_without_images():
     assert "fig:" not in prompt
 
 
+def test_summary_workflow_is_semantic_and_has_no_character_target():
+    out = prompts.build_prompts(_state())
+
+    assert "text 전체" in out["content_map_prompt"]
+    assert "모든 서브 챕터" in out["content_map_prompt"]
+    assert "고정 상한이나 목표가 없습니다" in out["content_map_prompt"]
+    assert "짧은 초록이 아니라" in out["summarizer_prompt"]
+    assert "특정 글자 수나 압축률을 목표로 삼지 마세요" in out["summarizer_prompt"]
+    assert "needs_revision" in out["review_prompt"]
+    assert "글자 수나 원문 대비 비율은 통과 기준으로 사용하지 않습니다" in (
+        out["review_prompt"]
+    )
+    workflow = out["workflow_instructions"]
+    assert workflow.index("content_map_prompt") < workflow.index("summary_prompt")
+    assert workflow.index("summary_prompt") < workflow.index("review_prompt")
+
+
 def test_question_counts_are_quality_limits_not_targets():
     out = prompts.build_prompts(_state())
     assert "최대 개수" in out["summarizer_prompt"]
@@ -157,21 +205,36 @@ def test_question_counts_are_quality_limits_not_targets():
     assert "억지로 채우지 마세요" in out["extension_prompt"]
 
 
-def test_basic_question_guidelines_ground_questions_in_chapter_body():
-    prompt = prompts.build_prompts(_state())["summarizer_prompt"]
-    assert "[기본 문제 작성 기준]" in prompt
-    assert "현재 챕터 본문만으로" in prompt
+def test_basic_question_guidelines_ground_questions_in_reviewed_summary():
+    prompt = prompts.build_prompts(_state())["basic_question_prompt"]
+    assert "[기본 문제 작성 기준 — 요약만 사용]" in prompt
+    assert "summary와 key_points만으로" in prompt
+    assert "원문 text나 content_map은" in prompt
+    assert "source_char_count" in prompt
     assert "그림, 도표, 이미지의 시각 정보에 의존하는 문제는 만들지 마세요" in prompt
     assert "reflection도 기본 문제" in prompt
-    assert "본문 근거 제한보다" in prompt
+    assert "요약 근거 제한보다" in prompt
 
 
 def test_extension_guidelines_use_chapter_and_user_context_without_search():
     prompt = prompts.build_prompts(_state())["extension_prompt"]
-    assert "[확장 문제 작성 기준]" in prompt
+    assert "[확장 문제 작성 기준 — 요약만 사용]" in prompt
     assert "단순 회상이나 정의 암기 문제가 아니라" in prompt
     assert "현실 맥락" in prompt
     assert "model_answer는 반드시 포함" in prompt
-    assert "외부 검색이나 별도 자료 수집은 하지 않습니다" in prompt
-    assert "함께 전달받은 챕터 본문" in prompt
+    assert "외부 검색이나 외부 자료 수집 도구를 사용하지 마세요" in prompt
+    assert "summary와 key_points" in prompt
+    assert "원문 text를 받거나 다시 읽지 마세요" in prompt
     assert '"sources"' not in prompt
+
+
+@pytest.mark.parametrize("execution_mode", ["sequential", "parallel"])
+def test_question_workflow_never_passes_raw_text_to_question_prompts(execution_mode):
+    workflow = prompts.build_prompts(
+        _state(execution_mode=execution_mode),
+    )["workflow_instructions"]
+
+    assert "basic_question_prompt" in workflow
+    assert "get_chapter_summary" in workflow
+    assert "원문" in workflow
+    assert "전달하지" in workflow or "제외한" in workflow

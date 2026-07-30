@@ -43,6 +43,7 @@ def test_choice_tools_expose_only_non_choice_public_parameters():
     assert properties["set_chapters"] == {"work_id", "chapters", "book_info"}
     assert properties["finalize_study"] == {"work_id"}
     assert properties["cleanup_work"] == {"work_id"}
+    assert properties["get_chapter_summary"] == {"work_id", "chapter_id"}
 
 
 def test_choice_workflows_have_only_elicitation_python_entrypoints():

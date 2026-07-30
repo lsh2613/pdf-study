@@ -94,14 +94,20 @@ sequential/parallel을 세 개의 순차 Elicitation으로 확인하고 모두 �
 확정한다. OCR은 `prepare_ocr`에 저장된 언어를 사용하며 모델 캐시가 없으면
 `prepare_ocr(work_id)`를 안내한다. 본문 실패는 새 설정과 챕터별 오류를 유지한다.
 
-`get_subagent_prompts(work_id)`는 챕터 설정이 완료된 작업에서만 요약자 프롬프트,
-확장 문제 프롬프트, 처리 순서와 함께 `summary_pending_chapter_ids`,
+`get_subagent_prompts(work_id)`는 챕터 설정이 완료된 작업에서만 내용 목록
+프롬프트, 요약 프롬프트, 독립 검토 프롬프트, 기본 문제 프롬프트, 호환용 결합
+요약자 프롬프트, 확장 문제 프롬프트와 처리 순서를 함께 반환한다. 응답 키는
+`content_map_prompt`, `summary_prompt`, `review_prompt`,
+`basic_question_prompt`, `summarizer_prompt`, `extension_prompt`다.
+`summary_pending_chapter_ids`,
 `extension_pending_chapter_ids`를 반환한다. 두 pending 목록은 각각 아직 저장할
 요약·기본 문제와 확장 문제가 남은 챕터 ID를 자연 정렬해 담는다. 호환용
 `chapter_ids`는 두 목록의 자연 정렬 합집합이며 완료·skip 챕터는 제외한다.
 workflow와 `next_action`은 실제 pending 결과 유형만 안내한다. 두 목록이 모두 비면
-`list_pending_chapters`를 호출한 뒤 `finalize_study(work_id)`로 진행한다. raw
-검증은 pending 합집합에만 적용한다.
+`list_pending_chapters`를 호출한 뒤 `finalize_study(work_id)`로 진행한다. 요약
+pending 챕터는 raw `text`와 `char_count`를 검증한다. 요약은 완료되고 확장 문제만
+pending인 챕터는 raw 대신 저장된 `summary`, `key_points`, `source_char_count`를
+검증한다.
 
 pending 판정의 정확한 상태 매핑은 다음과 같다.
 
@@ -111,9 +117,28 @@ pending 판정의 정확한 상태 매핑은 다음과 같다.
 
 `get_chapter_content(work_id, chapter_id)`는 챕터 입력을 반환한다. text 모드와 OCR 모드 모두 `text`가 들어간다. OCR 모드의 `text`는 `set_chapters` 시점에 PaddleOCR CPU로 선계산해 `chapters_raw/chN.json`에 저장한 본문이다. 등록되지 않은 `chapter_id`, skip 챕터, 아직 챕터가 설정되지 않은 작업은 실패한다.
 
-`save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다. `summary`는 비어 있지 않은 문자열, `key_points`는 비어 있지 않은 문자열 배열이어야 한다. `questions`는 객체여야 하며 `multiple_choice`, `short_answer`, `reflection` 키를 모두 배열로 가져야 한다. 활성화된 기본 문제 유형은 빈 배열이면 실패하고, 비활성화된 유형도 키는 유지해야 한다. 객관식은 agent 입력으로 비어 있지 않은 `id`, `question`, `explanation`, 하나의 `correct_answer`, 하나 이상의 비어 있지 않고 중복되지 않은 `incorrect_answers`를 받을 수 있다. 서버는 성공적으로 저장할 때만 정답·오답을 한 번 섞어 저장 형식의 최소 2개 비어 있지 않은 `options`와 범위 안의 정수 `answer_index`로 바꾸며, 이후 렌더·재개·재최종화는 저장된 순서를 바꾸지 않는다. 호환을 위해 agent는 기존 저장 형식인 `options`와 `answer_index`를 직접 보내도 되며, 이 경우 순서는 바꾸지 않는다. 단답형과 성찰형 항목은 비어 있지 않은 `id`, `question`, `model_answer`를 가져야 한다. 문제 ID는 영문자·숫자·`_`·`-`만 쓸 수 있고, 기본·확장 문제를 합친 같은 챕터 안에서 유일해야 한다. 각 유형의 개수는 raw 본문의 `char_count`별 최대치(3,000 미만: 3/1/1/1, 3,000–9,999: 5/2/2/1, 10,000–24,999: 7/3/2/2, 25,000 이상: 10/4/3/3; 객관식/단답형/주관식/확장형)를 넘을 수 없다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 하고, `title`이 있으면 문자열이어야 한다. 실패하면 `data.missing`에 `questions.multiple_choice[0].correct_answer`, `questions.multiple_choice[0].incorrect_answers`, `questions.multiple_choice[0].options`, `questions.multiple_choice[0].id`, `work_id`, `chapter_id`, `state` 같은 경로를 담고, 해당 챕터를 completed로 바꾸거나 요약·퀴즈 파일을 남기면 안 된다. `body_text`는 요구하지 않으며, 들어오더라도 저장 전에 제거되어 `chapters_raw`의 canonical `text`와 `char_count`를 덮어쓰지 않는다.
+`get_chapter_summary(work_id, chapter_id)`는 완료·저장된 `summary`,
+`key_points`, 원문 문제 개수 상한 계산용 `source_char_count`만 반환한다. 원문
+`text`, `content_map`, 검토 내부 정보는 문제 생성 입력으로 반환하지 않는다.
+요약이 completed가 아니거나 저장 요약의 필수값이 비어 있으면 상태 변경 없이
+실패하며, 성공하면 확장 문제 상태만 `in_progress`로 표시한다.
 
-`save_extension_result(work_id, chapter_id, data)`는 외부 검색 없이 챕터 본문과 학습자 정보로 만든 확장 문제를 저장한다. 확장형이 비활성인 작업은 실패한다. `questions.extension`은 비어 있지 않은 배열이어야 하고, 각 항목은 비어 있지 않은 `id`, `question`, `model_answer`를 가져야 한다. ID 문자·챕터 전체 유일성·본문 글자 수별 최대 개수 규칙은 `save_chapter_result`와 같다. 저장 스키마에 없는 추가 필드는 제거한다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 한다. 실패하면 `data.missing`에 필드 경로나 `work_id`, `chapter_id`, `state`를 담고, 해당 챕터의 extension 상태를 completed로 바꾸거나 확장 문제 파일을 남기면 안 된다. `body_text`가 들어오면 저장 전에 제거된다.
+`save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다.
+`summary`는 비어 있지 않은 문자열, `key_points`는 비어 있지 않은 문자열 배열이어야
+한다. 또한 전체 챕터에서 만든 `content_map`과 `summary_review`가 필수다.
+`content_map.sections`는 비어 있지 않아야 하고 각 section은 유일하고 안전한 `id`,
+비어 있지 않은 `heading`, `explicit_subchapter` boolean, 하나 이상의
+`important_points`를 가진다. important point는 유일한 `id`, `content`,
+`significance`를 가진다. 서브 챕터가 없으면 챕터 전체 section 하나를 사용하고,
+있으면 모든 명시적 서브 챕터를 section으로 만들며 각 heading이 최종 Markdown
+summary에 나타나야 한다. `summary_review.status`는 `passed`여야 하고,
+`covered_section_ids`와 `covered_point_ids`는 content map의 전체 id와 정확히
+일치해야 하며 `missing_significant_content`와 `distortions`는 빈 배열이어야 한다.
+요약 품질에 고정 글자 수나 압축률 제한은 적용하지 않는다.
+
+`questions`는 객체여야 하며 `multiple_choice`, `short_answer`, `reflection` 키를 모두 배열로 가져야 한다. 활성화된 기본 문제 유형은 빈 배열이면 실패하고, 비활성화된 유형도 키는 유지해야 한다. 객관식은 agent 입력으로 비어 있지 않은 `id`, `question`, `explanation`, 하나의 `correct_answer`, 하나 이상의 비어 있지 않고 중복되지 않은 `incorrect_answers`를 받을 수 있다. 서버는 성공적으로 저장할 때만 정답·오답을 한 번 섞어 저장 형식의 최소 2개 비어 있지 않은 `options`와 범위 안의 정수 `answer_index`로 바꾸며, 이후 렌더·재개·재최종화는 저장된 순서를 바꾸지 않는다. 호환을 위해 agent는 기존 저장 형식인 `options`와 `answer_index`를 직접 보내도 되며, 이 경우 순서는 바꾸지 않는다. 단답형과 성찰형 항목은 비어 있지 않은 `id`, `question`, `model_answer`를 가져야 한다. 문제 ID는 영문자·숫자·`_`·`-`만 쓸 수 있고, 기본·확장 문제를 합친 같은 챕터 안에서 유일해야 한다. 각 유형의 개수는 raw 본문의 `char_count`별 최대치(3,000 미만: 3/1/1/1, 3,000–9,999: 5/2/2/1, 10,000–24,999: 7/3/2/2, 25,000 이상: 10/4/3/3; 객관식/단답형/주관식/확장형)를 넘을 수 없다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 하고, `title`이 있으면 문자열이어야 한다. 실패하면 `data.missing`에 `content_map`, `summary_review.status`, `summary_review.covered_point_ids`, `questions.multiple_choice[0].correct_answer`, `questions.multiple_choice[0].incorrect_answers`, `questions.multiple_choice[0].options`, `questions.multiple_choice[0].id`, `work_id`, `chapter_id`, `state` 같은 경로를 담고, 해당 챕터를 completed로 바꾸거나 요약·퀴즈 파일을 남기면 안 된다. `body_text`는 요구하지 않으며, 들어오더라도 저장 전에 제거되어 `chapters_raw`의 canonical `text`와 `char_count`를 덮어쓰지 않는다.
+
+`save_extension_result(work_id, chapter_id, data)`는 외부 검색 없이 `get_chapter_summary`가 반환한 요약과 학습자 정보로 만든 확장 문제를 저장한다. 확장형이 비활성인 작업은 실패한다. `questions.extension`은 비어 있지 않은 배열이어야 하고, 각 항목은 비어 있지 않은 `id`, `question`, `model_answer`를 가져야 한다. ID 문자·챕터 전체 유일성·본문 글자 수별 최대 개수 규칙은 `save_chapter_result`와 같다. 저장 스키마에 없는 추가 필드는 제거한다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 한다. 실패하면 `data.missing`에 필드 경로나 `work_id`, `chapter_id`, `state`를 담고, 해당 챕터의 extension 상태를 completed로 바꾸거나 확장 문제 파일을 남기면 안 된다. `body_text`가 들어오면 저장 전에 제거된다.
 
 `get_work_state(work_id)`는 상태 파일 전체를 반환한다. 알 수 없는 작업은 실패한다.
 
