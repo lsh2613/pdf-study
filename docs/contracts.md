@@ -118,8 +118,9 @@ pending 판정의 정확한 상태 매핑은 다음과 같다.
 `get_chapter_content(work_id, chapter_id)`는 챕터 입력을 반환한다. text 모드와 OCR 모드 모두 `text`가 들어간다. OCR 모드의 `text`는 `set_chapters` 시점에 PaddleOCR CPU로 선계산해 `chapters_raw/chN.json`에 저장한 본문이다. 등록되지 않은 `chapter_id`, skip 챕터, 아직 챕터가 설정되지 않은 작업은 실패한다.
 
 `get_chapter_summary(work_id, chapter_id)`는 완료·저장된 `summary`,
-`key_points`, 원문 문제 개수 상한 계산용 `source_char_count`만 반환한다. 원문
-`text`, `content_map`, 검토 내부 정보는 문제 생성 입력으로 반환하지 않는다.
+`key_points`, 원문 문제 개수 상한 계산용 `source_char_count`, `chapter_id`와
+선택적 `title` 식별 메타를 반환한다. 원문 `text`, `content_map`, 검토 내부 정보는
+문제 생성 입력으로 반환하지 않는다.
 요약이 completed가 아니거나 저장 요약의 필수값이 비어 있으면 상태 변경 없이
 실패하며, 성공하면 확장 문제 상태만 `in_progress`로 표시한다.
 

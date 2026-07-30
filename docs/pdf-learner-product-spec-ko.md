@@ -1130,7 +1130,9 @@ Pending 판정:
 
 ### 16.5 Raw 검증 범위
 
-Raw 본문 검증은 실제 pending 결과가 하나라도 있는 챕터에만 적용한다. 이미 모든
+Raw 본문 검증은 원문이 필요한 요약 pending 챕터에만 적용한다. 요약은 완료되고
+확장 문제만 pending인 챕터는 저장된 `summary`, `key_points`,
+`source_char_count`를 검증하므로 오래된 Raw가 없어도 재개할 수 있다. 이미 모든
 결과가 완료된 챕터의 오래된 Raw가 없어졌다는 이유로 남은 작업이나 최종화를 막지
 않는다.
 
@@ -1150,6 +1152,7 @@ Raw 본문 검증은 실제 pending 결과가 하나라도 있는 챕터에만 �
 | `set_chapters` | 작업 ID, 챕터 정의, 책 정보 | 세 form, 설정 원자 확정, Text/OCR Raw 준비 |
 | `get_generation_instructions` | 작업 ID | 프롬프트, 실행 방식, 결과별 pending 목록 제공 |
 | `get_chapter_content` | 작업 ID, 챕터 ID | 검증된 Raw 본문 반환, 요약 처리 시작 표시 |
+| `get_chapter_summary` | 작업 ID, 챕터 ID | 검증된 저장 요약과 문제 개수 상한 메타 반환, 확장 문제 처리 시작 표시 |
 | `save_chapter_result` | 작업 ID, 챕터 ID, 기본 결과 | 기본 결과 검증, 객관식 보기 배치, 원자 저장 |
 | `save_extension_result` | 작업 ID, 챕터 ID, 확장 결과 | 확장 결과 검증과 원자 저장 |
 | `get_work_state` | 작업 ID | 현재 상태와 오류 조회 |
