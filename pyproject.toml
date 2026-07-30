@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "PDF를 챕터별 요약 + 4유형 검증 문제로 변환하는 MCP 서버"
 requires-python = ">=3.10,<3.14"
 dependencies = [
-    "mcp>=1.28.0",
+    "mcp>=1.28.0,<2",
     "pymupdf>=1.24.0",
     "pillow>=10.0.0",
     "rich>=13.0.0",

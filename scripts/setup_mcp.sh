@@ -186,23 +186,31 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 if command -v uv >/dev/null 2>&1; then
-  echo "uv detected. Forcing uv to download and use Python 3.13 for the local environment..."
-  uv venv --python 3.13 "$VENV_DIR"
+  if [[ -x "$VENV_PY" ]]; then
+    echo "Reusing existing project-local venv: $VENV_DIR"
+  else
+    echo "uv detected. Forcing uv to download and use Python 3.13 for the local environment..."
+    uv venv --python 3.13 "$VENV_DIR"
+  fi
   VIRTUAL_ENV="$VENV_DIR" uv pip install -e "$INSTALL_SPEC"
 else
-  # Find a compatible Python version (< 3.14) because PaddlePaddle doesn't support 3.14 yet
-  for py in python3.13 python3.12 python3.11 python3.10 "$PYTHON_BIN"; do
-    if command -v "$py" >/dev/null 2>&1; then
-      py_ver=$("$py" -c 'import sys; print(sys.version_info.minor)')
-      if [ "$py_ver" -lt 14 ]; then
-        PYTHON_BIN="$py"
-        break
+  if [[ -x "$VENV_PY" ]]; then
+    echo "Reusing existing project-local venv: $VENV_DIR"
+  else
+    # Find a compatible Python version (< 3.14) because PaddlePaddle doesn't support 3.14 yet
+    for py in python3.13 python3.12 python3.11 python3.10 "$PYTHON_BIN"; do
+      if command -v "$py" >/dev/null 2>&1; then
+        py_ver=$("$py" -c 'import sys; print(sys.version_info.minor)')
+        if [ "$py_ver" -lt 14 ]; then
+          PYTHON_BIN="$py"
+          break
+        fi
       fi
-    fi
-  done
-  
-  echo "Using Python binary: $PYTHON_BIN"
-  "$PYTHON_BIN" -m venv "$VENV_DIR"
+    done
+
+    echo "Using Python binary: $PYTHON_BIN"
+    "$PYTHON_BIN" -m venv "$VENV_DIR"
+  fi
 
   echo "Installing pdf-study into: $VENV_DIR"
   "$VENV_PY" -m pip install -U pip setuptools wheel

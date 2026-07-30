@@ -12,7 +12,15 @@
 ./scripts/setup_mcp.sh
 ```
 
-이 명령은 저장소 안에 `.venv`를 만들고, 패키지를 editable로 설치하고, `mcp`, `fitz`, `PIL`, `rich`, `markdown_it`, `paddle`, `paddleocr`, `pdf_study` import를 확인한다. 검증이 끝나면 Claude Code, Codex CLI, Antigravity CLI의 **전역** MCP 설정을 자동 적용한다. 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다.
+이 명령은 저장소 안에 `.venv`가 없으면 새로 만들고, 이미 있으면 재사용한다. 그
+환경에 패키지를 editable로 다시 설치하고 `mcp`, `fitz`, `PIL`, `rich`,
+`markdown_it`, `paddle`, `paddleocr`, `pdf_study` import를 확인한다. 검증이 끝나면
+Claude Code, Codex CLI, Antigravity CLI의 **전역** MCP 설정을 자동 적용한다. 대상
+클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다.
+
+서버는 MCP Python SDK v1의 `mcp.server.fastmcp` API를 사용하므로 런타임 의존성은
+`mcp>=1.28,<2` 범위로 제한한다. MCP SDK v2로 전환하려면 import·Elicitation·응답
+계약을 별도 마이그레이션하고 전체 서버 테스트를 다시 통과시켜야 한다.
 
 Claude Code와 Antigravity CLI의 기존 JSON 설정이 손상됐거나 예상한 객체 구조가 아니면 기존 파일을 덮어쓰지 않고 설치를 중단한다. 이 두 설정은 같은 위치의 `.pdf-study.bak` 백업을 만든 뒤 원자적으로 교체한다. Codex CLI는 `codex mcp add`로 전역 등록한 뒤 `codex mcp get pdf-study`로 등록을 확인한다.
 

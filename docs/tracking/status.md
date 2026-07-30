@@ -15,9 +15,9 @@
 - HTML 사이트와 Markdown+TUI 출력이 같은 저장 결과에서 생성된다.
 - Markdown+TUI는 진행 중인 챕터를 다시 열면 저장된 답안을 건너뛰고 첫 미응답 문제부터 자동 재개한다.
 - HTML 결과는 macOS/Linux의 `start_study.sh`와 Windows의 `start_study.bat`을 함께 제공한다. 같은 컴퓨터의 프로젝트 환경에서 더블클릭하면 사용 가능한 loopback 포트를 자동 선택해 브라우저를 열며, 기존 `study_html.py` 직접 실행 정보도 호환을 위해 유지한다.
-- 기존 출력 작업은 `init_work`가 이어가기·교체·새 폴더 선택을 요구하며 자동 덮어쓰지 않는다. 렌더 결과는 `.pdf-study-manifest.json`의 관리 경로만 staging 세대로 교체하고, 같은 형식·학습 fingerprint에서만 진도를 유지한다.
+- 기존 출력 작업은 `init_work`가 이어가기·교체 선택을 요구하며 자동 덮어쓰지 않는다. 렌더 결과는 `.pdf-study-manifest.json`의 관리 경로만 staging 세대로 교체하고, 같은 형식·학습 fingerprint에서만 진도를 유지한다.
 - 서버 재시작 후 `resume_work`로 기존 `.work` 상태를 다시 등록할 수 있다.
-- 프로젝트 로컬 `.venv` 설치 스크립트와 전역 MCP 클라이언트 설정 자동 적용, 환경 확인 명령이 있다. 기본 설치는 런타임만 준비하고 `setup_mcp.sh --dev`는 pytest까지 준비·검증한다. Claude Code·Antigravity CLI의 손상된 기존 JSON 설정은 백업·덮어쓰지 않으며, Codex CLI는 공식 `codex mcp add` 뒤 조회로 등록을 확인한다.
+- 프로젝트 로컬 `.venv` 설치 스크립트와 전역 MCP 클라이언트 설정 자동 적용, 환경 확인 명령이 있다. 기존 venv는 재사용하며 MCP Python SDK는 FastMCP v1 호환 범위인 `>=1.28,<2`로 제한한다. 기본 설치는 런타임만 준비하고 `setup_mcp.sh --dev`는 pytest까지 준비·검증한다. Claude Code·Antigravity CLI의 손상된 기존 JSON 설정은 백업·덮어쓰지 않으며, Codex CLI는 공식 `codex mcp add` 뒤 조회로 등록을 확인한다.
 - 배포 wheel은 서버·렌더러·템플릿만 포함하고 개발용 `pdf_study.tests*` 패키지는 포함하지 않는다. 저장소에서의 pytest와 fixture 생성은 소스 트리를 사용한다.
 - HTML과 Markdown+TUI 렌더러 테스트는 `tests/conftest.py`의 공용 작업 준비 helper를 사용해 같은 MCP 저장·렌더 흐름을 검증한다.
 - 처리 모드 선택지는 `processing_mode_contract.py`가 Elicitation용 독립
@@ -47,9 +47,8 @@
 
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, Elicitation 강제와 공개 스키마, 최종 렌더링, 진도 저장 서버, 설치 스크립트와 MCP 설정 보호를 다룬다.
 - 테스트 시작 시 fixture 생성기 fingerprint와 PDF 해시를 확인해 오래된 합성 PDF를 자동 재생성한다.
-- 최근 확인: 현재 checkout의 시스템 Python 격리 import 환경에서 334개 중 333개
-  테스트가 통과했다. 나머지 `test_setup_script_dev_check_validates_pytest`는 이
-  checkout에 `.venv/bin/python`이 없어 설치 전제 확인에서 실패했다. 경고는
+- 최근 확인: 현재 checkout의 프로젝트 `.venv`에서
+  `.venv/bin/python -m pytest -q`로 335개 테스트가 모두 통과했다. 경고는
   PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
 
 ## 남은 일
