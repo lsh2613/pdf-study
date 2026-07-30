@@ -1,5 +1,6 @@
 # 문서 목록
 
+- pdf-learner-product-spec-ko.md: Codex CLI 우선 pdf-learner 제품 및 동작 명세
 - architecture.md: 서버 구성과 데이터 흐름
 - business-rules.md: PDF 학습 자료 생성 규칙
 - security.md: 로컬 PDF와 네트워크 경계의 보호 기준

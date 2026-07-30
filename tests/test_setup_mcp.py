@@ -70,7 +70,7 @@ def test_pyproject_has_one_dev_dependency_definition_without_unused_plugin():
     assert "pytest-mock" not in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
 
-def test_runtime_pins_mcp_v1_with_fastmcp_elicitation():
+def test_runtime_requires_mcp_v1_with_fastmcp_elicitation():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert "mcp>=1.28.0,<2" in project["project"]["dependencies"]

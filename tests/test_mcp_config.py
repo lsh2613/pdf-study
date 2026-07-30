@@ -86,6 +86,27 @@ def test_global_config_uses_home_dir_not_project_dir(tmp_path: Path) -> None:
     assert not (project_dir / ".claude.json").exists()
 
 
+def test_antigravity_cli_uses_current_global_mcp_config_path(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    home_dir = tmp_path / "home"
+    project_dir.mkdir()
+    home_dir.mkdir()
+
+    paths = apply_mcp_config.apply_configs(
+        command=str(project_dir / ".venv/bin/python"),
+        cache_dir=project_dir / ".paddleocr",
+        project_dir=project_dir,
+        scope="global",
+        targets=["antigravity-cli"],
+        home_dir=home_dir,
+    )
+
+    expected = home_dir / ".gemini/config/mcp_config.json"
+    assert paths == [expected]
+    assert expected.exists()
+    assert not (home_dir / ".gemini/antigravity-cli/mcp_config.json").exists()
+
+
 def test_config_paths_rejects_project_local_scope(tmp_path: Path) -> None:
     with pytest.raises(apply_mcp_config.ConfigError, match="global"):
         apply_mcp_config.config_paths("local", tmp_path)
@@ -110,7 +131,7 @@ def test_invalid_existing_config_fails_without_modifying_any_target(tmp_path: Pa
         )
 
     assert claude_config.read_text(encoding="utf-8") == '{"mcpServers":'
-    assert not (home_dir / ".gemini/antigravity-cli/mcp_config.json").exists()
+    assert not (home_dir / ".gemini/config/mcp_config.json").exists()
 
 
 def test_existing_config_is_backed_up_before_atomic_replacement(tmp_path: Path) -> None:
@@ -210,6 +231,38 @@ def test_codex_never_policy_becomes_mcp_elicitation_only(tmp_path: Path) -> None
     ) == original
 
 
+def test_codex_missing_policy_becomes_mcp_elicitation_only(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "config.toml"
+    original = (
+        'model = "gpt-test"\n'
+        "\n"
+        "[mcp_servers.other]\n"
+        'command = "other"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+
+    changed = apply_mcp_config.ensure_codex_elicitation_allowed(config)
+
+    assert changed is True
+    parsed = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert parsed["approval_policy"] == {
+        "granular": {
+            "sandbox_approval": False,
+            "rules": False,
+            "mcp_elicitations": True,
+            "request_permissions": False,
+            "skill_approval": False,
+        },
+    }
+    assert parsed["model"] == "gpt-test"
+    assert parsed["mcp_servers"]["other"]["command"] == "other"
+    assert config.with_name("config.toml.pdf-study.bak").read_text(
+        encoding="utf-8"
+    ) == original
+
+
 @pytest.mark.parametrize("policy", ["on-request", "untrusted"])
 def test_codex_interactive_policy_is_left_unchanged(
     tmp_path: Path, policy: str,
@@ -303,4 +356,7 @@ def test_config_cli_updates_never_policy_before_codex_registration(
     parsed = tomllib.loads(config.read_text(encoding="utf-8"))
     assert parsed["approval_policy"]["granular"]["mcp_elicitations"] is True
     assert len(registration_calls) == 1
-    assert "Updated Codex approval policy" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Updated Codex approval policy" in output
+    assert "--dangerously-bypass-approvals-and-sandbox" in output
+    assert "codex --sandbox danger-full-access" in output

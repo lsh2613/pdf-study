@@ -26,9 +26,10 @@ Claude Code와 Antigravity CLI의 기존 JSON 설정이 손상됐거나 예상�
 아니면 기존 파일을 덮어쓰지 않고 설치를 중단한다. 이 두 설정은 같은 위치의
 `.pdf-study.bak` 백업을 만든 뒤 원자적으로 교체한다. Codex CLI는
 `codex mcp add`로 전역 등록한 뒤 `codex mcp get pdf-study`로 등록을 확인한다.
-Codex 전역 `config.toml`의 `approval_policy`가 정확히 `"never"`이면 다른 승인
-종류는 계속 자동 거절하면서 MCP form만 표시하는 granular 정책으로 바꾼다.
-변경 전 파일은 `config.toml.pdf-study.bak`으로 백업한다.
+Codex 전역 `config.toml`의 `approval_policy`가 없거나 정확히 `"never"`이면 다른
+승인 종류는 계속 자동 거절하면서 MCP form만 표시하는 granular 정책으로 바꾼다.
+정책이 없더라도 실행 surface의 기본값이 `never`로 확정될 수 있으므로 명시적으로
+설정한다. 변경 전 파일은 `config.toml.pdf-study.bak`으로 백업한다.
 
 기본 설치는 MCP 실행에 필요한 런타임 의존성만 설치한다. 테스트까지 실행할 개발 환경이 필요하면 다음 명령을 사용한다.
 
@@ -123,16 +124,25 @@ Elicitation 미지원 세션은 상태를 바꾸지 않고 실패한다.
 
 Codex CLI에서는 MCP form을 표시할 수 있는 대화형 승인 정책으로 세션을 시작해야
 한다. `approval_policy=never`인 세션은 서버가 올바른 form을 보내도 이를 자동
-거절한다. 일반 대화형 실행은 다음처럼 시작할 수 있다.
+거절한다. `--dangerously-bypass-approvals-and-sandbox`(`--yolo`)는 명령줄에서
+`never`를 강제하므로 전역 `config.toml`보다 우선하며 MCP form도 숨긴다. 일반
+대화형 실행은 다음처럼 시작할 수 있다.
 
 ```bash
 codex --ask-for-approval on-request
 ```
 
+파일시스템 sandbox는 해제하되 전역 granular 정책의 MCP form은 유지하려면 다음처럼
+승인 우회 플래그 없이 sandbox만 지정한다.
+
+```bash
+codex --sandbox danger-full-access
+```
+
 다른 승인 종류는 자동 거절하면서 MCP form만 표시하려면 Codex의 granular
 `approval_policy`에서 `mcp_elicitations=true`를 사용한다. 기본 설치 스크립트는
-전역 설정이 정확히 `approval_policy="never"`일 때만 다음과 같은 정책으로
-자동 변환한다.
+전역 설정에 `approval_policy`가 없거나 정확히 `approval_policy="never"`일 때
+다음과 같은 정책으로 자동 변환한다.
 
 ```toml
 approval_policy = { granular = { sandbox_approval = false, rules = false, mcp_elicitations = true, request_permissions = false, skill_approval = false } }
@@ -140,10 +150,12 @@ approval_policy = { granular = { sandbox_approval = false, rules = false, mcp_el
 
 이미 `on-request`, `untrusted`이거나 MCP Elicitation이 활성화된 granular 정책이면
 설정을 바꾸지 않는다. granular 정책에서 `mcp_elicitations=false`를 명시한 경우에는
-사용자의 명시적 선택을 덮어쓰지 않고 설치를 중단한다. 명령줄의 `-a never`, 선택한
-profile, 조직의 managed policy처럼 전역 `config.toml`보다 우선순위가 높은 설정은
-설치 스크립트가 바꿀 수 없다. 설정 변경은 이미 실행 중인 세션에는 반영되지 않으므로
-설치 뒤 Codex를 새로 시작해야 한다.
+사용자의 명시적 선택을 덮어쓰지 않고 설치를 중단한다. 명령줄의 `-a never`,
+`--dangerously-bypass-approvals-and-sandbox`, 선택한 profile, 조직의 managed
+policy처럼 전역 `config.toml`보다 우선순위가 높은 설정은 설치 스크립트가 바꿀 수
+없다. 설치 스크립트는 Codex 등록 뒤 이 우선순위 주의와 form을 유지하는 실행 명령을
+항상 출력한다. 설정 변경은 이미 실행 중인 세션에는 반영되지 않으므로 설치 뒤
+Codex를 새로 시작해야 한다.
 
 고정 출력 폴더에 기존 관리 작업이나 완료 결과가 있으면 `init_work`는 같은 호출
 안에서 `resume`/`replace` Elicitation을 연다. `replace`는 기존 `.work`를 새

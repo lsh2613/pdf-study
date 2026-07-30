@@ -35,6 +35,13 @@ _CODEX_ELICITATION_POLICY = (
     "} }"
 )
 
+_CODEX_ELICITATION_LAUNCH_GUIDANCE = (
+    "Launch Codex without --dangerously-bypass-approvals-and-sandbox, --yolo, "
+    "or -a never; those CLI flags override config.toml and suppress MCP forms. "
+    "For full filesystem access with MCP forms, use: "
+    "codex --sandbox danger-full-access"
+)
+
 
 def config_paths(
     scope: str,
@@ -47,7 +54,7 @@ def config_paths(
     home = home_dir or Path.home()
     return {
         "claude": home / ".claude.json",
-        "antigravity-cli": home / ".gemini/antigravity-cli/mcp_config.json",
+        "antigravity-cli": home / ".gemini/config/mcp_config.json",
     }
 
 
@@ -165,10 +172,12 @@ def _restore(path: Path, snapshot: tuple[bool, bytes | None, int]) -> None:
 
 
 def ensure_codex_elicitation_allowed(config_path: Path) -> bool:
-    """Convert only a blocking global ``never`` policy to MCP-only prompting.
+    """Ensure the global policy allows MCP forms while other prompts fail closed.
 
-    Returns ``True`` when the Codex config was changed. Other interactive
-    policies and an already-compatible granular policy are left untouched.
+    An omitted policy is made explicit because a client or surface default can
+    otherwise resolve it to ``never`` for the active thread. Returns ``True``
+    when the Codex config was changed. Other interactive policies and an
+    already-compatible granular policy are left untouched.
     """
     if not config_path.exists():
         return False
@@ -184,8 +193,6 @@ def ensure_codex_elicitation_allowed(config_path: Path) -> bool:
         raise ConfigError(f"{config_path}: invalid TOML ({exc})") from exc
 
     policy = data.get("approval_policy")
-    if policy is None:
-        return False
     if isinstance(policy, str) and policy in {"on-request", "untrusted"}:
         return False
     if isinstance(policy, dict):
@@ -199,34 +206,45 @@ def ensure_codex_elicitation_allowed(config_path: Path) -> bool:
             f"{config_path}: granular approval_policy explicitly does not allow "
             "mcp_elicitations; enable it manually"
         )
-    if policy != "never":
+    if policy not in {None, "never"}:
         raise ConfigError(
             f"{config_path}: unsupported approval_policy value {policy!r}"
         )
 
     first_table = re.search(r"(?m)^[ \t]*\[[^\r\n]", text)
-    root_text = text[:first_table.start()] if first_table else text
-    assignment = re.search(
-        r"""(?mx)
-        ^(?P<indent>[ \t]*)
-        approval_policy[ \t]*=[ \t]*
-        (?P<quote>["'])never(?P=quote)
-        (?P<trailing>[ \t]*(?:\#[^\r\n]*)?)
-        (?P<newline>\r?\n|$)
-        """,
-        root_text,
-    )
-    if assignment is None:
-        raise ConfigError(
-            f"{config_path}: could not safely locate the root "
-            "approval_policy = \"never\" assignment"
+    if policy is None:
+        insertion = first_table.start() if first_table else len(text)
+        prefix = text[:insertion]
+        separator = "" if not prefix or prefix.endswith(("\n", "\r")) else "\n"
+        updated = (
+            prefix
+            + separator
+            + _CODEX_ELICITATION_POLICY
+            + "\n"
+            + text[insertion:]
         )
-
-    replacement = (
-        f"{assignment.group('indent')}{_CODEX_ELICITATION_POLICY}"
-        f"{assignment.group('trailing')}{assignment.group('newline')}"
-    )
-    updated = text[:assignment.start()] + replacement + text[assignment.end():]
+    else:
+        root_text = text[:first_table.start()] if first_table else text
+        assignment = re.search(
+            r"""(?mx)
+            ^(?P<indent>[ \t]*)
+            approval_policy[ \t]*=[ \t]*
+            (?P<quote>["'])never(?P=quote)
+            (?P<trailing>[ \t]*(?:\#[^\r\n]*)?)
+            (?P<newline>\r?\n|$)
+            """,
+            root_text,
+        )
+        if assignment is None:
+            raise ConfigError(
+                f"{config_path}: could not safely locate the root "
+                "approval_policy = \"never\" assignment"
+            )
+        replacement = (
+            f"{assignment.group('indent')}{_CODEX_ELICITATION_POLICY}"
+            f"{assignment.group('trailing')}{assignment.group('newline')}"
+        )
+        updated = text[:assignment.start()] + replacement + text[assignment.end():]
     backup_path = config_path.with_name(config_path.name + ".pdf-study.bak")
     try:
         shutil.copy2(config_path, backup_path)
@@ -347,6 +365,7 @@ def main() -> int:
                 "(CLI, profile, or managed overrides may still apply)"
             )
         print("✅ Successfully registered and verified Codex CLI MCP config")
+        print(f"⚠️ {_CODEX_ELICITATION_LAUNCH_GUIDANCE}")
     return 0
 
 

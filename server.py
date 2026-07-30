@@ -525,9 +525,12 @@ def _choice_lines(choices: list[dict[str, Any]]) -> str:
 
 def _elicitation_cancelled(data: dict[str, Any]) -> dict[str, Any]:
     return _err(
-        "사용자가 필수 선택을 승인하지 않아 다음 단계를 실행하지 않았습니다.",
+        "필수 Elicitation이 승인 응답 없이 종료되어 다음 단계를 실행하지 않았습니다.",
         data=_without_choice_fallback(data),
-        next_action="같은 도구를 다시 호출하면 서버가 Elicitation을 다시 엽니다.",
+        next_action=(
+            "폼이 표시되지 않았다면 클라이언트의 approval_policy에서 MCP "
+            "Elicitation이 허용되는지 확인하고 새 세션에서 같은 도구를 다시 호출하세요."
+        ),
     )
 
 

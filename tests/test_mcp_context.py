@@ -144,6 +144,21 @@ def test_init_work_uses_fixed_server_result_root_without_workspace_context(
     assert not (server_cwd / "result").exists()
 
 
+def test_init_work_cancel_does_not_claim_the_user_rejected_an_unshown_form(
+    ko_short,
+):
+    response = asyncio.run(server.init_work(
+        pdf_path=str(ko_short),
+        ctx=ElicitationContext(responses=[{"_action": "cancel"}]),
+    ))
+
+    assert response["ok"] is False
+    assert "사용자" not in response["error"]
+    assert "승인 응답 없이 종료" in response["error"]
+    assert "approval_policy" in response["next_action"]
+    assert not (server.RESULT_ROOT / ko_short.stem).exists()
+
+
 def test_choice_tool_descriptions_never_advertise_removed_inputs():
     choice_tool_names = {
         "init_work",

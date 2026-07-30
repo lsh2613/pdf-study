@@ -1398,7 +1398,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "markdown-it-py", specifier = ">=2.2.0" },
-    { name = "mcp", specifier = ">=1.0.0" },
+    { name = "mcp", specifier = ">=1.28.0,<2" },
     { name = "paddleocr", specifier = ">=3.0.0" },
     { name = "paddlepaddle" },
     { name = "pillow", specifier = ">=10.0.0" },
