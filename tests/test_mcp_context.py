@@ -1,4 +1,4 @@
-"""MCP 요청 컨텍스트 기반 cwd와 사용자 선택 강제 계약."""
+"""고정 서버 result 루트와 MCP 사용자 선택 강제 계약."""
 from __future__ import annotations
 
 import asyncio
@@ -86,7 +86,7 @@ def test_choice_tools_fail_closed_without_elicitation(tmp_path, ko_short):
     assert not (tmp_path / "result").exists()
 
 
-def test_init_work_never_falls_back_to_mcp_server_cwd(
+def test_init_work_uses_fixed_server_result_root_without_workspace_context(
     tmp_path, ko_short, monkeypatch,
 ):
     server_cwd = tmp_path / "server-cwd"
@@ -95,14 +95,17 @@ def test_init_work_never_falls_back_to_mcp_server_cwd(
 
     response = asyncio.run(server.init_work(
         pdf_path=str(ko_short),
-        ctx=ElicitationContext(),
+        ctx=ElicitationContext(responses=[{
+            "enable_short_answer": False,
+            "enable_reflection": False,
+            "enable_extension": False,
+        }]),
     ))
 
-    assert response["ok"] is False
-    assert response["data"]["required_context"] == ["workspace_or_root"]
-    assert "required_parameters" not in response["data"]
-    _assert_no_removed_workflow_inputs(response["error"])
-    _assert_no_removed_workflow_inputs(response["next_action"])
+    expected = server.RESULT_ROOT / ko_short.stem
+    assert response["ok"] is True, response
+    assert response["data"]["output_dir"] == str(expected)
+    assert expected.is_dir()
     assert not (server_cwd / "result").exists()
 
 
@@ -193,7 +196,7 @@ def test_scan_toc_with_ocr_filters_private_choice_data(
     _assert_no_removed_workflow_inputs(response)
 
 
-def test_mcp_init_work_uses_single_codex_workspace_as_agent_cwd(
+def test_mcp_init_work_ignores_request_workspace_for_fixed_server_root(
     tmp_path, ko_short, monkeypatch,
 ):
     agent_cwd = tmp_path / "agent-cwd"
@@ -217,10 +220,11 @@ def test_mcp_init_work_uses_single_codex_workspace_as_agent_cwd(
         )
     )
 
-    expected = agent_cwd / "result" / ko_short.stem
+    expected = server.RESULT_ROOT / ko_short.stem
     assert response["ok"] is True, response
     assert response["data"]["output_dir"] == str(expected)
     assert expected.is_dir()
+    assert not (agent_cwd / "result").exists()
     assert not (server_cwd / "result").exists()
     _assert_no_choice_fallback(response)
 
@@ -652,10 +656,12 @@ def test_mcp_cleanup_requires_elicited_confirmation(monkeypatch):
     assert "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다." in ctx.messages[0]
 
 
-def test_fastmcp_round_trip_uses_request_workspace_and_elicitation(
+def test_fastmcp_round_trip_uses_fixed_server_root_and_elicitation(
     tmp_path, ko_short,
 ):
     messages = []
+    request_workspace = tmp_path / "request-workspace"
+    request_workspace.mkdir()
 
     async def on_elicit(context, params):
         messages.append(params.message)
@@ -680,15 +686,18 @@ def test_fastmcp_round_trip_uses_request_workspace_and_elicitation(
                 },
                 meta={
                     "x-codex-turn-metadata": {
-                        "workspaces": {str(tmp_path): {"has_changes": False}},
+                        "workspaces": {
+                            str(request_workspace): {"has_changes": False},
+                        },
                     },
                 },
             )
             init_data = initialized.structuredContent
             assert init_data is not None
             assert init_data["data"]["output_dir"] == str(
-                tmp_path / "result" / "ko_short",
+                server.RESULT_ROOT / "ko_short",
             )
+            assert not (request_workspace / "result").exists()
 
             scanned = await client.call_tool(
                 "scan_pdf",

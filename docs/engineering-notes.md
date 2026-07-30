@@ -82,20 +82,19 @@ MCP wrapper는 만들지 않는다. 회귀 테스트는 7개 등록 함수가 as
 `str` 필드의 JSON Schema `enum`으로 표시하고, 수신값을 서버 허용 목록으로 다시
 검증한다.
 
-## 출력 폴더가 서버 cwd와 agent cwd 사이를 이동
+## 출력 폴더가 요청마다 이동
 
-증상: 같은 PDF의 기본 결과가 `<agent cwd>/result/<pdf-name>`과 MCP 서버가 오래전에
-시작된 경로의 `result/<pdf-name>` 사이를 오간다.
+증상: 같은 PDF의 결과가 요청 workspace, MCP root, MCP 서버를 시작한 cwd에 따라
+서로 다른 `result/<pdf-name>`으로 생성되어 사용자가 결과를 찾기 어렵다.
 
-원인: MCP 서버 프로세스의 `Path.cwd()`는 호출별 agent cwd가 아니다. 에이전트가
-간헐적으로 절대 `output_dir`을 넣을 때만 원하는 경로가 사용되어 결과가 흔들린다.
+원인: 요청 context나 프로세스 `Path.cwd()`는 서버 설치 위치와 별개이며 클라이언트와
+호출마다 달라질 수 있다.
 
-대응: 등록된 MCP 함수는 요청 메타의 단일 Codex workspace를 우선 사용하고, 없으면 단일
-MCP root를 사용한다. 공개 `output_dir` 없이 그 아래 `result/<pdf-name>`을 계산한다.
-workspace가 없거나 여러 개라 모호하면 서버 cwd로 폴백하지 않고 상태 변경 없이
-실패한다. 실패 응답은 필요한 세션 context가 `workspace_or_root`임을 표시하고,
-클라이언트가 정확히 하나의 root를 노출한 뒤 같은 공개 호출을 재시도하도록
-안내한다.
+대응: `server.py`의 실제 위치를 MCP 서버 프로젝트 루트로 삼고, 공개 `output_dir`
+없이 그 아래 `result/<pdf-name>`만 사용한다. 요청 workspace, MCP root, 프로세스
+cwd는 경로 계산에 참여하지 않는다. `list_study_results`는 같은 고정 result 루트의
+직접 하위 디렉터리를 정렬된 절대 경로로 반환한다. 조회 결과에서는 숨김 staging,
+일반 파일, 심볼릭 링크를 제외하고 파일 시스템 상태를 변경하지 않는다.
 
 ## 챕터 설정 검증과 처리 상태
 

@@ -26,6 +26,14 @@ def pytest_configure(config):
     ensure_fixtures()
 
 
+@pytest.fixture(autouse=True)
+def isolated_server_result_root(tmp_path, monkeypatch) -> Path:
+    """고정 서버 result 루트가 테스트마다 임시 디렉터리를 사용하게 한다."""
+    result_root = tmp_path / "result"
+    monkeypatch.setattr(server, "RESULT_ROOT", result_root)
+    return result_root
+
+
 @pytest.fixture(scope="session")
 def fixtures_dir() -> Path:
     return FIXTURES_DIR

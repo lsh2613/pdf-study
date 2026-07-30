@@ -385,10 +385,10 @@ def test_init_work_rejects_missing_pdf(tmp_path):
     assert r["ok"] is False
 
 
-def test_init_work_default_output_dir_uses_agent_cwd_result_pdf_basename(
+def test_init_work_uses_server_result_root_and_pdf_basename(
     tmp_path, ko_short,
 ):
-    """output_dir 미지정 시 명시된 agent cwd 아래 기본 폴더를 만든다."""
+    """init_work는 요청 workspace와 무관한 서버 고정 폴더를 만든다."""
     r = asyncio.run(server.init_work(
         pdf_path=str(ko_short),
         ctx=ElicitationContext(cwd=tmp_path, responses=[{
@@ -401,8 +401,8 @@ def test_init_work_default_output_dir_uses_agent_cwd_result_pdf_basename(
     _check_envelope(r)
     assert r["ok"], r
     out = r["data"]["output_dir"]
-    assert out == str(tmp_path / "result" / "ko_short")
-    assert (tmp_path / "result" / "ko_short" / ".work" / "state.json").exists()
+    assert out == str(server.RESULT_ROOT / "ko_short")
+    assert (server.RESULT_ROOT / "ko_short" / ".work" / "state.json").exists()
 
 
 def test_init_work_docstring_tells_agents_when_to_use_mcp():
@@ -417,21 +417,21 @@ def test_init_work_docstring_tells_agents_when_to_use_mcp():
     assert "scan_pdf는 OCR 모델 다운로드/로드/실행을 하지 않고" in doc
 
 
-def test_init_work_docstring_rejects_server_startup_directory_fallback():
+def test_init_work_docstring_describes_stable_server_project_root():
     doc = server.init_work.__doc__ or ""
 
-    assert "현재 agent workspace" in doc
-    assert "서버 실행 cwd로 폴백하지 않고" in doc
+    assert "MCP 서버 프로젝트 루트" in doc
+    assert "요청 workspace나 프로세스 cwd에 따라" in doc
 
 
-def test_init_work_docstring_describes_fixed_workspace_output_path():
+def test_init_work_docstring_describes_fixed_server_output_path():
     doc = server.init_work.__doc__ or ""
 
-    assert "현재 agent workspace" in doc
+    assert "MCP 서버 프로젝트 루트" in doc
     assert "result/<pdf_basename>" in doc
 
 
-def test_init_work_default_dir_sanitizes_pdf_name(tmp_path):
+def test_init_work_fixed_dir_sanitizes_pdf_name(tmp_path):
     """공백/특수문자가 있는 PDF 파일명은 _ 로 치환."""
     weird = tmp_path / "리팩터링 2판-페이지 1.pdf"
     weird.write_bytes(b"%PDF-1.4")  # 진짜 PDF는 아니지만 init_work는 존재만 확인
@@ -446,7 +446,44 @@ def test_init_work_default_dir_sanitizes_pdf_name(tmp_path):
     ))
     assert r["ok"], r
     out = r["data"]["output_dir"]
-    assert out == str(tmp_path / "result" / "리팩터링_2판-페이지_1")
+    assert out == str(server.RESULT_ROOT / "리팩터링_2판-페이지_1")
+
+
+def test_list_study_results_returns_sorted_pdf_named_paths(tmp_path):
+    server.RESULT_ROOT.mkdir()
+    (server.RESULT_ROOT / "zeta").mkdir()
+    (server.RESULT_ROOT / "가나다").mkdir()
+    (server.RESULT_ROOT / "not-a-result.txt").write_text("x", encoding="utf-8")
+    (server.RESULT_ROOT / ".render-staging").mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    (server.RESULT_ROOT / "linked").symlink_to(external, target_is_directory=True)
+
+    response = server.list_study_results()
+
+    _check_envelope(response)
+    assert response["ok"] is True
+    assert response["data"] == {
+        "result_root": str(server.RESULT_ROOT),
+        "result_paths": [
+            str(server.RESULT_ROOT / "zeta"),
+            str(server.RESULT_ROOT / "가나다"),
+        ],
+    }
+    assert response["next_action"] is None
+
+
+def test_list_study_results_returns_empty_without_creating_result_root():
+    assert not server.RESULT_ROOT.exists()
+
+    response = server.list_study_results()
+
+    assert response["ok"] is True
+    assert response["data"] == {
+        "result_root": str(server.RESULT_ROOT),
+        "result_paths": [],
+    }
+    assert not server.RESULT_ROOT.exists()
 
 
 def test_init_work_existing_output_returns_metadata_without_fallback(tmp_path, ko_short):

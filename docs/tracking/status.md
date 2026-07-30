@@ -30,16 +30,16 @@
   함수 하나씩만 유지한다. 같은 작업을 선택 인자로 직접 실행하는 `_impl` 함수나
   별도 MCP wrapper는 제거했다.
 - 공개 도구 설명, 오류와 `next_action`은 등록된 MCP 입력만 호출 예시에 사용하며,
-  제거된 선택 인자나 번호형 자유 텍스트 fallback을 다시 안내하지 않는다. workspace
-  식별 실패는 클라이언트가 단일 workspace 또는 file root를 노출한 뒤 같은 호출을
-  재시도하도록 안내한다.
+  제거된 선택 인자나 번호형 자유 텍스트 fallback을 다시 안내하지 않는다.
 - 새 작업의 고정 출력 경로 안내와 문제 유형·선택적 학습자 정보, OCR 언어, 챕터
   구성·범위, 본문 추출 방식, 실행 방식, 최종 형식, 기존 작업 재개·교체와 `.work`
   정리를 실행 직전에 서버가 직접 확인한다. `set_chapters`의 세 선택은 독립 form으로
   순서대로 받고 모두 승인된 뒤에만 상태 변경을 시작한다.
-- `init_work(pdf_path)`와 `resume_work(pdf_path)`는 요청의 단일 agent workspace
-  아래 `result/<pdf-name>`을 고정 경로로 사용한다. 공개 `output_dir`은 없고,
-  workspace가 없거나 모호하면 서버 cwd로 폴백하지 않고 상태 변경 없이 실패한다.
+- `init_work(pdf_path)`와 `resume_work(pdf_path)`는 MCP 서버 프로젝트 루트 아래
+  `result/<pdf-name>`을 고정 경로로 사용한다. 공개 `output_dir`은 없고 요청
+  workspace, MCP root, 프로세스 cwd에 따라 경로가 달라지지 않는다.
+- 입력 없는 `list_study_results()`는 고정 result 루트의 PDF별 직접 하위
+  디렉터리를 정렬된 절대 경로로 반환하고 조회 중 상태를 변경하지 않는다.
 - 완료된 렌더 결과는 `cleanup_work`로 렌더링을 다시 하지 않고 `.work` 중간 데이터만 제거할 수 있다. 미완료 작업은 재개 데이터를 보호하기 위해 거부한다.
 - `finalize_study`는 `force` 없이도 완료분 자료를 만들며, 미반영 챕터의 결과 유형·상태·오류는 성공 응답의 `omitted_chapters`와 실행 안내로 알린다.
 
@@ -47,7 +47,10 @@
 
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, Elicitation 강제와 공개 스키마, 최종 렌더링, 진도 저장 서버, 설치 스크립트와 MCP 설정 보호를 다룬다.
 - 테스트 시작 시 fixture 생성기 fingerprint와 PDF 해시를 확인해 오래된 합성 PDF를 자동 재생성한다.
-- 최근 확인: 현재 checkout에서 `.venv/bin/python -m pytest -q`가 332개 테스트를 모두 통과했다. 경고는 PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
+- 최근 확인: 현재 checkout의 시스템 Python 격리 import 환경에서 334개 중 333개
+  테스트가 통과했다. 나머지 `test_setup_script_dev_check_validates_pytest`는 이
+  checkout에 `.venv/bin/python`이 없어 설치 전제 확인에서 실패했다. 경고는
+  PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
 
 ## 남은 일
 

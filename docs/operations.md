@@ -98,10 +98,10 @@ fixture 생성기·입력 폰트·PDF 파일 해시가 현재 manifest와 다르
 
 ## 결과물 실행
 
-`init_work(pdf_path)`와 `resume_work(pdf_path)`는 MCP 요청의 단일 Codex workspace
-또는 단일 MCP file root 아래 `result/<pdf-name>`만 사용한다. 공개 `output_dir`
-입력은 없다. workspace가 없거나 여러 개라 모호하면 서버는 MCP 프로세스 cwd를
-쓰지 않고 상태 변경 없이 실패한다.
+`init_work(pdf_path)`와 `resume_work(pdf_path)`는 `server.py`가 위치한 MCP 서버
+프로젝트 루트 아래 `result/<pdf-name>`만 사용한다. 공개 `output_dir` 입력은 없고
+요청 workspace, MCP file root, 프로세스 cwd에 따라 결과 위치가 달라지지 않는다.
+생성됐거나 진행 중인 PDF별 절대 경로는 입력 없는 `list_study_results()`로 조회한다.
 
 필수 선택을 사용하는 도구는 실행 직전에 MCP form elicitation을 연다. 공개 도구
 스키마에는 선택 파라미터가 없고 구조화 fallback도 없다. 거절·취소 또는

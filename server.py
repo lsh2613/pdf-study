@@ -10,7 +10,6 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
 
 from mcp import types
 from mcp.server.fastmcp import Context, FastMCP
@@ -26,11 +25,14 @@ MCP_INSTRUCTIONS = """
 사용자 선택은 각 도구가 시작하는 MCP form elicitation으로만 받는다. 에이전트가
 선택값을 도구 인자로 제공하거나 사용자를 대신해 응답하지 않는다. form elicitation을
 지원하지 않는 클라이언트에서는 선택이 필요한 도구가 상태 변경 없이 실패한다.
-출력 폴더는 MCP 서버 프로세스 cwd가 아니라 현재 호출자의 단일 workspace 아래
-result/<pdf-name>으로 계산한다.
+출력 폴더는 MCP 서버 프로젝트 루트 아래 result/<pdf-name>으로 계산한다.
+완료되었거나 진행 중인 결과 경로는 list_study_results로 조회한다.
 """.strip()
 
 mcp = FastMCP("pdf-study-builder", instructions=MCP_INSTRUCTIONS)
+
+SERVER_ROOT = Path(__file__).resolve().parent
+RESULT_ROOT = SERVER_ROOT / "result"
 
 
 _OUTPUT_FORMAT_CHOICES = (
@@ -470,39 +472,6 @@ def _pdf_name_slug(pdf_path: str) -> str:
     return safe or "study"
 
 
-def _context_meta(ctx: Context) -> dict[str, Any]:
-    """MCP 요청의 확장 메타를 일반 dict로 정규화한다."""
-    meta = getattr(getattr(ctx, "request_context", None), "meta", None)
-    if meta is None:
-        return {}
-    if isinstance(meta, dict):
-        return meta
-    if hasattr(meta, "model_dump"):
-        dumped = meta.model_dump(by_alias=True)
-        return dumped if isinstance(dumped, dict) else {}
-    return {}
-
-
-def _valid_workspace_paths(values: Any) -> list[Path]:
-    if not isinstance(values, dict):
-        return []
-    paths: list[Path] = []
-    for raw_path in values:
-        if not isinstance(raw_path, str):
-            continue
-        candidate = Path(raw_path).expanduser()
-        if candidate.is_absolute() and candidate.is_dir():
-            paths.append(candidate.resolve())
-    return list(dict.fromkeys(paths))
-
-
-def _codex_workspace_paths(ctx: Context) -> list[Path]:
-    turn_meta = _context_meta(ctx).get("x-codex-turn-metadata")
-    if not isinstance(turn_meta, dict):
-        return []
-    return _valid_workspace_paths(turn_meta.get("workspaces"))
-
-
 def _client_supports(ctx: Context, capability: types.ClientCapabilities) -> bool:
     checker = getattr(getattr(ctx, "session", None), "check_client_capability", None)
     if not callable(checker):
@@ -529,71 +498,9 @@ def _elicitation_required(ctx: Context) -> dict[str, Any] | None:
     )
 
 
-async def _agent_cwd(ctx: Context) -> Path | None:
-    """현재 호출자의 단일 workspace를 찾는다. 서버 프로세스 cwd는 쓰지 않는다."""
-    codex_paths = _codex_workspace_paths(ctx)
-    if len(codex_paths) == 1:
-        return codex_paths[0]
-    if len(codex_paths) > 1:
-        return None
-
-    if not _client_supports(
-        ctx,
-        types.ClientCapabilities(roots=types.RootsCapability()),
-    ):
-        return None
-    try:
-        result = await ctx.session.list_roots()
-    except Exception:  # 클라이언트 roots 구현 실패는 명시 경로 요청으로 복구한다.
-        return None
-
-    root_paths: list[Path] = []
-    for root in result.roots:
-        parsed = urlparse(str(root.uri))
-        if parsed.scheme != "file":
-            continue
-        candidate = Path(unquote(parsed.path))
-        if candidate.is_absolute() and candidate.is_dir():
-            root_paths.append(candidate.resolve())
-    root_paths = list(dict.fromkeys(root_paths))
-    return root_paths[0] if len(root_paths) == 1 else None
-
-
-def _missing_output_dir(pdf_path: str) -> dict[str, Any]:
-    suggested_suffix = str(Path("result") / _pdf_name_slug(pdf_path))
-    return _err(
-        "현재 agent workspace 또는 MCP file root를 하나로 식별할 수 없어 고정 출력 "
-        "폴더를 계산하지 않았습니다. MCP 서버 실행 경로로 대체하지 않습니다.",
-        data={
-            "required_context": ["workspace_or_root"],
-            "suggested_relative_path": suggested_suffix,
-        },
-        next_action=(
-            "MCP 세션에 정확히 하나의 Codex workspace 또는 file root를 노출한 뒤 "
-            f"같은 도구를 동일한 입력으로 다시 호출하세요. 결과는 {suggested_suffix}에 "
-            "생성됩니다."
-        ),
-    )
-
-
-def _resolve_output_dir(
-    output_dir: str,
-    pdf_path: str,
-    *,
-    agent_cwd: Path | None = None,
-) -> str | None:
-    raw = (output_dir or "").strip()
-    if not raw:
-        if agent_cwd is None:
-            return None
-        return str((agent_cwd / "result" / _pdf_name_slug(pdf_path)).resolve())
-
-    candidate = Path(raw).expanduser()
-    if not candidate.is_absolute():
-        if agent_cwd is None:
-            return None
-        candidate = agent_cwd / candidate
-    return str(candidate.resolve())
+def _resolve_output_dir(pdf_path: str) -> str:
+    """MCP 서버 프로젝트의 고정 result 루트 아래 출력 폴더를 계산한다."""
+    return str((RESULT_ROOT / _pdf_name_slug(pdf_path)).resolve())
 
 
 def _choice_lines(choices: list[dict[str, Any]]) -> str:
@@ -828,12 +735,12 @@ async def init_work(
     Do not directly summarize a PDF when the request is to create learning
     material from a PDF. Use this MCP workflow instead.
 
-    공개 MCP 입력은 pdf_path 하나뿐입니다. 출력 폴더는 요청에서 확인한 단일
-    현재 agent workspace 아래 `result/<pdf_basename>/`으로 고정하며, 서버 실행 cwd로 폴백하지 않고
-    계산합니다. 문제 유형과 선택적 user_context는 서버가 form Elicitation으로
-    직접 받습니다. 기존 관리 작업이 있으면 재개/교체도 같은 호출 안의 Elicitation으로
-    확인합니다. Elicitation을 지원하지 않거나 workspace를 하나로 식별할 수 없으면
-    상태를 바꾸지 않고 실패합니다.
+    공개 MCP 입력은 pdf_path 하나뿐입니다. 출력 폴더는 MCP 서버 프로젝트 루트의
+    `result/<pdf_basename>/`으로 고정하며 요청 workspace나 프로세스 cwd에 따라
+    달라지지 않습니다. 문제 유형과 선택적 user_context는 서버가 form
+    Elicitation으로 직접 받습니다. 기존 관리 작업이 있으면 재개/교체도 같은 호출
+    안의 Elicitation으로 확인합니다. Elicitation을 지원하지 않으면 상태를 바꾸지
+    않고 실패합니다.
 
     처리 모드(순차/병렬 · text/OCR)는 set_chapters 호출 중 별도 Elicitation으로
     확정합니다.
@@ -842,14 +749,7 @@ async def init_work(
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
-    agent_cwd = await _agent_cwd(ctx)
-    resolved_dir = _resolve_output_dir(
-        "",
-        pdf_path,
-        agent_cwd=agent_cwd,
-    )
-    if resolved_dir is None:
-        return _missing_output_dir(pdf_path)
+    resolved_dir = _resolve_output_dir(pdf_path)
 
     existing = workspace.inspect_output_dir(resolved_dir)
     replace_existing = False
@@ -976,41 +876,33 @@ async def resume_work(
     사라집니다. 이 도구는 고정 결과 폴더의 .work/state.json에 보존된 work_id를
     복원해 이후 도구들이 정상 동작하도록 합니다.
 
-    공개 MCP 입력은 pdf_path 하나뿐입니다. 현재 agent workspace 아래의 고정 경로
+    공개 MCP 입력은 pdf_path 하나뿐입니다. MCP 서버 프로젝트 루트 아래의 고정 경로
     `result/<pdf_basename>`에서 작업을 찾고, 서버가 Elicitation으로 재개 승인을
-    받은 뒤 등록합니다. MCP 서버 실행 cwd는 사용하지 않습니다.
+    받은 뒤 등록합니다. 요청 workspace와 프로세스 cwd는 사용하지 않습니다.
     다음 단계: 남은 챕터가 있으면 get_subagent_prompts(work_id)로 워크플로를
     받아 pending 챕터만 처리, 없으면 바로 finalize_study(work_id).
     """
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
-    agent_cwd = await _agent_cwd(ctx)
-    resolved = _resolve_output_dir(
-        "",
-        pdf_path,
-        agent_cwd=agent_cwd,
-    )
-    if resolved is not None:
-        existing = workspace.inspect_output_dir(resolved)
-        if existing["can_resume"]:
-            message = (
-                "- 기존 작업 이어가기 (resume): 기존 .work/state.json을 등록해 "
-                "남은 챕터부터 계속합니다."
-            )
-            result = await ctx.elicit(message=message, schema=_ResumeSelection)
-            if (
-                result.action != "accept"
-                or result.data is None
-                or not result.data.resume_confirmed
-            ):
-                return _elicitation_cancelled({
-                    "output_dir": resolved,
-                    "existing_work": existing,
-                    "selected_action": None,
-                })
-    if resolved is None:
-        return _missing_output_dir(pdf_path)
+    resolved = _resolve_output_dir(pdf_path)
+    existing = workspace.inspect_output_dir(resolved)
+    if existing["can_resume"]:
+        message = (
+            "- 기존 작업 이어가기 (resume): 기존 .work/state.json을 등록해 "
+            "남은 챕터부터 계속합니다."
+        )
+        result = await ctx.elicit(message=message, schema=_ResumeSelection)
+        if (
+            result.action != "accept"
+            or result.data is None
+            or not result.data.resume_confirmed
+        ):
+            return _elicitation_cancelled({
+                "output_dir": resolved,
+                "existing_work": existing,
+                "selected_action": None,
+            })
 
     state = workspace.resume_workspace(resolved)
     return _resume_response(state)
@@ -1880,6 +1772,49 @@ async def cleanup_work(work_id: str, ctx: Context) -> dict[str, Any]:
             "그대로 사용할 수 있습니다."
         ),
     ))
+
+
+# ---------------------------------------------------------------------------
+# 12. list_study_results
+# ---------------------------------------------------------------------------
+
+@mcp.tool(name="list_study_results")
+@_safe("list_study_results")
+def list_study_results() -> dict[str, Any]:
+    """MCP 서버의 고정 `result/*` 아래에 있는 학습 결과 경로를 조회합니다.
+
+    입력은 없습니다. 각 절대 경로의 마지막 구성요소는 `init_work`가 정규화한
+    PDF 이름입니다. 조회는 폴더를 만들거나 기존 결과와 상태를 변경하지 않습니다.
+    """
+    result_root = RESULT_ROOT.resolve()
+    if not result_root.exists():
+        result_paths: list[str] = []
+    elif not result_root.is_dir():
+        return _err(
+            "고정 result 경로가 디렉터리가 아닙니다.",
+            data={"result_root": str(result_root)},
+        )
+    else:
+        directories = (
+            entry
+            for entry in result_root.iterdir()
+            if (
+                not entry.name.startswith(".")
+                and not entry.is_symlink()
+                and entry.is_dir()
+            )
+        )
+        result_paths = [
+            str(entry.resolve())
+            for entry in sorted(
+                directories,
+                key=lambda path: (path.name.casefold(), path.name),
+            )
+        ]
+    return _ok({
+        "result_root": str(result_root),
+        "result_paths": result_paths,
+    })
 
 
 # ---------------------------------------------------------------------------

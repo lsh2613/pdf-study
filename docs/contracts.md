@@ -41,27 +41,29 @@ finalize_study(work_id)
 cleanup_work(work_id)
 ```
 
+선택 없는 결과 경로 조회 스키마는 `list_study_results()`다.
+
 `data.next_step.required_parameters`에는 에이전트가 생성하거나 전달해야 하는 값만
 들어간다. `set_chapters`는 `chapters`, `prepare_ocr`와 `finalize_study`는 빈 배열을
 사용한다.
 
 ## 도구 흐름
 
-`init_work(pdf_path)`는 요청 메타의 단일 Codex workspace 또는 단일 MCP file root
-아래 `result/<pdf_basename>`을 고정 출력 폴더로 계산한다. 공개 `output_dir`은 없다.
-workspace가 없거나 여러 개면 MCP 서버 cwd로 폴백하지 않고 실패한다. 기존 관리
-작업은 `resume`/`replace` Elicitation으로 처리하고, 관리되지 않은 파일이 있으면
-덮어쓰지 않는다. 새 작업은 단답형·주관식·확장형과 선택적 `user_context` form을
-승인한 뒤 만든다. 빈 context도 유효한 확정값이다.
-
-workspace를 하나로 식별할 수 없는 실패 응답은
-`data.required_context=["workspace_or_root"]`와 권장 상대 경로만 반환한다.
-`next_action`은 클라이언트가 정확히 하나의 workspace 또는 file root를 노출한 뒤
-같은 `init_work(pdf_path)` 호출을 재시도하도록 안내하며, 공개 스키마에 없는 경로
-인자를 요구하면 안 된다.
+`init_work(pdf_path)`는 `server.py`가 위치한 MCP 서버 프로젝트 루트 아래
+`result/<pdf_basename>`을 고정 출력 폴더로 계산한다. 공개 `output_dir`은 없고,
+요청 workspace, MCP file root, 프로세스 cwd에 따라 경로가 달라지지 않는다. 기존
+관리 작업은 `resume`/`replace` Elicitation으로 처리하고, 관리되지 않은 파일이
+있으면 덮어쓰지 않는다. 새 작업은 단답형·주관식·확장형과 선택적 `user_context`
+form을 승인한 뒤 만든다. 빈 context도 유효한 확정값이다.
 
 `resume_work(pdf_path)`는 같은 고정 경로의 `.work/state.json`을
 `resume_confirmed` Elicitation 승인 뒤 다시 등록한다.
+
+`list_study_results()`는 같은 서버 프로젝트 루트의 `result/*`에서 숨김 항목,
+파일, 심볼릭 링크를 제외한 직접 하위 디렉터리를 정렬해 조회한다. 성공 응답의
+`data.result_root`는 고정 result 루트의 절대 경로이고, `data.result_paths`는
+정규화된 PDF 이름을 마지막 구성요소로 포함하는 절대 경로 배열이다. result 루트가
+없으면 빈 배열을 반환하며 폴더를 만들거나 상태를 변경하지 않는다.
 
 `scan_pdf(work_id, scan_size, force_vision)`는 PDF 메타, 텍스트 품질, 페이지
 오프셋, 챕터 경계 추천을 반환한다. 내장 목차가 없거나 `force_vision=true`이면

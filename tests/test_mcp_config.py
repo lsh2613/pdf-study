@@ -29,6 +29,7 @@ def test_init_and_resume_public_schemas_exclude_choice_and_path_parameters():
 
     assert properties["init_work"] == {"pdf_path"}
     assert properties["resume_work"] == {"pdf_path"}
+    assert properties["list_study_results"] == set()
 
 
 def test_choice_tools_expose_only_non_choice_public_parameters():

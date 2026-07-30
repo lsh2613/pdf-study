@@ -46,7 +46,7 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
 - 사용자가 골라야 하는 선택지는 MCP form elicitation 안에서만 제공한다. 추천·기본값을 임의로 붙이거나 선택지를 합치면 안 된다.
 - 사용자 선택값은 MCP form elicitation 응답으로만 받는다. 선택 파라미터와 구조화 fallback을 MCP 공개 계약에 다시 추가하면 안 된다. Elicitation 미지원 세션은 상태를 바꾸지 않고 실패해야 한다.
 - 선택이 필요한 워크플로는 Elicitation과 승인 후 실행을 등록된 async MCP 함수 하나에서 처리한다. 같은 작업을 선택 인자로 직접 실행하는 별도 동기 함수, `_impl` 함수, MCP wrapper를 다시 추가하면 안 된다.
-- 출력 폴더는 요청의 단일 Codex workspace 또는 단일 MCP file root 아래 `result/<pdf-name>`으로만 계산한다. MCP 서버 프로세스 cwd, 에이전트가 준 `output_dir`, 임의의 다른 workspace를 사용하면 안 된다.
+- 출력 폴더는 `server.py`가 위치한 MCP 서버 프로젝트 루트 아래 `result/<pdf-name>`으로만 계산한다. MCP 서버 프로세스 cwd, 요청 workspace, MCP file root, 에이전트가 준 `output_dir`을 사용하면 안 된다. 결과 위치 조회는 입력 없는 `list_study_results`가 같은 고정 `result/*`의 절대 경로를 반환하는 방식으로 제공한다.
 - 확장 문제는 외부 검색 없이 챕터 본문과 학습자 정보만으로 만든다. 검색 도구나 HTTP 검색 클라이언트를 다시 추가하려면 별도의 보안·계약 결정을 먼저 기록해야 한다.
 - `.work/state.json`은 잠금이 걸린 `workspace.py` 헬퍼로만 바꾼다. 직접 read-modify-write를 넣으면 병렬 처리에서 상태가 깨진다.
 - `set_chapters`는 스캔 여부, 처리 모드, 챕터 정의와 책 정보 준비를 상태 변경 없이 먼저 검증한다. 검증된 모드·챕터와 처리 시작 phase는 하나의 잠금 구간에서 확정하고, 이후 본문 추출 실패는 새 설정의 `chapter_processing=failed`로 남긴다. 같은 작업의 `set_chapters` 전체 처리는 직렬화하며 책 정보 rollback 실패를 숨기면 안 된다.
