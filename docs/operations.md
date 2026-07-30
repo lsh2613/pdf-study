@@ -3,7 +3,7 @@
 ## 준비 조건
 
 - Python 3.10 이상이 필요하다.
-- 저장소 루트에서 명령을 실행해야 한다. 이 프로젝트는 루트 디렉터리 자체를 `pdf_study` 패키지로 매핑한다.
+- 저장소 루트에서 명령을 실행해야 한다. 이 프로젝트는 루트 디렉터리 자체를 `pdf_learner` 패키지로 매핑한다.
 - MCP 클라이언트에는 저장소 안 `.venv/bin/python`의 절대 경로를 등록해야 한다.
 
 ## 설치
@@ -14,7 +14,7 @@
 
 이 명령은 저장소 안에 `.venv`가 없으면 새로 만들고, 이미 있으면 재사용한다. 그
 환경에 패키지를 editable로 다시 설치하고 `mcp`, `fitz`, `PIL`, `rich`,
-`markdown_it`, `paddle`, `paddleocr`, `pdf_study` import를 확인한다. 검증이 끝나면
+`markdown_it`, `paddle`, `paddleocr`, `pdf_learner` import를 확인한다. 검증이 끝나면
 Claude Code, Codex CLI, Antigravity CLI의 **전역** MCP 설정을 자동 적용한다. 대상
 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다.
 
@@ -24,12 +24,12 @@ Claude Code, Codex CLI, Antigravity CLI의 **전역** MCP 설정을 자동 적�
 
 Claude Code와 Antigravity CLI의 기존 JSON 설정이 손상됐거나 예상한 객체 구조가
 아니면 기존 파일을 덮어쓰지 않고 설치를 중단한다. 이 두 설정은 같은 위치의
-`.pdf-study.bak` 백업을 만든 뒤 원자적으로 교체한다. Codex CLI는
-`codex mcp add`로 전역 등록한 뒤 `codex mcp get pdf-study`로 등록을 확인한다.
+`.pdf-learner.bak` 백업을 만든 뒤 원자적으로 교체한다. Codex CLI는
+`codex mcp add`로 전역 등록한 뒤 `codex mcp get pdf-learner`로 등록을 확인한다.
 Codex 전역 `config.toml`의 `approval_policy`가 없거나 정확히 `"never"`이면 다른
 승인 종류는 계속 자동 거절하면서 MCP form만 표시하는 granular 정책으로 바꾼다.
 정책이 없더라도 실행 surface의 기본값이 `never`로 확정될 수 있으므로 명시적으로
-설정한다. 변경 전 파일은 `config.toml.pdf-study.bak`으로 백업한다.
+설정한다. 변경 전 파일은 `config.toml.pdf-learner.bak`으로 백업한다.
 
 기본 설치는 MCP 실행에 필요한 런타임 의존성만 설치한다. 테스트까지 실행할 개발 환경이 필요하면 다음 명령을 사용한다.
 
@@ -64,7 +64,7 @@ Codex 전역 `config.toml`의 `approval_policy`가 없거나 정확히 `"never"`
 MCP 서버 진입점은 다음 명령이다.
 
 ```bash
-.venv/bin/python -m pdf_study
+.venv/bin/python -m pdf_learner
 ```
 
 일반 터미널에서 실행하면 stdio MCP 서버로 대기한다. 실제 도구 호출은 MCP 클라이언트가 이 프로세스를 자식 프로세스로 띄워 수행한다.
@@ -183,7 +183,7 @@ python3 study_tui.py
 
 `rich`가 없으면 TUI 런처가 설치를 시도하고, 설치할 수 없으면 평문 모드로 동작한다.
 
-결과 폴더의 `.pdf-study-manifest.json`은 현재 형식과 서버가 생성한 경로를 기록한다. 같은 작업을 다시 렌더하면 manifest 경로만 새 세대로 교체되며, 형식과 학습 fingerprint가 같을 때만 기존 진도가 유지된다.
+결과 폴더의 `.pdf-learner-manifest.json`은 현재 형식과 서버가 생성한 경로를 기록한다. 같은 작업을 다시 렌더하면 manifest 경로만 새 세대로 교체되며, 형식과 학습 fingerprint가 같을 때만 기존 진도가 유지된다.
 
 최종 결과를 확인한 뒤 PDF 본문·raw·상태가 든 `.work/`만 지우려면 MCP의
 `cleanup_work(work_id)`를 호출한다. 이 동작은 결과물·진도·manifest를 유지하고

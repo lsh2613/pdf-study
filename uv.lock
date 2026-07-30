@@ -1377,7 +1377,7 @@ wheels = [
 ]
 
 [[package]]
-name = "pdf-study"
+name = "pdf-learner"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

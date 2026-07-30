@@ -1,4 +1,4 @@
-"""FastMCP 서버 — pdf-study-builder MCP 도구 등록.
+"""FastMCP 서버 — pdf-learner-builder MCP 도구 등록.
 
 모든 도구는 {ok, error, data, next_action} 형식으로 응답하며,
 예외는 raise하지 않고 ok=False로 변환한다 (MCP 통신 안정성).
@@ -36,7 +36,7 @@ MCP_INSTRUCTIONS = """
 완료되었거나 진행 중인 결과 경로는 list_study_results로 조회한다.
 """.strip()
 
-mcp = FastMCP("pdf-study-builder", instructions=MCP_INSTRUCTIONS)
+mcp = FastMCP("pdf-learner-builder", instructions=MCP_INSTRUCTIONS)
 
 SERVER_ROOT = Path(__file__).resolve().parent
 RESULT_ROOT = SERVER_ROOT / "result"
@@ -102,7 +102,7 @@ class _OcrLanguageSelection(_ElicitationSelection):
 
 class _ResumeSelection(_ElicitationSelection):
     resume_confirmed: bool = Field(
-        description="기존 pdf-study 작업을 이어서 진행할지 여부",
+        description="기존 pdf-learner 작업을 이어서 진행할지 여부",
     )
 
 
@@ -624,7 +624,7 @@ async def _elicit_question_setup(
             Field(description=f"{question['question']} {choice_desc}"),
         )
     schema = create_model(
-        "PdfStudyQuestionSetupSelection",
+        "PdfLearnerQuestionSetupSelection",
         __base__=_ElicitationSelection,
         **fields,
     )
@@ -671,7 +671,7 @@ async def _elicit_chapter_setup(
             ),
         )
     schema = create_model(
-        "PdfStudyChapterSetupSelection",
+        "PdfLearnerChapterSetupSelection",
         __base__=_ElicitationSelection,
         **fields,
     )
@@ -710,7 +710,7 @@ async def _elicit_extraction_mode(ctx: Context, work_id: str) -> str | None:
     choices = processing_mode_contract.extraction_choices(text_quality)
     allowed_values = tuple(choice["value"] for choice in choices)
     schema = create_model(
-        "PdfStudyExtractionModeSelection",
+        "PdfLearnerExtractionModeSelection",
         __base__=_ElicitationSelection,
         extraction_mode=(
             str,
@@ -738,7 +738,7 @@ async def _elicit_execution_mode(ctx: Context) -> str | None:
     choices = processing_mode_contract.execution_choices()
     allowed_values = tuple(choice["value"] for choice in choices)
     schema = create_model(
-        "PdfStudyExecutionModeSelection",
+        "PdfLearnerExecutionModeSelection",
         __base__=_ElicitationSelection,
         execution_mode=(
             str,
@@ -847,7 +847,7 @@ async def init_work(
     replace_existing = False
     if existing["kind"] == "unmanaged_content":
         return _err(
-            "고정 출력 폴더에 pdf-study가 관리하지 않는 파일이 있어 사용할 수 없습니다.",
+            "고정 출력 폴더에 pdf-learner가 관리하지 않는 파일이 있어 사용할 수 없습니다.",
             data={"output_dir": resolved_dir, "existing_work": existing},
         )
     if existing["kind"] != "available":
@@ -855,7 +855,7 @@ async def init_work(
             ["resume", "replace"] if existing["can_resume"] else ["replace"]
         )
         action_schema = create_model(
-            "PdfStudyExistingWorkActionSelection",
+            "PdfLearnerExistingWorkActionSelection",
             __base__=_ElicitationSelection,
             action=(
                 str,
@@ -875,7 +875,7 @@ async def init_work(
         )
         action_result = await ctx.elicit(
             message=(
-                "고정 출력 폴더에 기존 pdf-study 작업이 있습니다.\n"
+                "고정 출력 폴더에 기존 pdf-learner 작업이 있습니다.\n"
                 + "\n".join(action_lines)
             ),
             schema=action_schema,
@@ -1977,7 +1977,7 @@ def list_study_results() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    """python -m pdf_study 실행 진입점."""
+    """python -m pdf_learner 실행 진입점."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s — %(message)s",

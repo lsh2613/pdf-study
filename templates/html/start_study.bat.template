@@ -1,4 +1,4 @@
 @echo off
 setlocal
-__PDF_STUDY_PYTHON__ "%~dp0study_html.py" --port 0 %*
+__PDF_LEARNER_PYTHON__ "%~dp0study_html.py" --port 0 %*
 if errorlevel 1 pause

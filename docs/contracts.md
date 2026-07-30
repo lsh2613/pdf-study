@@ -31,7 +31,7 @@ Form의 `requestedSchema`는 Codex가 처리할 수 있는 MCP primitive schema
 표현하며 빈 문자열을 “학습자 정보 없음”으로 해석한다.
 
 선택을 소비하는 각 워크플로는 form Elicitation과 승인 후 실행을 하나의 등록된
-async 함수에서 처리한다. `pdf_study.server`에는 같은 작업을 선택 인자로 바로
+async 함수에서 처리한다. `pdf_learner.server`에는 같은 작업을 선택 인자로 바로
 실행하는 별도 `_impl` 함수나 별도 MCP wrapper가 없다. 클라이언트는 모듈의 하위
 primitive를 조합하지 않고 MCP 세션으로 아래 도구를 호출해야 한다.
 
@@ -173,4 +173,4 @@ Markdown+TUI에서 `progress.json.answers`가 비어 있지 않고 `completed=fa
 
 두 출력 형식의 챕터 페이지 표기는 같은 규칙을 사용한다. `source_pages`가 배열이면 `PDF p.N–M · 원문 p.A–B`, 명시적 `null`이면서 오프셋을 모르면 `원문 페이지 미상`, 오프셋을 알면 번호가 없는 앞부분으로 보아 `원문 페이지 없음`을 표시한다. `source_pages` 입력 자체가 없으면 `PDF p.N–M`만 표시한다.
 
-최종 폴더의 `.pdf-study-manifest.json`은 현재 렌더 형식, 학습 fingerprint, 서버가 관리하는 top-level 경로를 기록한다. 재렌더할 때 이전 형식의 파일과 사라진 챕터 파일은 manifest 범위 안에서 제거된다. 진도는 출력 형식과 학습 fingerprint가 모두 같을 때만 새 세대로 복사된다. 형식, 챕터, 문제 옵션, 요약 또는 문제 내용이 바뀌면 이전 진도를 재사용하지 않는다.
+최종 폴더의 `.pdf-learner-manifest.json`은 현재 렌더 형식, 학습 fingerprint, 서버가 관리하는 top-level 경로를 기록한다. 재렌더할 때 이전 형식의 파일과 사라진 챕터 파일은 manifest 범위 안에서 제거된다. 진도는 출력 형식과 학습 fingerprint가 모두 같을 때만 새 세대로 복사된다. 형식, 챕터, 문제 옵션, 요약 또는 문제 내용이 바뀌면 이전 진도를 재사용하지 않는다.

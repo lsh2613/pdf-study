@@ -5,7 +5,7 @@ usage() {
   cat <<'INNER_EOF'
 Usage: scripts/setup_mcp.sh [--global] [--print-config] [--check] [--dev] [--claude] [--codex] [--antigravity-cli] [--help]
 
-Create a project-local .venv for pdf-study, install this package into it,
+Create a project-local .venv for pdf-learner, install this package into it,
 verify required runtime dependencies, and automatically apply MCP config to clients.
 
 Options:
@@ -23,8 +23,8 @@ Options:
 
 Environment:
   PYTHON           Python executable used to create the venv (default: python3).
-  PDF_STUDY_VENV   Override venv path (default: <repo>/.venv).
-  PDF_STUDY_PADDLEOCR_CACHE
+  PDF_LEARNER_VENV   Override venv path (default: <repo>/.venv).
+  PDF_LEARNER_PADDLEOCR_CACHE
                    Override PaddleOCR model cache path (default: <repo>/.paddleocr).
 INNER_EOF
 }
@@ -32,10 +32,10 @@ INNER_EOF
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)"
 PYTHON_BIN="${PYTHON:-python3}"
-VENV_DIR="${PDF_STUDY_VENV:-$REPO_DIR/.venv}"
+VENV_DIR="${PDF_LEARNER_VENV:-$REPO_DIR/.venv}"
 VENV_PY="$VENV_DIR/bin/python"
-PADDLEOCR_CACHE_DIR="${PDF_STUDY_PADDLEOCR_CACHE:-$REPO_DIR/.paddleocr}"
-export PDF_STUDY_PADDLEOCR_CACHE="$PADDLEOCR_CACHE_DIR"
+PADDLEOCR_CACHE_DIR="${PDF_LEARNER_PADDLEOCR_CACHE:-$REPO_DIR/.paddleocr}"
+export PDF_LEARNER_PADDLEOCR_CACHE="$PADDLEOCR_CACHE_DIR"
 
 print_config() {
   "$PYTHON_BIN" - "$VENV_PY" "$PADDLEOCR_CACHE_DIR" <<'PY'
@@ -47,11 +47,11 @@ command = sys.argv[1]
 cache_dir = sys.argv[2]
 print(json.dumps({
     "mcpServers": {
-        "pdf-study": {
+        "pdf-learner": {
             "command": command,
-            "args": ["-m", "pdf_study"],
+            "args": ["-m", "pdf_learner"],
             "env": {
-                "PDF_STUDY_PADDLEOCR_CACHE": cache_dir,
+                "PDF_LEARNER_PADDLEOCR_CACHE": cache_dir,
             },
         }
     }
@@ -88,7 +88,7 @@ modules = {
     "markdown_it": "markdown-it-py",
     "paddle": "paddlepaddle",
     "paddleocr": "paddleocr",
-    "pdf_study": "pdf-study",
+    "pdf_learner": "pdf-learner",
 }
 
 missing = []
@@ -99,12 +99,12 @@ for module, package in modules.items():
         missing.append((package, module, f"{type(exc).__name__}: {exc}"))
 
 if missing:
-    print("pdf-study MCP environment check failed:", file=sys.stderr)
+    print("pdf-learner MCP environment check failed:", file=sys.stderr)
     for package, module, error in missing:
         print(f"- {package} ({module}): {error}", file=sys.stderr)
     sys.exit(1)
 
-print(f"pdf-study MCP environment OK: {sys.executable}")
+print(f"pdf-learner MCP environment OK: {sys.executable}")
 PY
 }
 
@@ -117,10 +117,10 @@ import sys
 try:
     importlib.import_module("pytest")
 except Exception as exc:  # noqa: BLE001 - show exact import failure
-    print(f"pdf-study development environment check failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+    print(f"pdf-learner development environment check failed: {type(exc).__name__}: {exc}", file=sys.stderr)
     sys.exit(1)
 
-print(f"pdf-study development environment OK (pytest): {sys.executable}")
+print(f"pdf-learner development environment OK (pytest): {sys.executable}")
 PY
 }
 
@@ -212,7 +212,7 @@ else
     "$PYTHON_BIN" -m venv "$VENV_DIR"
   fi
 
-  echo "Installing pdf-study into: $VENV_DIR"
+  echo "Installing pdf-learner into: $VENV_DIR"
   "$VENV_PY" -m pip install -U pip setuptools wheel
   "$VENV_PY" -m pip install -e "$INSTALL_SPEC"
 fi

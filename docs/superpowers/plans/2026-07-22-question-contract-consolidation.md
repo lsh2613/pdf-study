@@ -35,7 +35,7 @@
 Create `tests/test_question_contract.py` with direct examples of the required public internal API.
 
 ```python
-from pdf_study import question_contract
+from pdf_learner import question_contract
 
 
 def test_summary_contract_reports_existing_missing_paths():
@@ -62,7 +62,7 @@ def test_extension_contract_reports_existing_missing_paths():
 
 Run: `rtk .venv/bin/python -m pytest tests/test_question_contract.py -q`
 
-Expected: FAIL because `pdf_study.question_contract` does not exist.
+Expected: FAIL because `pdf_learner.question_contract` does not exist.
 
 - [ ] **Step 3: Implement the contract module**
 

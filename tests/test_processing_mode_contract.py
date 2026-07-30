@@ -1,4 +1,4 @@
-from pdf_study import processing_mode_contract
+from pdf_learner import processing_mode_contract
 
 
 def test_elicitation_choices_split_extraction_from_execution():

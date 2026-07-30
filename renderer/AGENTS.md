@@ -10,7 +10,7 @@
 
 HTML과 Markdown+TUI는 같은 로더 관점을 공유해야 한다. 한쪽에서 skip 챕터를 제외하거나 확장 문제를 합치는 규칙이 바뀌면 다른 쪽도 같은 저장 의미를 따라야 한다.
 
-개별 렌더러는 최종 출력 폴더를 직접 정리하지 않고 전달받은 비어 있는 staging 폴더에 현재 세대만 만든다. `output_manager.py`가 `.pdf-study-manifest.json`에 기록된 관리 경로를 교체하고 실패 시 이전 세대를 복원한다. manifest 밖의 파일은 렌더러나 output manager가 삭제하거나 덮어쓰면 안 된다.
+개별 렌더러는 최종 출력 폴더를 직접 정리하지 않고 전달받은 비어 있는 staging 폴더에 현재 세대만 만든다. `output_manager.py`가 `.pdf-learner-manifest.json`에 기록된 관리 경로를 교체하고 실패 시 이전 세대를 복원한다. manifest 밖의 파일은 렌더러나 output manager가 삭제하거나 덮어쓰면 안 된다.
 
 ## 지켜야 할 동작
 

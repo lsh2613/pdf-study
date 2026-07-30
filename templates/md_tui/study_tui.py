@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""pdf-study 학습 TUI (rich 기반).
+"""pdf-learner 학습 TUI (rich 기반).
 
 - 루트에서 실행: `python study_tui.py` → 챕터 선택 메뉴
 - 챕터 폴더에서 실행: `cd ch1 && python study_tui.py` → 해당 챕터로 바로 진입
 
-pdf_study 패키지에 의존하지 않는 독립 스크립트(출력 폴더에 그대로 복사됨).
+pdf_learner 패키지에 의존하지 않는 독립 스크립트(출력 폴더에 그대로 복사됨).
 의존성 rich는 **있으면 사용, 없으면 자동 설치 시도, 그래도 안 되면(pip 부재·
 오프라인·권한·externally-managed 환경 등) 평문 모드로 폴백**한다 — 어떤
 환경에서도 별도 준비 없이 실행된다.

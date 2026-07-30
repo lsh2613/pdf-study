@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from pdf_study import analysis, workspace
+from pdf_learner import analysis, workspace
 
 
 @pytest.fixture(autouse=True)
@@ -489,7 +489,7 @@ def test_ocr_body_text_does_not_overwrite_raw(make_workspace, ko_with_toc):
             return "초기 OCR 본문"
 
     from unittest.mock import patch
-    with patch("pdf_study.analysis.ocr.get_ocr_worker", return_value=MockWorker()):
+    with patch("pdf_learner.analysis.ocr.get_ocr_worker", return_value=MockWorker()):
         analysis.set_chapters_impl(
             wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 1]}],
             "sequential", "ocr",

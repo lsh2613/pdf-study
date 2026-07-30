@@ -1,7 +1,7 @@
 """Semantic summary completeness contract tests."""
 from __future__ import annotations
 
-from pdf_study import summary_contract
+from pdf_learner import summary_contract
 
 
 def test_quality_example_passes_without_length_rule():

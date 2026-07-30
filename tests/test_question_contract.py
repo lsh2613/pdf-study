@@ -1,6 +1,6 @@
 import copy
 
-from pdf_study import question_contract
+from pdf_learner import question_contract
 
 
 def test_summary_contract_reports_existing_missing_paths():

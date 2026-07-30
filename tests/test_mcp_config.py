@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from pdf_study import server
+from pdf_learner import server
 from scripts import apply_mcp_config
 
 
@@ -153,9 +153,9 @@ def test_existing_config_is_backed_up_before_atomic_replacement(tmp_path: Path) 
         home_dir=home_dir,
     )
 
-    assert (home_dir / ".claude.json.pdf-study.bak").read_text(encoding="utf-8") == original
+    assert (home_dir / ".claude.json.pdf-learner.bak").read_text(encoding="utf-8") == original
     data = json.loads(claude_config.read_text(encoding="utf-8"))
-    assert set(data["globalMcpServers"]) == {"other", "pdf-study"}
+    assert set(data["globalMcpServers"]) == {"other", "pdf-learner"}
     assert not list(home_dir.glob("..claude.json.*.tmp"))
 
 
@@ -164,7 +164,7 @@ def test_gitignore_covers_local_mcp_config_paths() -> None:
 
     assert ".claude.json" in gitignore
     assert ".agents/mcp_config.json" in gitignore
-    assert "*.pdf-study.bak" in gitignore
+    assert "*.pdf-learner.bak" in gitignore
 
 
 def test_global_codex_registration_uses_cli_and_verifies_result(
@@ -175,7 +175,7 @@ def test_global_codex_registration_uses_cli_and_verifies_result(
 
     def fake_run(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
         calls.append(args)
-        return subprocess.CompletedProcess(args, 0, stdout="pdf-study", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="pdf-learner", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -188,11 +188,11 @@ def test_global_codex_registration_uses_cli_and_verifies_result(
     assert calls == [
         [
             "codex", "mcp", "add", "--env",
-            f"PDF_STUDY_PADDLEOCR_CACHE={tmp_path / '.paddleocr'}",
-            "pdf-study", "--", str(tmp_path / ".venv/bin/python"),
-            "-m", "pdf_study",
+            f"PDF_LEARNER_PADDLEOCR_CACHE={tmp_path / '.paddleocr'}",
+            "pdf-learner", "--", str(tmp_path / ".venv/bin/python"),
+            "-m", "pdf_learner",
         ],
-        ["codex", "mcp", "get", "pdf-study"],
+        ["codex", "mcp", "get", "pdf-learner"],
     ]
 
 
@@ -227,7 +227,7 @@ def test_codex_never_policy_becomes_mcp_elicitation_only(tmp_path: Path) -> None
     assert "# Preserve this comment." in config.read_text(encoding="utf-8")
     assert "# Existing automation default." in config.read_text(encoding="utf-8")
     assert stat.S_IMODE(config.stat().st_mode) == 0o640
-    assert config.with_name("config.toml.pdf-study.bak").read_text(
+    assert config.with_name("config.toml.pdf-learner.bak").read_text(
         encoding="utf-8"
     ) == original
 
@@ -259,7 +259,7 @@ def test_codex_missing_policy_becomes_mcp_elicitation_only(
     }
     assert parsed["model"] == "gpt-test"
     assert parsed["mcp_servers"]["other"]["command"] == "other"
-    assert config.with_name("config.toml.pdf-study.bak").read_text(
+    assert config.with_name("config.toml.pdf-learner.bak").read_text(
         encoding="utf-8"
     ) == original
 
@@ -276,7 +276,7 @@ def test_codex_interactive_policy_is_left_unchanged(
 
     assert changed is False
     assert config.read_text(encoding="utf-8") == original
-    assert not config.with_name("config.toml.pdf-study.bak").exists()
+    assert not config.with_name("config.toml.pdf-learner.bak").exists()
 
 
 def test_codex_compatible_granular_policy_is_left_unchanged(
@@ -312,7 +312,7 @@ def test_codex_explicitly_disabled_granular_elicitation_fails_closed(
         apply_mcp_config.ensure_codex_elicitation_allowed(config)
 
     assert config.read_text(encoding="utf-8") == original
-    assert not config.with_name("config.toml.pdf-study.bak").exists()
+    assert not config.with_name("config.toml.pdf-learner.bak").exists()
 
 
 def test_config_cli_updates_never_policy_before_codex_registration(

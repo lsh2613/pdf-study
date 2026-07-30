@@ -202,7 +202,7 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates" / "html"
 _STATIC_ASSET_FILES = ("style.css", "storage.js")
 _STATIC_ROOT_FILES = ("study_html.py", "README.md")
 _LAUNCHER_TEMPLATE_FILES = ("start_study.sh.template", "start_study.bat.template")
-_PYTHON_EXECUTABLE_MARKER = "__PDF_STUDY_PYTHON__"
+_PYTHON_EXECUTABLE_MARKER = "__PDF_LEARNER_PYTHON__"
 
 
 def _esc(s: Any) -> str:

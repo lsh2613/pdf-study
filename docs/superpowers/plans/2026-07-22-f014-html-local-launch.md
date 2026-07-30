@@ -115,13 +115,13 @@ Expected: FAIL because the renderer currently copies only `study_html.py` and `R
 
 - [ ] **Step 3: Add launcher templates and renderer substitution**
 
-Create the POSIX template below. The renderer must substitute `__PDF_STUDY_PYTHON__` with `shlex.quote(sys.executable)` before writing `start_study.sh`, then set mode `0o755` with `Path.chmod`.
+Create the POSIX template below. The renderer must substitute `__PDF_LEARNER_PYTHON__` with `shlex.quote(sys.executable)` before writing `start_study.sh`, then set mode `0o755` with `Path.chmod`.
 
 ```sh
 #!/bin/sh
 set -eu
 SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
-exec __PDF_STUDY_PYTHON__ "$SCRIPT_DIR/study_html.py" --port 0 "$@"
+exec __PDF_LEARNER_PYTHON__ "$SCRIPT_DIR/study_html.py" --port 0 "$@"
 ```
 
 Create the Windows template below. The renderer must substitute the same marker with a batch-safe double-quoted executable path (`"` escaped as `""`) before writing `start_study.bat`.
@@ -129,7 +129,7 @@ Create the Windows template below. The renderer must substitute the same marker 
 ```bat
 @echo off
 setlocal
-__PDF_STUDY_PYTHON__ "%~dp0study_html.py" --port 0 %*
+__PDF_LEARNER_PYTHON__ "%~dp0study_html.py" --port 0 %*
 if errorlevel 1 pause
 ```
 

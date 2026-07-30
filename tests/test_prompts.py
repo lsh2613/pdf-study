@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from pdf_study import prompts, question_contract, summary_contract
+from pdf_learner import prompts, question_contract, summary_contract
 
 
 def _state(**overrides):

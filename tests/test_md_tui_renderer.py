@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 
-from pdf_study.renderer.md_tui_renderer import _book_md, _summary_md
+from pdf_learner.renderer.md_tui_renderer import _book_md, _summary_md
 from .conftest import build_rendered_study, finalize_test_study
 
 
@@ -122,7 +122,7 @@ def test_progress_fingerprint_preserves_same_md_tui_generation(ko_with_toc, tmp_
 
     assert rerendered["ok"], rerendered
     assert progress.read_text(encoding="utf-8") == '{"completed":true}'
-    assert (out / ".pdf-study-manifest.json").exists()
+    assert (out / ".pdf-learner-manifest.json").exists()
 
 
 # --- rich 미설치 평문 폴백 셰임 --------------------------------------------

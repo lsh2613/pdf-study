@@ -57,7 +57,7 @@ primitive `type`, nullable `anyOf`와 `$ref` 부재를 검사한다. Codex 세�
 ## Python 직접 실행으로 Elicitation 우회
 
 증상: MCP 입력 스키마에서 선택 파라미터를 제거했는데도 셸 권한이 있는 에이전트가
-`pdf_study.server`를 import하고 동기 워크플로 함수를 직접 호출해 문제 유형,
+`pdf_learner.server`를 import하고 동기 워크플로 함수를 직접 호출해 문제 유형,
 text/OCR, 순차/병렬, 출력 형식을 임의로 정한다.
 
 원인: MCP Elicitation은 MCP 요청 경계에서만 실행된다. 같은 이름의 동기 구현이
@@ -182,7 +182,7 @@ Markdown 포함을 검증한 뒤에만 완료 처리한다. 글자 수나 원문
 대응: `init_work`는 고정 출력 폴더의 기존 관리 작업을 발견하면 상태를 바꾸기 전에
 `resume`, `replace` Elicitation을 연다. 관리되지 않은 파일은 실패한다. 명시적
 replace도 새 입력을 먼저 검증하고 `.work`만 제거하며 이전 렌더 결과는 다음 렌더
-성공까지 둔다. 렌더는 staging에서 끝까지 만든 뒤 `.pdf-study-manifest.json`의
+성공까지 둔다. 렌더는 staging에서 끝까지 만든 뒤 `.pdf-learner-manifest.json`의
 관리 경로만 rollback 가능한 순서로 교체한다. manifest 밖의 파일은 제거하거나
 덮어쓰지 않는다.
 

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from .fixtures.build_fixtures import FIXTURES_DIR, ensure_fixtures
-from pdf_study import question_contract, server, workspace
+from pdf_learner import question_contract, server, workspace
 
 
 def pytest_configure(config):

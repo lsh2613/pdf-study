@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from pdf_study.tests.fixtures import build_fixtures
+from pdf_learner.tests.fixtures import build_fixtures
 
 
 _FIXTURE_NAMES = ("ko_with_toc.pdf", "ko_short.pdf", "scanned_empty.pdf")

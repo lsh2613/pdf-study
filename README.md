@@ -1,4 +1,4 @@
-## PDF Study MCP
+## PDF Learner MCP
 
 로컬 PDF를 학습 자료로 변환하는 MCP 서버입니다. 챕터별 요약, 핵심 포인트,
 검증 문제, 확장 문제를 만들고 결과를 HTML 사이트나 Markdown + TUI 형태로 렌더링합니다.

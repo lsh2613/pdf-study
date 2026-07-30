@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from pdf_study.pdf import reader
+from pdf_learner.pdf import reader
 
 
 def test_get_pdf_info_extracts_metadata_and_pages(ko_with_toc):

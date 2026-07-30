@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from pdf_study import server, workspace
-from pdf_study import analysis
+from pdf_learner import server, workspace
+from pdf_learner import analysis
 from .conftest import (
     create_test_work,
     finalize_test_study,

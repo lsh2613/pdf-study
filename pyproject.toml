@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pdf-study"
+name = "pdf-learner"
 version = "0.1.0"
 description = "PDF를 챕터별 요약 + 4유형 검증 문제로 변환하는 MCP 서버"
 requires-python = ">=3.10,<3.14"
@@ -23,23 +23,23 @@ dependencies = [
 dev = ["pytest>=9.1.1"]
 
 [project.scripts]
-pdf-study = "pdf_study.__main__:main"
+pdf-learner = "pdf_learner.__main__:main"
 
-# repo 루트(pdf_study/) 자체가 패키지 디렉토리인 flat 레이아웃이라 package-dir로
-# "pdf_study" 패키지를 현재 디렉토리에 매핑한다.
+# 저장소 루트 자체가 패키지 디렉토리인 flat 레이아웃이라 package-dir로
+# "pdf_learner" 패키지를 현재 디렉토리에 매핑한다.
 [tool.setuptools]
 packages = [
-    "pdf_study",
-    "pdf_study.pdf",
-    "pdf_study.renderer",
+    "pdf_learner",
+    "pdf_learner.pdf",
+    "pdf_learner.renderer",
 ]
-package-dir = { "pdf_study" = "." }
+package-dir = { "pdf_learner" = "." }
 include-package-data = true
 
 # 학습 자료 템플릿(css/js/serve.py)은 정적 리소스 — 패키지 데이터로 함께 배포.
 # 합성 fixture PDF/이미지는 sdist/wheel에서 제외 (build_fixtures로 재생성).
 [tool.setuptools.package-data]
-"pdf_study" = ["templates/html/*", "templates/md_tui/*"]
+"pdf_learner" = ["templates/html/*", "templates/md_tui/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

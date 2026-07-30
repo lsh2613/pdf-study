@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from pdf_study import workspace
+from pdf_learner import workspace
 
 
 @pytest.fixture

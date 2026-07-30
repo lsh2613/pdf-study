@@ -7,7 +7,7 @@ from mcp import types
 from mcp.shared.memory import create_connected_server_and_client_session
 import pytest
 
-from pdf_study import server, workspace
+from pdf_learner import server, workspace
 from .conftest import (
     create_test_work,
     ElicitationContext,
@@ -891,7 +891,7 @@ def test_fastmcp_static_choice_elicitations_use_supported_schemas(monkeypatch):
         server.workspace,
         "load_state",
         lambda _work_id: {
-            "output_dir": "/tmp/pdf-study-finalize-test",
+            "output_dir": "/tmp/pdf-learner-finalize-test",
             "chapters": {},
             "question_options": {"extension": False},
         },
@@ -899,7 +899,7 @@ def test_fastmcp_static_choice_elicitations_use_supported_schemas(monkeypatch):
     monkeypatch.setattr(
         server.workspace,
         "get_work_dir",
-        lambda _work_id: "/tmp/pdf-study-finalize-test/.work",
+        lambda _work_id: "/tmp/pdf-learner-finalize-test/.work",
     )
     monkeypatch.setattr(server.workspace, "update_phase", lambda *_args: None)
     monkeypatch.setattr(

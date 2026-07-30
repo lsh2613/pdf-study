@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from pdf_study.pdf import chapter
+from pdf_learner.pdf import chapter
 
 
 def test_make_chunks_even_split():

@@ -24,16 +24,16 @@ def test_setup_script_prints_absolute_mcp_config():
         cwd=ROOT,
     )
     data = json.loads(out)
-    cfg = data["mcpServers"]["pdf-study"]
+    cfg = data["mcpServers"]["pdf-learner"]
     command = Path(cfg["command"])
 
     assert command.is_absolute()
     assert command == ROOT / ".venv" / "bin" / "python"
-    assert cfg["args"] == ["-m", "pdf_study"]
+    assert cfg["args"] == ["-m", "pdf_learner"]
     assert cfg["env"] == {
-        "PDF_STUDY_PADDLEOCR_CACHE": str(ROOT / ".paddleocr"),
+        "PDF_LEARNER_PADDLEOCR_CACHE": str(ROOT / ".paddleocr"),
     }
-    assert "<PDF_STUDY_INSTALL_DIR>" not in out
+    assert "<PDF_LEARNER_INSTALL_DIR>" not in out
     assert "~/" not in out
 
 
@@ -42,7 +42,7 @@ def test_setup_script_checks_paddle_runtime_dependencies():
 
     assert '"paddle": "paddlepaddle"' in text
     assert '"paddleocr": "paddleocr"' in text
-    assert "PDF_STUDY_PADDLEOCR_CACHE" in text
+    assert "PDF_LEARNER_PADDLEOCR_CACHE" in text
 
 
 def test_setup_script_dev_check_validates_pytest():

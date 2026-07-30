@@ -38,7 +38,7 @@ def test_default_cache_is_project_local_and_can_be_overridden(monkeypatch, tmp_p
     assert ocr.resolve_model_cache_dir() == ROOT / ".paddleocr"
 
     custom_cache = tmp_path / "ocr-cache"
-    monkeypatch.setenv("PDF_STUDY_PADDLEOCR_CACHE", str(custom_cache))
+    monkeypatch.setenv("PDF_LEARNER_PADDLEOCR_CACHE", str(custom_cache))
 
     assert ocr.resolve_model_cache_dir() == custom_cache
 
@@ -132,10 +132,10 @@ def test_worker_initializes_paddleocr_for_cpu_and_local_cache(monkeypatch, tmp_p
 
 def test_worker_keeps_runtime_overrides_without_overriding_selected_language(monkeypatch, tmp_path):
     ocr = load_ocr_module(monkeypatch)
-    monkeypatch.setenv("PDF_STUDY_PADDLEOCR_DET_MODEL", "PP-OCRv6_tiny_det")
-    monkeypatch.setenv("PDF_STUDY_PADDLEOCR_REC_MODEL", "custom_rec")
-    monkeypatch.setenv("PDF_STUDY_PADDLEOCR_DET_LIMIT_SIDE_LEN", "736")
-    monkeypatch.setenv("PDF_STUDY_PADDLEOCR_CPU_THREADS", "1")
+    monkeypatch.setenv("PDF_LEARNER_PADDLEOCR_DET_MODEL", "PP-OCRv6_tiny_det")
+    monkeypatch.setenv("PDF_LEARNER_PADDLEOCR_REC_MODEL", "custom_rec")
+    monkeypatch.setenv("PDF_LEARNER_PADDLEOCR_DET_LIMIT_SIDE_LEN", "736")
+    monkeypatch.setenv("PDF_LEARNER_PADDLEOCR_CPU_THREADS", "1")
     calls: list[dict[str, object]] = []
 
     class FakePaddleOCR:

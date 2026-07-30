@@ -6,9 +6,9 @@
     3. scanned_empty.pdf     — 텍스트 레이어 거의 없음 → no_text_layer 거부
 
 사용:
-    python -m pdf_study.tests.fixtures.build_fixtures
+    python -m pdf_learner.tests.fixtures.build_fixtures
     또는
-    from pdf_study.tests.fixtures.build_fixtures import build_all
+    from pdf_learner.tests.fixtures.build_fixtures import build_all
     build_all()
 
 생성된 PDF는 git에 들어가지 않습니다(.gitignore). 생성기 fingerprint가
@@ -27,7 +27,7 @@ from PIL import Image
 # macOS 기본 한글 폰트. 다른 OS에선 KO_FONT 환경변수로 오버라이드 가능.
 import os
 KO_FONT = os.environ.get(
-    "PDF_STUDY_KO_FONT",
+    "PDF_LEARNER_KO_FONT",
     "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
 )
 
@@ -194,7 +194,7 @@ def build_ko_with_toc(out_path: Path) -> Path:
         "title": "테스트용 한국어 책",
         "author": "테스트 저자",
         "subject": "데이터베이스 시스템 개론",
-        "creator": "pdf_study fixture",
+        "creator": "pdf_learner fixture",
         "producer": "PyMuPDF",
     })
 
@@ -320,7 +320,7 @@ def build_ko_short(out_path: Path) -> Path:
         "title": "짧은 한국어 입문서",
         "author": "샘플 저자",
         "subject": "리팩터링 입문",
-        "creator": "pdf_study fixture",
+        "creator": "pdf_learner fixture",
         "producer": "PyMuPDF",
     })
 
@@ -364,7 +364,7 @@ def build_scanned_empty(out_path: Path) -> Path:
     doc.set_metadata({
         "title": "스캔본 샘플",
         "author": "",
-        "creator": "pdf_study fixture",
+        "creator": "pdf_learner fixture",
         "producer": "PyMuPDF",
     })
     for _ in range(5):

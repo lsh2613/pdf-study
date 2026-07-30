@@ -22,7 +22,7 @@
   새 PDF와 옵션을 먼저 검증하고 기존 `.work`만 제거한다. 이전 렌더 결과는 새 렌더가
   성공할 때까지 유지한다.
 - 렌더러는 비어 있는 staging 폴더에 현재 세대를 완성한다.
-- `.pdf-study-manifest.json`은 현재 형식, 학습 fingerprint, 서버가 관리하는
+- `.pdf-learner-manifest.json`은 현재 형식, 학습 fingerprint, 서버가 관리하는
   top-level 경로를 기록한다. 설치는 이전 manifest의 관리 경로만 교체하며 실패하면
   이전 세대와 manifest를 복원한다.
 - manifest 밖의 경로와 새 결과가 충돌하면 사용자 파일을 덮어쓰지 않고 실패한다.

@@ -200,11 +200,11 @@ def install_rendered_output(
     )
 
     staging_dir = Path(tempfile.mkdtemp(
-        prefix=f".pdf-study-render-{work_id}-",
+        prefix=f".pdf-learner-render-{work_id}-",
         dir=str(output_dir.parent),
     ))
     backup_dir = Path(tempfile.mkdtemp(
-        prefix=f".pdf-study-backup-{work_id}-",
+        prefix=f".pdf-learner-backup-{work_id}-",
         dir=str(output_dir.parent),
     ))
     installed: list[str] = []

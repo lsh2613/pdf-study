@@ -32,7 +32,7 @@ from . import question_contract
 
 logger = logging.getLogger(__name__)
 
-OUTPUT_MANIFEST_NAME = ".pdf-study-manifest.json"
+OUTPUT_MANIFEST_NAME = ".pdf-learner-manifest.json"
 
 # work_id 별 in-memory lock (state.json read-modify-write 직렬화)
 _locks: dict[str, threading.Lock] = {}

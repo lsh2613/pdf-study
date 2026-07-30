@@ -1,6 +1,6 @@
-# pdf-study 작업 기준
+# pdf-learner 작업 기준
 
-pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. 사용자는 개발자로 한정하지 않는다. PDF 자체를 공부하거나 책을 PDF로 만들어 학습하려는 사람이, 챕터 요약·핵심 포인트·검증 문제·확장 문제를 HTML 또는 터미널 자료로 받는 것이 목표다.
+pdf-learner는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. 사용자는 개발자로 한정하지 않는다. PDF 자체를 공부하거나 책을 PDF로 만들어 학습하려는 사람이, 챕터 요약·핵심 포인트·검증 문제·확장 문제를 HTML 또는 터미널 자료로 받는 것이 목표다.
 
 ```
 .
@@ -44,7 +44,7 @@ pdf-study는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다. �
   `summary_review`가 모든 section·important point coverage와 중요 누락·왜곡 부재를
   확인한 `passed` 결과만 완료로 저장한다.
 - `init_work`는 단답형·주관식·확장형 문제 선택과 선택적 학습자 정보를 같은 MCP form elicitation으로 직접 받는다. 사용자가 form을 승인하기 전에는 작업을 만들거나 PDF 스캔으로 넘어가지 않는다. 객관식만 기존 호환을 위해 기본 활성이다.
-- `init_work`가 고정 출력 폴더의 기존 관리 작업을 발견하면 `resume`, `replace`를 form elicitation으로 직접 확인한다. `replace`는 사용자의 명시적 선택을 받은 뒤에만 같은 등록 함수 안에서 실행한다. 관리되지 않은 파일이 있으면 실패한다. 렌더 결과 정리는 `.pdf-study-manifest.json`에 기록된 관리 경로에 한정하며 다른 사용자 파일을 삭제하거나 덮어쓰면 안 된다.
+- `init_work`가 고정 출력 폴더의 기존 관리 작업을 발견하면 `resume`, `replace`를 form elicitation으로 직접 확인한다. `replace`는 사용자의 명시적 선택을 받은 뒤에만 같은 등록 함수 안에서 실행한다. 관리되지 않은 파일이 있으면 실패한다. 렌더 결과 정리는 `.pdf-learner-manifest.json`에 기록된 관리 경로에 한정하며 다른 사용자 파일을 삭제하거나 덮어쓰면 안 된다.
 - 챕터 경계는 PDF 북마크 또는 목차 페이지 이미지로만 정한다. PDF 텍스트를 긁어 목차를 추정하는 코드를 추가하면 안 된다. `scan_pdf`는 목차 후보 이미지를 렌더할 뿐 OCR 모델을 준비하거나 실행하지 않는다.
 - 챕터 추출 범위의 canonical 키는 PDF 파일의 1-based 범위를 담는 `pdf_pages`다. `source_pages`는 원문에 표시된 페이지 번호를 보존하는 선택적 메타이며 추출 범위를 바꾸지 않는다. 구형 `page_range`·`printed_range`는 기존 작업 읽기 호환에만 사용한다.
 - 텍스트 레이어가 없거나 깨진 PDF는 text 모드로 밀어붙이면 안 된다. OCR 흐름은 `set_chapters`에서 PaddleOCR CPU로 본문을 선계산해 `chapters_raw/chN.json`의 `text`와 `char_count`로 저장하는 방향이다. `body_text`는 raw 본문을 덮어쓰는 경로로 쓰지 않는다.

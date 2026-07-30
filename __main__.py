@@ -1,4 +1,4 @@
-"""python -m pdf_study 진입점."""
+"""python -m pdf_learner 진입점."""
 from .server import main
 
 if __name__ == "__main__":

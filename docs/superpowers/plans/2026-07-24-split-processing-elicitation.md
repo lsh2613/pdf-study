@@ -331,7 +331,7 @@ async def _elicit_extraction_mode(ctx: Context, work_id: str) -> str | None:
     choices = processing_mode_contract.extraction_choices(text_quality)
     mode_type = Literal.__getitem__(tuple(choice["value"] for choice in choices))
     schema = create_model(
-        "PdfStudyExtractionModeSelection",
+        "PdfLearnerExtractionModeSelection",
         extraction_mode=(
             mode_type,
             Field(description="사용자가 선택한 본문 추출 방식"),
@@ -355,7 +355,7 @@ async def _elicit_execution_mode(ctx: Context) -> str | None:
     choices = processing_mode_contract.execution_choices()
     mode_type = Literal.__getitem__(tuple(choice["value"] for choice in choices))
     schema = create_model(
-        "PdfStudyExecutionModeSelection",
+        "PdfLearnerExecutionModeSelection",
         execution_mode=(
             mode_type,
             Field(description="사용자가 선택한 챕터 실행 방식"),

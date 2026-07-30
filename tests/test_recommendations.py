@@ -1,7 +1,7 @@
 """analysis._build_recommendations + _outline_to_chapters 단위 테스트 (PDF 없이)."""
 from __future__ import annotations
 
-from pdf_study import analysis
+from pdf_learner import analysis
 
 
 def _outline_chs():

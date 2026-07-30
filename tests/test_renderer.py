@@ -6,14 +6,14 @@ import sys
 
 import pytest
 
-from pdf_study import server
-from pdf_study.renderer.html_renderer import (
+from pdf_learner import server
+from pdf_learner.renderer.html_renderer import (
     HtmlRenderer,
     _FallbackMd,
     _chapter_body,
     _summary_section,
 )
-from pdf_study.renderer.study_loader import _unescape_if_double_escaped
+from pdf_learner.renderer.study_loader import _unescape_if_double_escaped
 from .conftest import (
     build_rendered_study,
     create_test_work,
@@ -289,7 +289,7 @@ def test_managed_output_removes_pages_for_removed_chapters(ko_with_toc, tmp_path
     assert not (out / "index.html").exists()
     assert not (out / "ch1.html").exists()
     assert not (out / "ch2.html").exists()
-    assert (out / ".pdf-study-manifest.json").exists()
+    assert (out / ".pdf-learner-manifest.json").exists()
 
 
 def test_managed_output_switches_format_without_touching_unrelated_file(
@@ -320,7 +320,7 @@ def test_progress_fingerprint_preserves_same_html_generation(ko_with_toc, tmp_pa
 
     assert rerendered["ok"], rerendered
     assert progress.read_text(encoding="utf-8") == '{"completed":true}'
-    manifest = (out / ".pdf-study-manifest.json").read_text(encoding="utf-8")
+    manifest = (out / ".pdf-learner-manifest.json").read_text(encoding="utf-8")
     assert '"study_fingerprint"' in manifest
 
 
@@ -344,7 +344,7 @@ def test_render_rollback_keeps_previous_generation(
 ):
     wid, out, _ = _build_multi(ko_with_toc, tmp_path)
     index_before = (out / "index.html").read_bytes()
-    manifest_path = out / ".pdf-study-manifest.json"
+    manifest_path = out / ".pdf-learner-manifest.json"
     manifest_before = manifest_path.read_bytes()
 
     def fail_render(self, work_id, output_dir):
@@ -389,7 +389,7 @@ def test_managed_output_refuses_to_overwrite_unmanaged_name(ko_short, tmp_path):
     assert rendered["ok"] is False
     assert "unmanaged paths" in rendered["error"]
     assert user_readme.read_text(encoding="utf-8") == "user-owned"
-    assert not (out / ".pdf-study-manifest.json").exists()
+    assert not (out / ".pdf-learner-manifest.json").exists()
 
 
 def test_managed_output_refuses_to_overwrite_unmanaged_broken_symlink(
@@ -422,7 +422,7 @@ def test_managed_output_refuses_to_overwrite_unmanaged_broken_symlink(
     assert rendered["ok"] is False
     assert "unmanaged paths" in rendered["error"]
     assert user_readme.is_symlink()
-    assert not (out / ".pdf-study-manifest.json").exists()
+    assert not (out / ".pdf-learner-manifest.json").exists()
 
 
 # ---------------------------- 단일 챕터 ----------------------------

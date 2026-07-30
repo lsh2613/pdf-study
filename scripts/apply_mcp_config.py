@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the pdf-study MCP server entry to client configuration files."""
+"""Apply the pdf-learner MCP server entry to client configuration files."""
 from __future__ import annotations
 
 import argparse
@@ -17,7 +17,7 @@ from typing import Any
 
 TARGETS = ("claude", "codex", "antigravity-cli")
 SERVER_CONFIG = {
-    "args": ["-m", "pdf_study"],
+    "args": ["-m", "pdf_learner"],
 }
 
 
@@ -86,7 +86,7 @@ def _server_entry(command: str, cache_dir: Path) -> dict[str, Any]:
     return {
         **SERVER_CONFIG,
         "command": command,
-        "env": {"PDF_STUDY_PADDLEOCR_CACHE": str(cache_dir)},
+        "env": {"PDF_LEARNER_PADDLEOCR_CACHE": str(cache_dir)},
     }
 
 
@@ -102,14 +102,14 @@ def apply_codex_cli_config(
         "mcp",
         "add",
         "--env",
-        f"PDF_STUDY_PADDLEOCR_CACHE={cache_dir}",
-        "pdf-study",
+        f"PDF_LEARNER_PADDLEOCR_CACHE={cache_dir}",
+        "pdf-learner",
         "--",
         command,
         "-m",
-        "pdf_study",
+        "pdf_learner",
     ]
-    get_command = [codex_bin, "mcp", "get", "pdf-study"]
+    get_command = [codex_bin, "mcp", "get", "pdf-learner"]
     for cli_command, action in ((add_command, "register"), (get_command, "verify")):
         try:
             completed = subprocess.run(
@@ -130,7 +130,7 @@ def _updated_config(
 ) -> dict[str, Any]:
     updated = dict(data)
     servers = dict(updated.get(key, {}))
-    servers["pdf-study"] = _server_entry(command, cache_dir)
+    servers["pdf-learner"] = _server_entry(command, cache_dir)
     updated[key] = servers
     return updated
 
@@ -245,7 +245,7 @@ def ensure_codex_elicitation_allowed(config_path: Path) -> bool:
             f"{assignment.group('trailing')}{assignment.group('newline')}"
         )
         updated = text[:assignment.start()] + replacement + text[assignment.end():]
-    backup_path = config_path.with_name(config_path.name + ".pdf-study.bak")
+    backup_path = config_path.with_name(config_path.name + ".pdf-learner.bak")
     try:
         shutil.copy2(config_path, backup_path)
         _atomic_write(config_path, updated.encode("utf-8"), snapshot[2])
@@ -294,7 +294,7 @@ def apply_configs(
     for path, _, _ in prepared:
         path.parent.mkdir(parents=True, exist_ok=True)
         if snapshots[path][0]:
-            shutil.copy2(path, path.with_name(path.name + ".pdf-study.bak"))
+            shutil.copy2(path, path.with_name(path.name + ".pdf-learner.bak"))
 
     try:
         for path, content, mode in prepared:

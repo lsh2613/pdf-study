@@ -1,6 +1,6 @@
 # 구조
 
-pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, 학습 자료 렌더링을 맡고, 챕터별 요약·문제 작성은 MCP 클라이언트의 메인 모델 또는 서브 에이전트가 수행하는 구조다. 서버는 PDF 본문을 직접 요약하지 않고, 요약자가 정확한 입력과 저장 계약을 지키도록 단계별 도구와 프롬프트를 제공한다.
+pdf-learner는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, 학습 자료 렌더링을 맡고, 챕터별 요약·문제 작성은 MCP 클라이언트의 메인 모델 또는 서브 에이전트가 수행하는 구조다. 서버는 PDF 본문을 직접 요약하지 않고, 요약자가 정확한 입력과 저장 계약을 지키도록 단계별 도구와 프롬프트를 제공한다.
 
 ## 구성
 
@@ -16,7 +16,7 @@ pdf-study는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, �
 - `pdf/`는 PDF 파일을 여는 경계다. 외부로 보이는 페이지 번호는 1부터 시작하며, 내부 라이브러리의 0부터 시작하는 페이지 번호는 이 모듈 안에서만 쓴다.
 - `prompts.py`는 책 정보, 학습자 맥락, 문제 유형, 처리 모드를 넣어 한국어 챕터 처리 프롬프트를 만든다.
 - `renderer/`는 저장된 중립 JSON을 HTML 사이트 또는 Markdown+TUI 폴더로 변환한다. 렌더러는 PDF를 다시 읽지 않는다.
-- `renderer/output_manager.py`는 렌더 staging, 학습 fingerprint, `.pdf-study-manifest.json`, 관리 경로 교체와 실패 rollback을 담당한다. 개별 렌더러는 비어 있는 staging 폴더에 한 세대만 만든다.
+- `renderer/output_manager.py`는 렌더 staging, 학습 fingerprint, `.pdf-learner-manifest.json`, 관리 경로 교체와 실패 rollback을 담당한다. 개별 렌더러는 비어 있는 staging 폴더에 한 세대만 만든다.
 - `templates/`는 최종 결과물에 복사되는 런처, 정적 자산, TUI 엔진을 담는다. HTML 런처는 렌더링한 프로젝트 환경의 Python으로 loopback 전용 `study_html.py`를 실행하며, `start_study.sh`와 `start_study.bat`은 포트 `0`으로 사용 가능한 포트를 자동 배정한다.
 - `scripts/setup_mcp.sh`는 저장소 안의 `.venv`를 만들고 검증한 뒤 Claude Code,
   Codex CLI, Antigravity CLI의 전역 MCP 설정에 `.venv/bin/python` 절대 경로를
@@ -101,6 +101,6 @@ flowchart TD
 
 서버가 맡는 경계는 PDF 처리, 챕터 원문 입력, 상태 저장, 출력 렌더링이다. 학습 자료의 실제 내용 품질은 클라이언트 모델이 맡지만, 서버는 저장 전에 필수 필드가 비어 있는 결과를 거부한다.
 
-pdf-study 서버는 외부 검색이나 검색용 HTTP 호출을 하지 않는다. PDF 처리와 결과 렌더링은 로컬 파일 시스템에서 끝난다. 챕터 본문을 받아 실제 내용을 생성하는 모델의 네트워크 경계는 MCP 클라이언트와 모델 제공자의 실행 환경에 따르며 서버의 로컬 처리 보장과 구분한다.
+pdf-learner 서버는 외부 검색이나 검색용 HTTP 호출을 하지 않는다. PDF 처리와 결과 렌더링은 로컬 파일 시스템에서 끝난다. 챕터 본문을 받아 실제 내용을 생성하는 모델의 네트워크 경계는 MCP 클라이언트와 모델 제공자의 실행 환경에 따르며 서버의 로컬 처리 보장과 구분한다.
 
-최종 출력 폴더에서 서버가 소유하는 범위는 `.work`와 `.pdf-study-manifest.json`에 기록된 top-level 렌더 경로다. manifest 밖의 파일은 렌더 교체 대상이 아니며 새 결과와 이름이 충돌하면 덮어쓰지 않고 실패한다.
+최종 출력 폴더에서 서버가 소유하는 범위는 `.work`와 `.pdf-learner-manifest.json`에 기록된 top-level 렌더 경로다. manifest 밖의 파일은 렌더 교체 대상이 아니며 새 결과와 이름이 충돌하면 덮어쓰지 않고 실패한다.

@@ -18,6 +18,6 @@ tests/fixtures/.fixture-manifest.json
 .mcp.json
 .claude.json
 .agents/mcp_config.json
-*.pdf-study.bak
+*.pdf-learner.bak
 result/
 .dryforge/
