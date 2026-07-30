@@ -14,7 +14,7 @@ Options:
   --claude         Apply config to Claude Code.
   --codex          Apply config to Codex CLI.
   --antigravity-cli Apply config to Antigravity CLI.
-  (If no targets are specified, config is applied to all three.)
+  (If no targets are specified, config is applied only to Codex CLI.)
 
   --print-config   Print the MCP config JSON for this checkout and exit.
   --check          Verify the existing .venv can import required dependencies.
@@ -169,7 +169,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-  TARGETS=("claude" "codex" "antigravity-cli")
+  TARGETS=("codex")
 fi
 
 INSTALL_SPEC="$REPO_DIR"

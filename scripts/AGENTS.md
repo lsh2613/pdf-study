@@ -16,8 +16,8 @@ MCP 설정의 `command`는 `.venv/bin/python` 절대 경로여야 한다. `pytho
 
 - `--print-config`는 설치를 실행하지 않고 현재 checkout 기준 JSON만 출력한다.
 - `--check`는 이미 있는 `.venv`에서 필수 import를 확인하고, 없으면 실패해야 한다.
-- 기본 실행은 기존 프로젝트 venv 재사용 또는 새 venv 생성, 패키지 재설치, import 검증, Claude Code/Codex CLI/Antigravity CLI의 전역 설정 자동 적용 순서로 진행한다.
-- 대상 클라이언트를 지정하지 않으면 세 클라이언트 설정을 모두 적용한다.
+- 기본 실행은 기존 프로젝트 venv 재사용 또는 새 venv 생성, 패키지 재설치, import 검증, Codex CLI 전역 설정 자동 적용 순서로 진행한다.
+- 대상 클라이언트를 지정하지 않으면 Codex CLI만 설정한다. Claude Code와 Antigravity CLI는 각각 `--claude`, `--antigravity-cli`를 명시했을 때만 설정한다.
 - `uv`가 없으면 자동 설치를 시도할 수 있고, macOS에서 `libomp`가 없고 Homebrew가 있으면 설치를 시도할 수 있다.
 - 새 런타임 의존성을 추가하면 import 검증 목록도 함께 갱신해야 한다.
 

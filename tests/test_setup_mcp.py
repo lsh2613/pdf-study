@@ -81,3 +81,11 @@ def test_setup_script_reuses_existing_project_venv():
 
     assert 'if [[ -x "$VENV_PY" ]]' in text
     assert 'echo "Reusing existing project-local venv: $VENV_DIR"' in text
+
+
+def test_setup_script_defaults_to_codex_only():
+    """대상 옵션을 생략하면 Codex만 설정해야 한다."""
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert 'TARGETS=("codex")' in text
+    assert 'TARGETS=("claude" "codex" "antigravity-cli")' not in text
