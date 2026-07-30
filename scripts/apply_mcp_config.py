@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,17 @@ SERVER_CONFIG = {
 
 class ConfigError(RuntimeError):
     """Raised when an existing MCP config cannot be safely updated."""
+
+
+_CODEX_ELICITATION_POLICY = (
+    "approval_policy = { granular = { "
+    "sandbox_approval = false, "
+    "rules = false, "
+    "mcp_elicitations = true, "
+    "request_permissions = false, "
+    "skill_approval = false "
+    "} }"
+)
 
 
 def config_paths(
@@ -151,6 +164,88 @@ def _restore(path: Path, snapshot: tuple[bool, bytes | None, int]) -> None:
         path.unlink()
 
 
+def ensure_codex_elicitation_allowed(config_path: Path) -> bool:
+    """Convert only a blocking global ``never`` policy to MCP-only prompting.
+
+    Returns ``True`` when the Codex config was changed. Other interactive
+    policies and an already-compatible granular policy are left untouched.
+    """
+    if not config_path.exists():
+        return False
+    if not config_path.is_file() or config_path.is_symlink():
+        raise ConfigError(f"{config_path}: expected a regular non-symlink TOML file")
+
+    snapshot = _snapshot(config_path)
+    assert snapshot[1] is not None
+    try:
+        text = snapshot[1].decode("utf-8")
+        data = tomllib.loads(text)
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ConfigError(f"{config_path}: invalid TOML ({exc})") from exc
+
+    policy = data.get("approval_policy")
+    if policy is None:
+        return False
+    if isinstance(policy, str) and policy in {"on-request", "untrusted"}:
+        return False
+    if isinstance(policy, dict):
+        granular = policy.get("granular")
+        if (
+            isinstance(granular, dict)
+            and granular.get("mcp_elicitations") is True
+        ):
+            return False
+        raise ConfigError(
+            f"{config_path}: granular approval_policy explicitly does not allow "
+            "mcp_elicitations; enable it manually"
+        )
+    if policy != "never":
+        raise ConfigError(
+            f"{config_path}: unsupported approval_policy value {policy!r}"
+        )
+
+    first_table = re.search(r"(?m)^[ \t]*\[[^\r\n]", text)
+    root_text = text[:first_table.start()] if first_table else text
+    assignment = re.search(
+        r"""(?mx)
+        ^(?P<indent>[ \t]*)
+        approval_policy[ \t]*=[ \t]*
+        (?P<quote>["'])never(?P=quote)
+        (?P<trailing>[ \t]*(?:\#[^\r\n]*)?)
+        (?P<newline>\r?\n|$)
+        """,
+        root_text,
+    )
+    if assignment is None:
+        raise ConfigError(
+            f"{config_path}: could not safely locate the root "
+            "approval_policy = \"never\" assignment"
+        )
+
+    replacement = (
+        f"{assignment.group('indent')}{_CODEX_ELICITATION_POLICY}"
+        f"{assignment.group('trailing')}{assignment.group('newline')}"
+    )
+    updated = text[:assignment.start()] + replacement + text[assignment.end():]
+    backup_path = config_path.with_name(config_path.name + ".pdf-study.bak")
+    try:
+        shutil.copy2(config_path, backup_path)
+        _atomic_write(config_path, updated.encode("utf-8"), snapshot[2])
+    except OSError as exc:
+        try:
+            _restore(config_path, snapshot)
+        except OSError as restore_exc:
+            raise ConfigError(
+                f"{config_path}: approval policy update failed ({exc}); "
+                f"rollback failed ({restore_exc})"
+            ) from restore_exc
+        raise ConfigError(
+            f"{config_path}: approval policy update failed ({exc}); "
+            "changes were rolled back"
+        ) from exc
+    return True
+
+
 def apply_configs(
     *,
     command: str,
@@ -223,6 +318,12 @@ def main() -> int:
             codex_bin = shutil.which("codex")
             if codex_bin is None:
                 raise ConfigError("Codex CLI was not found on PATH")
+            codex_home = Path(
+                os.environ.get("CODEX_HOME", Path.home() / ".codex")
+            )
+            policy_updated = ensure_codex_elicitation_allowed(
+                codex_home / "config.toml"
+            )
             apply_codex_cli_config(
                 command=args.command,
                 cache_dir=args.cache_dir,
@@ -235,6 +336,16 @@ def main() -> int:
     for target, path in zip(json_targets, paths):
         print(f"✅ Successfully updated {target} MCP config at: {path}")
     if "codex" in targets:
+        if policy_updated:
+            print(
+                "✅ Updated Codex approval policy to allow only MCP "
+                "elicitation prompts"
+            )
+        else:
+            print(
+                "ℹ️ Codex global config does not block MCP elicitation "
+                "(CLI, profile, or managed overrides may still apply)"
+            )
         print("✅ Successfully registered and verified Codex CLI MCP config")
     return 0
 

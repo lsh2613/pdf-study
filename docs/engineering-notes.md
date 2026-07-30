@@ -39,6 +39,21 @@
 등록된 입력만 예시로 사용하고, 선택이 필요하면 도구가 form을 연다고 안내한다.
 번호형 자유 텍스트 선택지는 구조화 fallback과 같은 우회 경로로 취급한다.
 
+## Codex가 Elicitation 요청을 method not found로 거절
+
+증상: 클라이언트 capability에는 Elicitation이 있지만 `ctx.elicit`에서
+`McpError: elicitation/create`가 발생하고 form이 열리지 않는다.
+
+원인: Pydantic의 `str | None`은 `anyOf=[string, null]`을 만들고 모델 기본
+JSON Schema는 최상위 `title`도 만든다. 둘 다 Codex의 엄격한 MCP primitive form
+계약 밖이라 요청이 도구 실행 전에 거절될 수 있다.
+
+대응: 모든 정적·동적 form 모델은 공통 Elicitation 기반 모델을 상속한다. 이 기반은
+최상위 `title`을 제거하고, 선택적 문자열은 `str`과 빈 문자열 기본값으로 표현한다.
+FastMCP round-trip 테스트에서 실제 `requestedSchema`의 최상위 키, 각 필드의
+primitive `type`, nullable `anyOf`와 `$ref` 부재를 검사한다. Codex 세션 자체의
+승인 정책이 `never`이면 유효한 form도 자동 거절되므로 서버 스키마 오류와 구분한다.
+
 ## Python 직접 실행으로 Elicitation 우회
 
 증상: MCP 입력 스키마에서 선택 파라미터를 제거했는데도 셸 권한이 있는 에이전트가

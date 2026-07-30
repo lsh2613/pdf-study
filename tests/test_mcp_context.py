@@ -54,6 +54,41 @@ def _assert_no_removed_workflow_inputs(value) -> None:
             assert removed not in value
 
 
+def _assert_codex_primitive_form_schema(schema: dict) -> None:
+    """Codex 0.146의 엄격한 MCP form 스키마 부분집합을 검증한다."""
+    assert set(schema) <= {"$schema", "type", "properties", "required"}
+    assert schema["type"] == "object"
+    assert isinstance(schema["properties"], dict)
+
+    common_keys = {"type", "title", "description", "default"}
+    type_keys = {
+        "string": {"enum", "enumNames", "oneOf", "format", "minLength", "maxLength"},
+        "boolean": set(),
+        "number": {"minimum", "maximum"},
+        "integer": {"minimum", "maximum"},
+        "array": {"items", "minItems", "maxItems"},
+    }
+    for field_schema in schema["properties"].values():
+        field_type = field_schema.get("type")
+        assert field_type in type_keys
+        assert set(field_schema) <= common_keys | type_keys[field_type]
+        assert "anyOf" not in field_schema
+        assert "$ref" not in field_schema
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        server._OutputFormatSelection,
+        server._OcrLanguageSelection,
+        server._ResumeSelection,
+        server._CleanupSelection,
+    ],
+)
+def test_static_elicitation_models_use_codex_primitive_form_schema(model):
+    _assert_codex_primitive_form_schema(model.model_json_schema())
+
+
 def test_choice_tools_fail_closed_without_elicitation(tmp_path, ko_short):
     ctx = ElicitationContext(
         cwd=tmp_path,
@@ -256,6 +291,41 @@ def test_mcp_init_work_uses_elicited_question_choices(
         "extension": False,
     }
     assert len(ctx.messages) == 1
+
+
+def test_mcp_existing_work_action_uses_codex_primitive_form_schema(
+    tmp_path, ko_short,
+):
+    created = asyncio.run(server.init_work(
+        pdf_path=str(ko_short),
+        ctx=ElicitationContext(
+            cwd=tmp_path,
+            responses=[{
+                "enable_short_answer": False,
+                "enable_reflection": False,
+                "enable_extension": False,
+            }],
+        ),
+    ))
+    assert created["ok"] is True, created
+
+    ctx = ElicitationContext(
+        cwd=tmp_path,
+        responses=[{"action": "resume"}],
+    )
+    schemas = []
+    original_elicit = ctx.elicit
+
+    async def capture_schema(message, schema):
+        schemas.append(schema.model_json_schema())
+        return await original_elicit(message, schema)
+
+    ctx.elicit = capture_schema
+    resumed = asyncio.run(server.init_work(pdf_path=str(ko_short), ctx=ctx))
+
+    assert resumed["ok"] is True, resumed
+    assert len(schemas) == 1
+    _assert_codex_primitive_form_schema(schemas[0])
 
 
 def test_mcp_init_work_allows_omitted_user_context(
@@ -660,11 +730,13 @@ def test_fastmcp_round_trip_uses_fixed_server_root_and_elicitation(
     tmp_path, ko_short,
 ):
     messages = []
+    schemas = []
     request_workspace = tmp_path / "request-workspace"
     request_workspace.mkdir()
 
     async def on_elicit(context, params):
         messages.append(params.message)
+        schemas.append(params.requestedSchema)
         return types.ElicitResult(
             action="accept",
             content={
@@ -719,15 +791,23 @@ def test_fastmcp_round_trip_uses_fixed_server_root_and_elicitation(
         "extension": False,
     }
     assert len(messages) == 1
+    assert len(schemas) == 1
+    _assert_codex_primitive_form_schema(schemas[0])
+    user_context = schemas[0]["properties"]["user_context"]
+    assert user_context["type"] == "string"
+    assert user_context["default"] == ""
+    assert "user_context" not in schemas[0]["required"]
 
 
 def test_fastmcp_set_chapters_uses_three_ordered_elicitations(
     tmp_path, ko_short,
 ):
     messages = []
+    schemas = []
 
     async def on_elicit(context, params):
         messages.append(params.message)
+        schemas.append(params.requestedSchema)
         if "[챕터 구성과 범위]" in params.message:
             content = {
                 "chapter_strategy": "proceed",
@@ -778,10 +858,14 @@ def test_fastmcp_set_chapters_uses_three_ordered_elicitations(
     assert "[챕터 구성과 범위]" in messages[0]
     assert "[본문 추출 방식]" in messages[1]
     assert "[실행 방식]" in messages[2]
+    assert len(schemas) == 3
+    for schema in schemas:
+        _assert_codex_primitive_form_schema(schema)
 
 
 def test_fastmcp_static_choice_elicitations_use_supported_schemas(monkeypatch):
     captured = {}
+    schemas = []
 
     def fake_prepare_ocr(work_id, ocr_language=""):
         captured["ocr"] = (work_id, ocr_language)
@@ -817,6 +901,7 @@ def test_fastmcp_static_choice_elicitations_use_supported_schemas(monkeypatch):
     )
 
     async def on_elicit(context, params):
+        schemas.append(params.requestedSchema)
         if "OCR로 읽을 PDF의 언어" in params.message:
             content = {"ocr_language": "english"}
         elif "최종 학습 자료 형식" in params.message:
@@ -850,3 +935,6 @@ def test_fastmcp_static_choice_elicitations_use_supported_schemas(monkeypatch):
         "ocr": ("work-ocr", "english"),
         "finalize": ("work-finalize", "md_tui", True),
     }
+    assert len(schemas) == 2
+    for schema in schemas:
+        _assert_codex_primitive_form_schema(schema)

@@ -24,6 +24,12 @@ fallback이 없다. Elicitation을 지원하지 않는 세션은
 `data.required_capability="elicitation.form"`으로 상태 변경 없이 실패한다.
 거절·취소도 선택 뒤의 실행 본문으로 넘어가지 않는다.
 
+Form의 `requestedSchema`는 Codex가 처리할 수 있는 MCP primitive schema
+부분집합만 사용한다. 최상위 키는 `$schema`, `type`, `properties`, `required`로
+제한하고 Pydantic 모델 이름인 `title`을 전송하지 않는다. 선택적 문자열은
+`string | null`의 `anyOf`로 표현하지 않고 `type="string"`, `default=""`로
+표현하며 빈 문자열을 “학습자 정보 없음”으로 해석한다.
+
 선택을 소비하는 각 워크플로는 form Elicitation과 승인 후 실행을 하나의 등록된
 async 함수에서 처리한다. `pdf_study.server`에는 같은 작업을 선택 인자로 바로
 실행하는 별도 `_impl` 함수나 별도 MCP wrapper가 없다. 클라이언트는 모듈의 하위

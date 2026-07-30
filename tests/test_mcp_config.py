@@ -4,7 +4,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import stat
 import subprocess
+import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -169,3 +172,135 @@ def test_global_codex_registration_uses_cli_and_verifies_result(
         ],
         ["codex", "mcp", "get", "pdf-study"],
     ]
+
+
+def test_codex_never_policy_becomes_mcp_elicitation_only(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    original = (
+        "# Preserve this comment.\n"
+        'approval_policy = "never" # Existing automation default.\n'
+        'model = "gpt-test"\n'
+        "\n"
+        "[mcp_servers.other]\n"
+        'command = "other"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    config.chmod(0o640)
+
+    changed = apply_mcp_config.ensure_codex_elicitation_allowed(config)
+
+    assert changed is True
+    parsed = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert parsed["approval_policy"] == {
+        "granular": {
+            "sandbox_approval": False,
+            "rules": False,
+            "mcp_elicitations": True,
+            "request_permissions": False,
+            "skill_approval": False,
+        },
+    }
+    assert parsed["model"] == "gpt-test"
+    assert parsed["mcp_servers"]["other"]["command"] == "other"
+    assert "# Preserve this comment." in config.read_text(encoding="utf-8")
+    assert "# Existing automation default." in config.read_text(encoding="utf-8")
+    assert stat.S_IMODE(config.stat().st_mode) == 0o640
+    assert config.with_name("config.toml.pdf-study.bak").read_text(
+        encoding="utf-8"
+    ) == original
+
+
+@pytest.mark.parametrize("policy", ["on-request", "untrusted"])
+def test_codex_interactive_policy_is_left_unchanged(
+    tmp_path: Path, policy: str,
+) -> None:
+    config = tmp_path / "config.toml"
+    original = f'approval_policy = "{policy}"\n'
+    config.write_text(original, encoding="utf-8")
+
+    changed = apply_mcp_config.ensure_codex_elicitation_allowed(config)
+
+    assert changed is False
+    assert config.read_text(encoding="utf-8") == original
+    assert not config.with_name("config.toml.pdf-study.bak").exists()
+
+
+def test_codex_compatible_granular_policy_is_left_unchanged(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "config.toml"
+    original = (
+        "approval_policy = { granular = { "
+        "mcp_elicitations = true, sandbox_approval = false } }\n"
+    )
+    config.write_text(original, encoding="utf-8")
+
+    changed = apply_mcp_config.ensure_codex_elicitation_allowed(config)
+
+    assert changed is False
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_codex_explicitly_disabled_granular_elicitation_fails_closed(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "config.toml"
+    original = (
+        "approval_policy = { granular = { "
+        "mcp_elicitations = false, sandbox_approval = false } }\n"
+    )
+    config.write_text(original, encoding="utf-8")
+
+    with pytest.raises(
+        apply_mcp_config.ConfigError,
+        match="explicitly does not allow mcp_elicitations",
+    ):
+        apply_mcp_config.ensure_codex_elicitation_allowed(config)
+
+    assert config.read_text(encoding="utf-8") == original
+    assert not config.with_name("config.toml.pdf-study.bak").exists()
+
+
+def test_config_cli_updates_never_policy_before_codex_registration(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    config = codex_home / "config.toml"
+    config.write_text('approval_policy = "never"\n', encoding="utf-8")
+    registration_calls = []
+
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(
+        apply_mcp_config.shutil,
+        "which",
+        lambda name: "/usr/bin/codex" if name == "codex" else None,
+    )
+    monkeypatch.setattr(
+        apply_mcp_config,
+        "apply_codex_cli_config",
+        lambda **kwargs: registration_calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "apply_mcp_config.py",
+            "--command",
+            str(tmp_path / ".venv/bin/python"),
+            "--cache-dir",
+            str(tmp_path / ".paddleocr"),
+            "--scope",
+            "global",
+            "--project-dir",
+            str(tmp_path),
+            "codex",
+        ],
+    )
+
+    assert apply_mcp_config.main() == 0
+
+    parsed = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert parsed["approval_policy"]["granular"]["mcp_elicitations"] is True
+    assert len(registration_calls) == 1
+    assert "Updated Codex approval policy" in capsys.readouterr().out

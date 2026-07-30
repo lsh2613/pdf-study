@@ -41,6 +41,11 @@ text/OCR과 순차/병렬을 각각 고르기 전에는 서버가 기본값을 �
 두지 않는다. Elicitation 미지원 세션과 거절·취소는 상태와 출력 파일을 바꾸지 않고
 실패해야 한다.
 
+Elicitation form의 JSON Schema는 문자열·숫자·불리언과 지원되는 문자열 enum 같은
+MCP primitive 필드만 사용한다. 선택적 학습자 정보는 nullable union이 아니라
+기본값이 빈 문자열인 문자열 필드로 받으며, form 최상위에 클라이언트 계약 밖의
+Pydantic 모델 메타데이터를 포함하지 않는다.
+
 선택이 필요한 각 워크플로는 form Elicitation과 승인 후 실행을 하나의 등록된 async
 MCP 함수에서 처리한다. 동일 작업을 선택 인자로 직접 실행하는 별도 동기 함수,
 `_impl` 함수, MCP wrapper를 두지 않는다. 테스트 준비는 선택형 워크플로 전체를

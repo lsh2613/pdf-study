@@ -13,7 +13,7 @@ from typing import Any
 
 from mcp import types
 from mcp.server.fastmcp import Context, FastMCP
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from . import analysis, processing_mode_contract, prompts, question_contract, workspace
 from .renderer import RENDERERS
@@ -62,7 +62,20 @@ _OCR_LANGUAGE_CHOICES = (
 )
 
 
-class _OutputFormatSelection(BaseModel):
+def _normalize_elicitation_json_schema(schema: dict[str, Any]) -> None:
+    """Codex MCP form의 엄격한 최상위 스키마 계약에 맞춘다."""
+    schema.pop("title", None)
+
+
+class _ElicitationSelection(BaseModel):
+    """모든 form Elicitation이 공유하는 Codex 호환 Pydantic 기반."""
+
+    model_config = ConfigDict(
+        json_schema_extra=_normalize_elicitation_json_schema,
+    )
+
+
+class _OutputFormatSelection(_ElicitationSelection):
     output_format: str = Field(
         description="사용자가 선택한 최종 학습 자료 형식",
         json_schema_extra={
@@ -71,7 +84,7 @@ class _OutputFormatSelection(BaseModel):
     )
 
 
-class _OcrLanguageSelection(BaseModel):
+class _OcrLanguageSelection(_ElicitationSelection):
     ocr_language: str = Field(
         description="사용자가 선택한 PDF OCR 언어",
         json_schema_extra={
@@ -80,13 +93,13 @@ class _OcrLanguageSelection(BaseModel):
     )
 
 
-class _ResumeSelection(BaseModel):
+class _ResumeSelection(_ElicitationSelection):
     resume_confirmed: bool = Field(
         description="기존 pdf-study 작업을 이어서 진행할지 여부",
     )
 
 
-class _CleanupSelection(BaseModel):
+class _CleanupSelection(_ElicitationSelection):
     cleanup_confirmed: bool = Field(
         description="최종 결과는 유지하고 .work 중간 데이터만 삭제할지 여부",
     )
@@ -527,9 +540,9 @@ async def _elicit_question_setup(
     fields: dict[str, tuple[Any, Any]] = {}
     if setup["user_context_request"]:
         fields["user_context"] = (
-            str | None,
+            str,
             Field(
-                default=None,
+                default="",
                 description="선택 사항: 학습 목적, 배경지식, 관심 분야, 현재 수준",
             ),
         )
@@ -541,7 +554,11 @@ async def _elicit_question_setup(
             bool,
             Field(description=f"{question['question']} {choice_desc}"),
         )
-    schema = create_model("PdfStudyQuestionSetupSelection", **fields)
+    schema = create_model(
+        "PdfStudyQuestionSetupSelection",
+        __base__=_ElicitationSelection,
+        **fields,
+    )
     message = (
         (
             "다음 Codex workspace 기준 위치에 새 작업을 만듭니다.\n"
@@ -584,7 +601,11 @@ async def _elicit_chapter_setup(
                 json_schema_extra={"enum": list(chapter_values)},
             ),
         )
-    schema = create_model("PdfStudyChapterSetupSelection", **fields)
+    schema = create_model(
+        "PdfStudyChapterSetupSelection",
+        __base__=_ElicitationSelection,
+        **fields,
+    )
     chapter_lines = []
     for chapter in chapters:
         pages = chapter.get("pdf_pages", chapter.get("page_range"))
@@ -621,6 +642,7 @@ async def _elicit_extraction_mode(ctx: Context, work_id: str) -> str | None:
     allowed_values = tuple(choice["value"] for choice in choices)
     schema = create_model(
         "PdfStudyExtractionModeSelection",
+        __base__=_ElicitationSelection,
         extraction_mode=(
             str,
             Field(
@@ -648,6 +670,7 @@ async def _elicit_execution_mode(ctx: Context) -> str | None:
     allowed_values = tuple(choice["value"] for choice in choices)
     schema = create_model(
         "PdfStudyExecutionModeSelection",
+        __base__=_ElicitationSelection,
         execution_mode=(
             str,
             Field(
@@ -764,6 +787,7 @@ async def init_work(
         )
         action_schema = create_model(
             "PdfStudyExistingWorkActionSelection",
+            __base__=_ElicitationSelection,
             action=(
                 str,
                 Field(
