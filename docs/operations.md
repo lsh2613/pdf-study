@@ -30,6 +30,10 @@ Codex 전역 `config.toml`의 `approval_policy`가 없거나 정확히 `"never"`
 승인 종류는 계속 자동 거절하면서 MCP form만 표시하는 granular 정책으로 바꾼다.
 정책이 없더라도 실행 surface의 기본값이 `never`로 확정될 수 있으므로 명시적으로
 설정한다. 변경 전 파일은 `config.toml.pdf-learner.bak`으로 백업한다.
+같은 등록 과정에서 `pdf-learner` 서버에는
+`default_tools_approval_mode = "approve"`를 설정한다. 따라서 신뢰한 로컬
+pdf-learner의 일반 MCP 도구 호출은 개별 승인 없이 실행되며, 사용자가 직접 답해야
+하는 form elicitation은 그대로 표시된다.
 
 기본 설치는 MCP 실행에 필요한 런타임 의존성만 설치한다. 테스트까지 실행할 개발 환경이 필요하면 다음 명령을 사용한다.
 

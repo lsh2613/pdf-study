@@ -42,6 +42,10 @@ _CODEX_ELICITATION_LAUNCH_GUIDANCE = (
     "codex --sandbox danger-full-access"
 )
 
+_CODEX_PDF_LEARNER_DEFAULT_TOOL_APPROVAL = (
+    'default_tools_approval_mode = "approve"'
+)
+
 
 def config_paths(
     scope: str,
@@ -264,6 +268,86 @@ def ensure_codex_elicitation_allowed(config_path: Path) -> bool:
     return True
 
 
+def ensure_codex_pdf_learner_tools_auto_approved(config_path: Path) -> bool:
+    """Set the local pdf-learner server's default MCP approval to approve.
+
+    The Codex CLI creates the server table through ``codex mcp add``.  This
+    narrowly updates that table afterwards, leaving every other MCP server and
+    any per-tool overrides intact.
+    """
+    if not config_path.exists():
+        raise ConfigError(
+            f"{config_path}: Codex MCP registration did not create config.toml"
+        )
+    if not config_path.is_file() or config_path.is_symlink():
+        raise ConfigError(f"{config_path}: expected a regular non-symlink TOML file")
+
+    snapshot = _snapshot(config_path)
+    assert snapshot[1] is not None
+    try:
+        text = snapshot[1].decode("utf-8")
+        data = tomllib.loads(text)
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ConfigError(f"{config_path}: invalid TOML ({exc})") from exc
+
+    server = data.get("mcp_servers", {}).get("pdf-learner")
+    if not isinstance(server, dict):
+        raise ConfigError(
+            f"{config_path}: Codex MCP registration did not create the pdf-learner server"
+        )
+    if server.get("default_tools_approval_mode") == "approve":
+        return False
+
+    header = re.search(
+        r"(?m)^[ \t]*\[mcp_servers\.pdf-learner\][ \t]*(?:\#[^\r\n]*)?(?:\r?\n|$)",
+        text,
+    )
+    if header is None:
+        raise ConfigError(
+            f"{config_path}: could not safely locate the pdf-learner MCP server table"
+        )
+    next_header = re.search(r"(?m)^[ \t]*\[[^\r\n]+\]", text[header.end():])
+    table_end = header.end() + (next_header.start() if next_header else len(text[header.end():]))
+    table_text = text[header.end():table_end]
+    assignment = re.search(
+        r"(?m)^(?P<indent>[ \t]*)default_tools_approval_mode[ \t]*=[^\r\n]*(?P<newline>\r?\n|$)",
+        table_text,
+    )
+    if assignment is None:
+        updated = (
+            text[:header.end()]
+            + _CODEX_PDF_LEARNER_DEFAULT_TOOL_APPROVAL
+            + "\n"
+            + text[header.end():]
+        )
+    else:
+        replacement = (
+            f"{assignment.group('indent')}{_CODEX_PDF_LEARNER_DEFAULT_TOOL_APPROVAL}"
+            f"{assignment.group('newline')}"
+        )
+        updated_table = (
+            table_text[:assignment.start()] + replacement + table_text[assignment.end():]
+        )
+        updated = text[:header.end()] + updated_table + text[table_end:]
+
+    backup_path = config_path.with_name(config_path.name + ".pdf-learner.bak")
+    try:
+        shutil.copy2(config_path, backup_path)
+        _atomic_write(config_path, updated.encode("utf-8"), snapshot[2])
+    except OSError as exc:
+        try:
+            _restore(config_path, snapshot)
+        except OSError as restore_exc:
+            raise ConfigError(
+                f"{config_path}: tool approval update failed ({exc}); "
+                f"rollback failed ({restore_exc})"
+            ) from restore_exc
+        raise ConfigError(
+            f"{config_path}: tool approval update failed ({exc}); changes were rolled back"
+        ) from exc
+    return True
+
+
 def apply_configs(
     *,
     command: str,
@@ -347,6 +431,9 @@ def main() -> int:
                 cache_dir=args.cache_dir,
                 codex_bin=codex_bin,
             )
+            tool_approval_updated = ensure_codex_pdf_learner_tools_auto_approved(
+                codex_home / "config.toml"
+            )
     except (ConfigError, OSError) as exc:
         print(f"❌ Failed to update MCP config: {exc}", file=os.sys.stderr)
         return 1
@@ -365,6 +452,10 @@ def main() -> int:
                 "(CLI, profile, or managed overrides may still apply)"
             )
         print("✅ Successfully registered and verified Codex CLI MCP config")
+        if tool_approval_updated:
+            print("✅ Configured all pdf-learner MCP tools for automatic approval")
+        else:
+            print("ℹ️ All pdf-learner MCP tools are already automatically approved")
         print(f"⚠️ {_CODEX_ELICITATION_LAUNCH_GUIDANCE}")
     return 0
 

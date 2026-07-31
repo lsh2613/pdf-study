@@ -315,6 +315,29 @@ def test_codex_explicitly_disabled_granular_elicitation_fails_closed(
     assert not config.with_name("config.toml.pdf-learner.bak").exists()
 
 
+def test_codex_pdf_learner_tools_default_to_automatic_approval(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        'model = "gpt-test"\n\n'
+        "[mcp_servers.pdf-learner]\n"
+        'command = "/tmp/pdf-learner-python"\n\n'
+        "[mcp_servers.pdf-learner.tools.init_work]\n"
+        'approval_mode = "approve"\n\n'
+        "[mcp_servers.other]\n"
+        'command = "other"\n',
+        encoding="utf-8",
+    )
+
+    changed = apply_mcp_config.ensure_codex_pdf_learner_tools_auto_approved(config)
+
+    parsed = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert changed is True
+    assert parsed["mcp_servers"]["pdf-learner"]["default_tools_approval_mode"] == "approve"
+    assert parsed["mcp_servers"]["pdf-learner"]["tools"]["init_work"]["approval_mode"] == "approve"
+    assert parsed["mcp_servers"]["other"]["command"] == "other"
+    assert config.with_name("config.toml.pdf-learner.bak").exists()
+
+
 def test_config_cli_updates_never_policy_before_codex_registration(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
@@ -330,10 +353,19 @@ def test_config_cli_updates_never_policy_before_codex_registration(
         "which",
         lambda name: "/usr/bin/codex" if name == "codex" else None,
     )
+    def fake_codex_registration(**kwargs: object) -> None:
+        registration_calls.append(kwargs)
+        config.write_text(
+            config.read_text(encoding="utf-8")
+            + "\n[mcp_servers.pdf-learner]\n"
+            + 'command = "/tmp/pdf-learner-python"\n',
+            encoding="utf-8",
+        )
+
     monkeypatch.setattr(
         apply_mcp_config,
         "apply_codex_cli_config",
-        lambda **kwargs: registration_calls.append(kwargs),
+        fake_codex_registration,
     )
     monkeypatch.setattr(
         sys,
@@ -356,6 +388,7 @@ def test_config_cli_updates_never_policy_before_codex_registration(
 
     parsed = tomllib.loads(config.read_text(encoding="utf-8"))
     assert parsed["approval_policy"]["granular"]["mcp_elicitations"] is True
+    assert parsed["mcp_servers"]["pdf-learner"]["default_tools_approval_mode"] == "approve"
     assert len(registration_calls) == 1
     output = capsys.readouterr().out
     assert "Updated Codex approval policy" in output
