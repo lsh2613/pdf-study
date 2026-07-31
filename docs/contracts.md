@@ -88,7 +88,10 @@ form을 승인한 뒤 만든다. 빈 context도 유효한 확정값이다.
 
 `set_chapters(work_id, chapters, book_info)`는 챕터 구성·범위, text/OCR,
 sequential/parallel을 세 개의 순차 Elicitation으로 확인하고 모두 승인된 뒤에만
-처리 상태를 변경한다. text 품질이 신뢰 불가면 추출 form은 OCR만 허용한다.
+처리 상태를 변경한다. 첫 번째 form은 `source_pages`가 있는 챕터를
+`PDF p.N–M · 원문 p.A–B` 형식으로 표시하며, 명시적 `null`은 오프셋 상태에 따라
+`원문 페이지 미상` 또는 `원문 페이지 없음`으로 표시한다. text 품질이 신뢰 불가면
+추출 form은 OCR만 허용한다.
 `pdf_pages=[start,end]`는 필수 1-based inclusive 범위이고 `source_pages`는 선택적
 표시 메타다. 입력 전체를 무부작용으로 검증한 뒤 모드·챕터·phase를 한 잠금 구간에서
 확정한다. OCR은 `prepare_ocr`에 저장된 언어를 사용하며 모델 캐시가 없으면

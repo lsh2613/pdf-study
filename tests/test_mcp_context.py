@@ -548,6 +548,7 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
                     "chapter_id": "ch1",
                     "title": "사용자 확인 대상",
                     "pdf_pages": [1, 12],
+                    "source_pages": [101, 112],
                 },
             ],
             ctx=ctx,
@@ -560,6 +561,7 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
     assert state["extraction_mode"] == "text"
     assert len(ctx.messages) == 3
     assert "사용자 확인 대상" in ctx.messages[0]
+    assert "PDF p.1–12 · 원문 p.101–112" in ctx.messages[0]
     assert "[챕터 구성과 범위]" in ctx.messages[0]
     assert "[본문 추출 방식]" not in ctx.messages[0]
     assert "[본문 추출 방식]" in ctx.messages[1]

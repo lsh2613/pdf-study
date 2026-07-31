@@ -25,6 +25,7 @@ from . import (
 )
 from .renderer import RENDERERS
 from .renderer.output_manager import install_rendered_output
+from .renderer.page_labels import format_page_label
 
 logger = logging.getLogger(__name__)
 
@@ -658,7 +659,12 @@ async def _elicit_chapter_setup(
     fields: dict[str, tuple[Any, Any]] = {
         "chapters_confirmed": (
             bool,
-            Field(description="표시된 챕터 제목과 PDF 페이지 범위를 이대로 사용할지 여부"),
+            Field(
+                description=(
+                    "표시된 챕터 제목과 PDF 페이지·원문 페이지 범위를 "
+                    "이대로 사용할지 여부"
+                ),
+            ),
         ),
     }
     if chapter_choices:
@@ -676,14 +682,16 @@ async def _elicit_chapter_setup(
         **fields,
     )
     chapter_lines = []
+    page_offset = recommendations.get("page_offset")
     for chapter in chapters:
-        pages = chapter.get("pdf_pages", chapter.get("page_range"))
+        page_label = format_page_label(chapter, page_offset=page_offset)
         chapter_lines.append(
-            f"- {chapter.get('chapter_id')}: {chapter.get('title')} / PDF {pages}"
+            f"- {chapter.get('chapter_id')}: {chapter.get('title')} / {page_label}"
         )
     message = (
         "[챕터 구성과 범위]\n"
-        "챕터 구성 방식과 제목·PDF 페이지 범위를 사용자가 직접 확인해야 합니다.\n\n"
+        "챕터 구성 방식과 제목·PDF 페이지·원문 페이지 범위를 사용자가 직접 "
+        "확인해야 합니다.\n\n"
         + (
             "[챕터 구성 방식]\n"
             + _choice_lines(chapter_choices)
