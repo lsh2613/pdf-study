@@ -262,12 +262,14 @@ def test_set_chapters_preserves_page_metadata_end_to_end(tmp_path, ko_short):
 def test_init_work_elicits_optional_question_types_and_user_context(tmp_path, ko_short):
     ctx = ElicitationContext(
         cwd=tmp_path,
-        responses=[{
-            "enable_short_answer": True,
-            "enable_reflection": False,
-            "enable_extension": True,
-            "user_context": "데이터베이스를 처음 배우는 직장인",
-        }],
+        responses=[
+            {
+                "enable_short_answer": True,
+                "enable_reflection": False,
+                "enable_extension": True,
+            },
+            {"user_context": "데이터베이스를 처음 배우는 직장인"},
+        ],
     )
     r = asyncio.run(server.init_work(pdf_path=str(ko_short), ctx=ctx))
 
@@ -280,7 +282,16 @@ def test_init_work_elicits_optional_question_types_and_user_context(tmp_path, ko
         "extension": True,
     }
     assert "question_setup" not in r["data"]
-    assert "단답형 문제를 생성할까요?" in ctx.messages[0]
+    assert ctx.messages[:3] == [
+        "학습자의 핵심 개념 이해를 빠르게 확인하기 위한 단답형 문제를 포함할까요?",
+        "학습자가 핵심 내용을 자신의 말로 설명할 수 있는지 확인하는 주관식 문제를 포함할까요?",
+        "확장 문제는 PDF 개념을 학습자의 현실·실무 맥락과 연결하는 응용 문제를 의미합니다.",
+    ]
+    assert (
+        ctx.schemas[0]["properties"]["enable_short_answer"]["title"]
+        == "단답형 문제 생성"
+    )
+    assert "description" not in ctx.schemas[0]["properties"]["enable_short_answer"]
     assert (
         workspace.load_state(r["data"]["work_id"])["user_context"]
         == "데이터베이스를 처음 배우는 직장인"
@@ -311,12 +322,14 @@ def test_scan_pdf_confirms_choices_and_user_context(tmp_path, ko_short):
 
     r = asyncio.run(server.scan_pdf(
         work_id=wid,
-        ctx=ElicitationContext(responses=[{
-            "enable_short_answer": True,
-            "enable_reflection": False,
-            "enable_extension": True,
-            "user_context": "  데이터베이스를 처음 배우는 직장인  ",
-        }]),
+        ctx=ElicitationContext(responses=[
+            {
+                "enable_short_answer": True,
+                "enable_reflection": False,
+                "enable_extension": True,
+            },
+            {"user_context": "  데이터베이스를 처음 배우는 직장인  "},
+        ]),
     ))
 
     assert r["ok"], r
@@ -342,7 +355,7 @@ def test_scan_pdf_invalid_elicitation_data_never_exposes_choice_fallback(
         return SimpleNamespace(
             action="accept",
             data=SimpleNamespace(model_dump=lambda: {
-                "enable_short_answer": True,
+                "enable_short_answer": False,
             }),
         )
 
@@ -350,10 +363,7 @@ def test_scan_pdf_invalid_elicitation_data_never_exposes_choice_fallback(
     response = asyncio.run(server.scan_pdf(work_id=wid, ctx=ctx))
 
     assert response["ok"] is False
-    assert response["data"]["missing"] == [
-        "enable_reflection",
-        "enable_extension",
-    ]
+    assert "enable_short_answer 값이 없습니다" in response["error"]
     _assert_no_choice_fallback(response)
     assert workspace.load_state(wid)["page_count"] is None
 
@@ -362,11 +372,14 @@ def test_scan_pdf_does_not_silently_change_confirmed_choice(tmp_path, ko_short):
     wid = _init(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     first = asyncio.run(server.scan_pdf(
         work_id=wid,
-        ctx=ElicitationContext(responses=[{
-            "enable_short_answer": True,
-            "enable_reflection": False,
-            "enable_extension": False,
-        }]),
+        ctx=ElicitationContext(responses=[
+            {
+                "enable_short_answer": True,
+                "enable_reflection": False,
+                "enable_extension": False,
+            },
+            {"user_context": ""},
+        ]),
     ))
     assert first["ok"], first
 
@@ -391,12 +404,14 @@ def test_init_work_uses_server_result_root_and_pdf_basename(
     """init_work는 요청 workspace와 무관한 서버 고정 폴더를 만든다."""
     r = asyncio.run(server.init_work(
         pdf_path=str(ko_short),
-        ctx=ElicitationContext(cwd=tmp_path, responses=[{
-            "enable_short_answer": True,
-            "enable_reflection": True,
-            "enable_extension": True,
-            "user_context": "",
-        }]),
+        ctx=ElicitationContext(cwd=tmp_path, responses=[
+            {
+                "enable_short_answer": True,
+                "enable_reflection": True,
+                "enable_extension": True,
+            },
+            {"user_context": ""},
+        ]),
     ))
     _check_envelope(r)
     assert r["ok"], r
@@ -437,12 +452,14 @@ def test_init_work_fixed_dir_sanitizes_pdf_name(tmp_path):
     weird.write_bytes(b"%PDF-1.4")  # 진짜 PDF는 아니지만 init_work는 존재만 확인
     r = asyncio.run(server.init_work(
         pdf_path=str(weird),
-        ctx=ElicitationContext(cwd=tmp_path, responses=[{
-            "enable_short_answer": True,
-            "enable_reflection": True,
-            "enable_extension": True,
-            "user_context": "",
-        }]),
+        ctx=ElicitationContext(cwd=tmp_path, responses=[
+            {
+                "enable_short_answer": True,
+                "enable_reflection": True,
+                "enable_extension": True,
+            },
+            {"user_context": ""},
+        ]),
     ))
     assert r["ok"], r
     out = r["data"]["output_dir"]

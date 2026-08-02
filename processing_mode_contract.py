@@ -11,26 +11,26 @@ _TEXT_UNAVAILABLE_QUALITIES = frozenset({"garbled", "no_text_layer"})
 _EXTRACTION_SPECS = (
     {
         "value": "text",
-        "label": "Text",
-        "desc": "PDF 텍스트 레이어를 사용해 본문을 추출합니다.",
+        "label": "PyMuPDF",
+        "desc": "PDF 텍스트 레이어에서 본문을 직접 추출",
     },
     {
         "value": "ocr",
-        "label": "OCR",
-        "desc": "PaddleOCR CPU로 본문을 먼저 읽어 텍스트로 저장합니다.",
+        "label": "PyMuPDF + PaddleOCR",
+        "desc": "PDF 페이지를 이미지로 렌더링한 뒤 OCR로 본문 추출",
     },
 )
 
 _EXECUTION_SPECS = (
     {
         "value": "sequential",
-        "label": "Sequential",
-        "desc": "챕터를 한 개씩 순서대로 처리합니다.",
+        "label": "순차 처리",
+        "desc": "",
     },
     {
         "value": "parallel",
-        "label": "Parallel",
-        "desc": "최대 5개 sub-agent가 챕터를 동시에 처리합니다.",
+        "label": "병렬 처리",
+        "desc": "최대 5개 챕터 동시 처리",
     },
 )
 

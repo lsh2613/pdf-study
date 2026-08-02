@@ -8,4 +8,5 @@
 - engineering-notes.md: 놓치기 쉬운 동작과 확인 절차
 - operations.md: 설치·실행·검증 절차
 - contracts.md: MCP 도구와 출력물의 외부 계약
+- adr.md: Elicitation처럼 재발 방지가 필요한 구현 결정과 검증 규칙
 - 10-mcp-setup.md: MCP 로컬 `.venv` 빠른 설치 안내(상세 절차는 operations.md)

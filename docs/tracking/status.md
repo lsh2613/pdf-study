@@ -39,15 +39,21 @@
 - 모든 정적·동적 Elicitation form은 Codex primitive schema 부분집합을 사용한다.
   선택적 학습자 정보는 빈 문자열 기본값의 `string`으로 표현하고, Pydantic이 만드는
   최상위 모델 `title`과 nullable `anyOf`를 wire schema에서 제거한다.
+- Elicitation 필드 제목은 한국어로 표시하고, 필요한 선택지 설명만 같은 enum 항목에
+  넣는다. `message`에는 단계 고유 정보만 남기며, 표시용 `md+tui`, `순차 처리`,
+  `병렬 처리` 등은 승인 뒤 기존 내부값으로 변환한다. 선택형 문제가 모두 꺼져 있으면
+  학습자 정보 form을 생략한다. 문제 유형은 Codex의 다중 필드 탐색 순서에 의존하지
+  않도록 단일 필드 form으로 단답형·주관식·확장형 순서대로 요청한다.
 - 선택이 필요한 일곱 워크플로는 Elicitation과 승인 후 실행을 결합한 등록 async
   함수 하나씩만 유지한다. 같은 작업을 선택 인자로 직접 실행하는 `_impl` 함수나
   별도 MCP wrapper는 제거했다.
 - 공개 도구 설명, 오류와 `next_action`은 등록된 MCP 입력만 호출 예시에 사용하며,
   제거된 선택 인자나 번호형 자유 텍스트 fallback을 다시 안내하지 않는다.
-- 새 작업의 고정 출력 경로 안내와 문제 유형·선택적 학습자 정보, OCR 언어, 챕터
+- 새 작업의 고정 출력 경로 안내와 문제 유형·조건부 학습자 정보, OCR 언어, 챕터
   구성·범위, 본문 추출 방식, 실행 방식, 최종 형식, 기존 작업 재개·교체와 `.work`
-  정리를 실행 직전에 서버가 직접 확인한다. `set_chapters`의 세 선택은 독립 form으로
-  순서대로 받고 모두 승인된 뒤에만 상태 변경을 시작한다.
+  정리를 실행 직전에 서버가 직접 확인한다. `set_chapters`의 기본 선택은 독립
+  form으로 순서대로 받고, 직접 입력·균등 청크의 조건부 입력까지 모두 승인된 뒤에만
+  상태 변경을 시작한다.
 - `init_work(pdf_path)`와 `resume_work(pdf_path)`는 MCP 서버 프로젝트 루트 아래
   `result/<pdf-name>`을 고정 경로로 사용한다. 공개 `output_dir`은 없고 요청
   workspace, MCP root, 프로세스 cwd에 따라 경로가 달라지지 않는다.
@@ -61,7 +67,7 @@
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, Elicitation 강제와 공개 스키마, 최종 렌더링, 진도 저장 서버, 설치 스크립트와 MCP 설정 보호를 다룬다.
 - 테스트 시작 시 fixture 생성기 fingerprint와 PDF 해시를 확인해 오래된 합성 PDF를 자동 재생성한다.
 - 최근 확인: 현재 checkout의 프로젝트 `.venv`에서
-  `.venv/bin/python -m pytest -q`로 369개 테스트가 모두 통과했다. 경고는
+  `.venv/bin/python -m pytest -q`로 375개 테스트가 모두 통과했다. 경고는
   PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
 
 ## 남은 일

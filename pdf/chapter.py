@@ -36,7 +36,7 @@ def make_chunks(page_count: int, chunk_size: int = DEFAULT_CHUNK_SIZE) -> list[d
         end = min(start + chunk_size - 1, page_count)
         chapters.append({
             "chapter_id": f"ch{idx}",
-            "title": f"Part {idx} (p.{start}-{end})",
+            "title": f"파트 {idx} (PDF p.{start}-{end})",
             "pdf_pages": [start, end],
         })
         idx += 1

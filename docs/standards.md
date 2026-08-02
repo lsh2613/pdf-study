@@ -9,8 +9,9 @@
 사용자 선택은 선택을 소비하는 도구가 실행 직전에 여는 MCP form elicitation으로만
 받아야 한다. 선택 파라미터와 `choices`, `user_choice_required`,
 `user_choice_instruction` 같은 구조화 fallback을 공개 MCP 계약에 추가하면 안 된다.
-선택 정의의 label과 설명은 private Elicitation 메시지 안에서 그대로 유지하고,
-추천을 임의로 붙이거나 여러 선택을 합치면 안 된다.
+선택 정의의 label은 private Elicitation schema의 enum 항목에 표시하고, 구분에
+필요한 설명만 같은 항목에 덧붙인다. 자명한 설명을 억지로 추가하거나 `message`에
+다시 나열하지 않는다. 추천을 임의로 붙이거나 여러 선택을 합치면 안 된다.
 
 Elicitation 거절·취소 또는 미지원 세션은 승인 뒤 처리 본문으로 넘어가거나 상태를
 바꾸지 않아야 한다. 선택형 워크플로와 같은 작업을 수행하는 별도 동기 함수,

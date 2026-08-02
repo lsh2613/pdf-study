@@ -43,7 +43,7 @@ pdf-learner는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다.
   모든 제목과 section을 보존한다. 요약 후 원문·content map·초안을 대조한
   `summary_review`가 모든 section·important point coverage와 중요 누락·왜곡 부재를
   확인한 `passed` 결과만 완료로 저장한다.
-- `init_work`는 단답형·주관식·확장형 문제 선택과 선택적 학습자 정보를 같은 MCP form elicitation으로 직접 받는다. 사용자가 form을 승인하기 전에는 작업을 만들거나 PDF 스캔으로 넘어가지 않는다. 객관식만 기존 호환을 위해 기본 활성이다.
+- `init_work`는 단답형·주관식·확장형 문제 선택을 MCP form elicitation으로 직접 받고, 하나라도 포함할 때만 선택적 학습자 정보 form을 이어서 연다. 필요한 form을 모두 승인하기 전에는 작업을 만들거나 PDF 스캔으로 넘어가지 않는다. 객관식만 기존 호환을 위해 기본 활성이다.
 - `init_work`가 고정 출력 폴더의 기존 관리 작업을 발견하면 `resume`, `replace`를 form elicitation으로 직접 확인한다. `replace`는 사용자의 명시적 선택을 받은 뒤에만 같은 등록 함수 안에서 실행한다. 관리되지 않은 파일이 있으면 실패한다. 렌더 결과 정리는 `.pdf-learner-manifest.json`에 기록된 관리 경로에 한정하며 다른 사용자 파일을 삭제하거나 덮어쓰면 안 된다.
 - 챕터 경계는 PDF 북마크 또는 목차 페이지 이미지로만 정한다. PDF 텍스트를 긁어 목차를 추정하는 코드를 추가하면 안 된다. `scan_pdf`는 목차 후보 이미지를 렌더할 뿐 OCR 모델을 준비하거나 실행하지 않는다.
 - 챕터 추출 범위의 canonical 키는 PDF 파일의 1-based 범위를 담는 `pdf_pages`다. `source_pages`는 원문에 표시된 페이지 번호를 보존하는 선택적 메타이며 추출 범위를 바꾸지 않는다. 구형 `page_range`·`printed_range`는 기존 작업 읽기 호환에만 사용한다.

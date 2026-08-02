@@ -139,22 +139,22 @@ def _with_offset_meta(
             {
                 "value": "proceed",
                 "label": "이대로 진행",
-                "desc": "suggested_chapters를 그대로 set_chapters에 전달합니다.",
+                "desc": "현재 추천 챕터 구성과 범위 사용",
             },
             {
                 "value": "reanalyze_with_vision",
                 "label": "목차 이미지로 재분석",
-                "desc": "목차 페이지를 렌더한 뒤 OCR 텍스트와 이미지로 챕터를 다시 구성합니다.",
+                "desc": "목차 페이지 OCR로 챕터 다시 구성",
             },
             {
                 "value": "manual_pdf_pages",
                 "label": "직접 입력",
-                "desc": "사용자가 PDF 페이지 범위로 챕터를 직접 구성합니다.",
+                "desc": "PDF 페이지 범위를 직접 지정",
             },
             {
                 "value": "chunks",
                 "label": "균등 청크",
-                "desc": "목차를 읽을 수 없을 때 PDF를 일정 페이지 수의 청크로 나눕니다.",
+                "desc": "일정 페이지 수로 균등 분할",
             },
         ]
         reco["user_choices"] = [choice["value"] for choice in reco["user_choice_options"]]
@@ -171,17 +171,17 @@ def _with_offset_meta(
             {
                 "value": "proceed",
                 "label": "이대로 진행",
-                "desc": "목차 이미지 OCR 결과와 이미지를 확인해 챕터를 구성합니다.",
+                "desc": "현재 OCR 기반 챕터 구성과 범위 사용",
             },
             {
                 "value": "manual_pdf_pages",
                 "label": "직접 입력",
-                "desc": "사용자가 PDF 페이지 범위로 챕터를 직접 구성합니다.",
+                "desc": "PDF 페이지 범위를 직접 지정",
             },
             {
                 "value": "chunks",
                 "label": "균등 청크",
-                "desc": "목차를 읽을 수 없을 때 PDF를 일정 페이지 수의 청크로 나눕니다.",
+                "desc": "일정 페이지 수로 균등 분할",
             },
         ]
         reco["user_choices"] = [choice["value"] for choice in reco["user_choice_options"]]

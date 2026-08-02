@@ -9,11 +9,11 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from mcp import types
 from mcp.server.fastmcp import Context, FastMCP
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, create_model
 
 from . import (
     analysis,
@@ -26,6 +26,7 @@ from . import (
 from .renderer import RENDERERS
 from .renderer.output_manager import install_rendered_output
 from .renderer.page_labels import format_page_label
+from .pdf import chapter as chapter_mod
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +47,13 @@ RESULT_ROOT = SERVER_ROOT / "result"
 _OUTPUT_FORMAT_CHOICES = (
     {
         "value": "html",
-        "label": "HTML",
-        "desc": "정적 웹사이트 — 브라우저로 열람 + 진도 저장 서버",
+        "label": "html",
+        "desc": "브라우저에서 학습하고 진도 저장",
     },
     {
         "value": "md_tui",
-        "label": "Markdown + TUI",
-        "desc": "챕터별 Markdown + 터미널 학습 TUI",
+        "label": "md+tui",
+        "desc": "터미널에서 학습하고 진도 저장",
     },
 )
 
@@ -60,19 +61,71 @@ _OCR_LANGUAGE_CHOICES = (
     {
         "value": "korean",
         "label": "한국어",
-        "desc": "한국어 PDF를 한국어 OCR 모델로 읽습니다.",
+        "desc": "",
     },
     {
         "value": "english",
         "label": "영어",
-        "desc": "영어 PDF를 영어 OCR 모델로 읽습니다.",
+        "desc": "",
     },
+)
+
+_RESUME_CHOICES = (
+    {"value": True, "label": "이어가기", "desc": ""},
+    {"value": False, "label": "취소", "desc": ""},
+)
+
+_CLEANUP_CHOICES = (
+    {"value": True, "label": "삭제", "desc": ""},
+    {"value": False, "label": "유지", "desc": ""},
 )
 
 
 def _normalize_elicitation_json_schema(schema: dict[str, Any]) -> None:
     """Codex MCP form의 엄격한 최상위 스키마 계약에 맞춘다."""
     schema.pop("title", None)
+
+
+def _form_choice_value(choice: dict[str, Any]) -> str:
+    """설명까지 포함하되 내부 값과 분리된 form 제출값을 만든다."""
+    description = str(choice.get("desc") or "").strip()
+    value = str(choice["label"])
+    return f"{value} — {description}" if description else value
+
+
+def _form_choice_schema(choices: list[dict[str, Any]]) -> dict[str, Any]:
+    """Codex가 지원하는 단순 enum에 설명형 한글 선택값을 직접 넣는다."""
+    return {
+        "enum": [_form_choice_value(choice) for choice in choices],
+    }
+
+
+def _form_choice_input_type(choices: list[dict[str, Any]]) -> Any:
+    """테스트의 기존 내부값도 받되 wire schema는 문자열 enum으로 유지한다."""
+    def normalize(value: Any) -> Any:
+        for choice in choices:
+            internal = choice["value"]
+            if type(value) is type(internal) and value == internal:
+                return _form_choice_value(choice)
+        return value
+
+    return Annotated[str, BeforeValidator(normalize)]
+
+
+def _resolve_form_choice(
+    value: Any,
+    choices: list[dict[str, Any]],
+    *,
+    error: str = "지원하지 않는 선택값입니다.",
+) -> Any:
+    """form 표시값을 기존 내부 상태값으로 되돌린다."""
+    for choice in choices:
+        internal = choice["value"]
+        if value == _form_choice_value(choice) or (
+            type(value) is type(internal) and value == internal
+        ):
+            return internal
+    raise ValueError(error)
 
 
 class _ElicitationSelection(BaseModel):
@@ -85,31 +138,41 @@ class _ElicitationSelection(BaseModel):
 
 class _OutputFormatSelection(_ElicitationSelection):
     output_format: str = Field(
-        description="사용자가 선택한 최종 학습 자료 형식",
-        json_schema_extra={
-            "enum": [choice["value"] for choice in _OUTPUT_FORMAT_CHOICES],
-        },
+        title="최종 학습 자료 형식",
+        json_schema_extra=_form_choice_schema(
+            [dict(choice) for choice in _OUTPUT_FORMAT_CHOICES],
+        ),
     )
 
 
 class _OcrLanguageSelection(_ElicitationSelection):
     ocr_language: str = Field(
-        description="사용자가 선택한 PDF OCR 언어",
-        json_schema_extra={
-            "enum": [choice["value"] for choice in _OCR_LANGUAGE_CHOICES],
-        },
+        title="PDF OCR 언어",
+        json_schema_extra=_form_choice_schema(
+            [dict(choice) for choice in _OCR_LANGUAGE_CHOICES],
+        ),
     )
 
 
 class _ResumeSelection(_ElicitationSelection):
-    resume_confirmed: bool = Field(
-        description="기존 pdf-learner 작업을 이어서 진행할지 여부",
+    resume_confirmed: _form_choice_input_type(
+        [dict(choice) for choice in _RESUME_CHOICES],
+    ) = Field(
+        title="기존 작업 이어가기",
+        json_schema_extra=_form_choice_schema(
+            [dict(choice) for choice in _RESUME_CHOICES],
+        ),
     )
 
 
 class _CleanupSelection(_ElicitationSelection):
-    cleanup_confirmed: bool = Field(
-        description="최종 결과는 유지하고 .work 중간 데이터만 삭제할지 여부",
+    cleanup_confirmed: _form_choice_input_type(
+        [dict(choice) for choice in _CLEANUP_CHOICES],
+    ) = Field(
+        title="중간 작업 데이터 삭제",
+        json_schema_extra=_form_choice_schema(
+            [dict(choice) for choice in _CLEANUP_CHOICES],
+        ),
     )
 
 
@@ -450,54 +513,63 @@ _QUESTION_SETUP_DEFS = (
     {
         "field": "enable_short_answer",
         "state_key": "short_answer",
-        "question": "단답형 문제를 생성할까요?",
+        "title": "단답형 문제 생성",
+        "question": (
+            "학습자의 핵심 개념 이해를 빠르게 확인하기 위한 단답형 문제를 "
+            "포함할까요?"
+        ),
         "choices": [
             {
                 "value": True,
                 "label": "단답형 문제 포함",
-                "desc": "챕터 핵심 개념을 짧은 문장으로 답하는 문제를 만듭니다.",
+                "desc": "",
             },
             {
                 "value": False,
                 "label": "단답형 문제 제외",
-                "desc": "단답형 문제를 만들지 않습니다.",
+                "desc": "",
             },
         ],
     },
     {
         "field": "enable_reflection",
         "state_key": "reflection",
-        "question": "주관식 문제를 생성할까요?",
+        "title": "주관식 문제 생성",
+        "question": (
+            "학습자가 핵심 내용을 자신의 말로 설명할 수 있는지 확인하는 주관식 "
+            "문제를 포함할까요?"
+        ),
         "choices": [
             {
                 "value": True,
                 "label": "주관식 문제 포함",
-                "desc": "요약 근거를 설명하는 서술형 검증 문제를 만듭니다.",
+                "desc": "",
             },
             {
                 "value": False,
                 "label": "주관식 문제 제외",
-                "desc": "주관식 문제를 만들지 않습니다.",
+                "desc": "",
             },
         ],
     },
     {
         "field": "enable_extension",
         "state_key": "extension",
-        "question": "확장 문제를 생성할까요?",
+        "title": "확장 문제 생성",
+        "question": (
+            "확장 문제는 PDF 개념을 학습자의 현실·실무 맥락과 연결하는 응용 "
+            "문제를 의미합니다."
+        ),
         "choices": [
             {
                 "value": True,
                 "label": "확장 문제 포함",
-                "desc": (
-                    "PDF 개념을 학습자의 현실·실무 맥락과 연결하는 응용 문제를 "
-                    "외부 검색 없이 만듭니다."
-                ),
+                "desc": "",
             },
             {
                 "value": False,
                 "label": "확장 문제 제외",
-                "desc": "확장 문제를 만들지 않습니다.",
+                "desc": "",
             },
         ],
     },
@@ -510,6 +582,7 @@ def _question_setup_payload(state: dict[str, Any]) -> dict[str, Any]:
     questions = [
         {
             "field": item["field"],
+            "title": item["title"],
             "question": item["question"],
             "choices": [dict(choice) for choice in item["choices"]],
         }
@@ -519,6 +592,10 @@ def _question_setup_payload(state: dict[str, Any]) -> dict[str, Any]:
     setup = {
         "pending_fields": [item["field"] for item in questions],
         "questions": questions,
+        "has_enabled_optional_questions": any(
+            options.get(item["state_key"]) is True
+            for item in _QUESTION_SETUP_DEFS
+        ),
         "user_context_request": (
             None
             if state.get("user_context_confirmed") or state.get("user_context")
@@ -539,8 +616,8 @@ def _question_setup_payload(state: dict[str, Any]) -> dict[str, Any]:
 
 def _question_setup_next_action(work_id: str, setup: dict[str, Any]) -> str:
     return (
-        f'scan_pdf(work_id="{work_id}")를 호출하면 서버가 미정 문제 유형과 선택적 '
-        "학습자 정보 Elicitation을 엽니다."
+        f'scan_pdf(work_id="{work_id}")를 호출하면 서버가 미정 문제 유형을 묻고, '
+        "선택형 문제가 있으면 학습자 정보 Elicitation을 이어서 엽니다."
     )
 
 
@@ -583,13 +660,6 @@ def _resolve_output_dir(pdf_path: str) -> str:
     return str((RESULT_ROOT / _pdf_name_slug(pdf_path)).resolve())
 
 
-def _choice_lines(choices: list[dict[str, Any]]) -> str:
-    return "\n".join(
-        f"- {choice['label']} ({choice.get('value', '')}): {choice['desc']}"
-        for choice in choices
-    )
-
-
 def _elicitation_cancelled(data: dict[str, Any]) -> dict[str, Any]:
     return _err(
         "필수 Elicitation이 승인 응답 없이 종료되어 다음 단계를 실행하지 않았습니다.",
@@ -604,48 +674,70 @@ def _elicitation_cancelled(data: dict[str, Any]) -> dict[str, Any]:
 async def _elicit_question_setup(
     ctx: Context,
     setup: dict[str, Any],
-    *,
-    output_dir: str | None = None,
 ) -> dict[str, Any] | None:
-    fields: dict[str, tuple[Any, Any]] = {}
-    if setup["user_context_request"]:
-        fields["user_context"] = (
-            str,
-            Field(
-                default="",
-                description="선택 사항: 학습 목적, 배경지식, 관심 분야, 현재 수준",
+    selected: dict[str, Any] = {}
+    # Codex 클라이언트가 다중 필드 form의 탐색 순서를 재배열할 수 있으므로 문제
+    # 유형은 단일 필드 form으로 하나씩 열어 단답형 → 주관식 → 확장형을 보장한다.
+    for question in setup["questions"]:
+        field = question["field"]
+        schema = create_model(
+            f"PdfLearnerQuestionSetupSelection_{field}",
+            __base__=_ElicitationSelection,
+            **{
+                field: (
+                    _form_choice_input_type(question["choices"]),
+                    Field(
+                        title=question["title"],
+                        json_schema_extra=_form_choice_schema(
+                            question["choices"],
+                        ),
+                    ),
+                ),
+            },
+        )
+        result = await ctx.elicit(message=question["question"], schema=schema)
+        if result.action != "accept" or result.data is None:
+            return None
+        if not hasattr(result.data, field):
+            raise ValueError(f"문제 유형 응답에 {field} 값이 없습니다.")
+        raw_value = getattr(result.data, field)
+        selected[field] = _resolve_form_choice(
+            raw_value,
+            question["choices"],
+            error="지원하지 않는 문제 유형 선택값입니다.",
+        )
+
+    context_is_useful = setup["has_enabled_optional_questions"] or any(
+        selected.get(question["field"]) is True
+        for question in setup["questions"]
+    )
+    if setup["user_context_request"] and context_is_useful:
+        context_schema = create_model(
+            "PdfLearnerUserContextSelection",
+            __base__=_ElicitationSelection,
+            user_context=(
+                str,
+                Field(
+                    default="",
+                    title="학습자 정보 (선택)",
+                    description="학습 목적, 배경지식, 관심 분야, 현재 수준 등",
+                ),
             ),
         )
-    for question in setup["questions"]:
-        choice_desc = " / ".join(
-            f"{choice['label']}: {choice['desc']}" for choice in question["choices"]
+        context_message = (
+            "학습자에 최적화된 문제를 만들기 위해 학습자 정보를 제공해주세요."
         )
-        fields[question["field"]] = (
-            bool,
-            Field(description=f"{question['question']} {choice_desc}"),
+        context_result = await ctx.elicit(
+            message=context_message,
+            schema=context_schema,
         )
-    schema = create_model(
-        "PdfLearnerQuestionSetupSelection",
-        __base__=_ElicitationSelection,
-        **fields,
-    )
-    message = (
-        (
-            "다음 Codex workspace 기준 위치에 새 작업을 만듭니다.\n"
-            f"- {output_dir}\n\n"
-            if output_dir is not None else ""
-        )
-        + "다음 문제 유형을 사용자가 직접 선택해야 합니다. 각 항목과 설명을 그대로 "
-        "확인한 뒤 답해주세요.\n"
-        + "\n".join(
-            f"\n{question['question']}\n{_choice_lines(question['choices'])}"
-            for question in setup["questions"]
-        )
-    )
-    result = await ctx.elicit(message=message, schema=schema)
-    if result.action != "accept" or result.data is None:
-        return None
-    return result.data.model_dump()
+        if context_result.action != "accept" or context_result.data is None:
+            return None
+        selected["user_context"] = context_result.data.user_context
+    elif setup["user_context_request"]:
+        # 선택형 문제가 모두 꺼져 있으면 학습자 정보는 묻지 않고 확정된 빈 값으로 둔다.
+        selected["user_context"] = ""
+    return selected
 
 
 async def _elicit_chapter_setup(
@@ -656,30 +748,22 @@ async def _elicit_chapter_setup(
     outline = workspace.load_outline(work_id) or {}
     recommendations = outline.get("recommendations") or {}
     chapter_choices = recommendations.get("user_choice_options") or []
-    fields: dict[str, tuple[Any, Any]] = {
-        "chapters_confirmed": (
-            bool,
-            Field(
-                description=(
-                    "표시된 챕터 제목과 PDF 페이지·원문 페이지 범위를 "
-                    "이대로 사용할지 여부"
-                ),
-            ),
-        ),
-    }
-    if chapter_choices:
-        chapter_values = tuple(choice["value"] for choice in chapter_choices)
-        fields["chapter_strategy"] = (
-            str,
-            Field(
-                description="사용자가 선택한 챕터 구성 방식",
-                json_schema_extra={"enum": list(chapter_values)},
-            ),
-        )
+    if not chapter_choices:
+        chapter_choices = [{
+            "value": "proceed",
+            "label": "이대로 진행",
+            "desc": "현재 챕터 구성과 범위 사용",
+        }]
     schema = create_model(
         "PdfLearnerChapterSetupSelection",
         __base__=_ElicitationSelection,
-        **fields,
+        chapter_strategy=(
+            str,
+            Field(
+                title="챕터 구성 방식",
+                json_schema_extra=_form_choice_schema(chapter_choices),
+            ),
+        ),
     )
     chapter_lines = []
     page_offset = recommendations.get("page_offset")
@@ -689,81 +773,219 @@ async def _elicit_chapter_setup(
             f"- {chapter.get('chapter_id')}: {chapter.get('title')} / {page_label}"
         )
     message = (
-        "[챕터 구성과 범위]\n"
-        "챕터 구성 방식과 제목·PDF 페이지·원문 페이지 범위를 사용자가 직접 "
-        "확인해야 합니다.\n\n"
-        + (
-            "[챕터 구성 방식]\n"
-            + _choice_lines(chapter_choices)
-            + "\n\n"
-            if chapter_choices else ""
-        )
-        + "[챕터]\n"
+        "[pdf-learner가 분석한 챕터]\n"
         + "\n".join(chapter_lines)
     )
     result = await ctx.elicit(message=message, schema=schema)
     if result.action != "accept" or result.data is None:
         return None
     selected = result.data.model_dump()
-    if (
-        chapter_choices
-        and selected.get("chapter_strategy") not in chapter_values
-    ):
-        raise ValueError("지원하지 않는 챕터 구성 방식입니다.")
+    selected["chapter_strategy"] = _resolve_form_choice(
+        selected["chapter_strategy"],
+        chapter_choices,
+        error="지원하지 않는 챕터 구성 방식입니다.",
+    )
     return selected
+
+
+def _source_pages_for_pdf_range(
+    pdf_pages: list[int],
+    page_offset: int | None,
+) -> list[int] | None:
+    if page_offset is None:
+        return None
+    start, end = pdf_pages
+    source_start, source_end = start - page_offset, end - page_offset
+    if source_end < 1:
+        return None
+    return [max(1, source_start), source_end]
+
+
+def _parse_manual_chapters(
+    value: str,
+    *,
+    page_basis: str,
+    page_offset: int | None,
+) -> list[dict[str, Any]]:
+    chapters: list[dict[str, Any]] = []
+    for line_number, raw_line in enumerate(value.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        title, separator, raw_range = line.partition("|")
+        match = re.fullmatch(r"\s*(\d+)\s*[-–~]\s*(\d+)\s*", raw_range)
+        if not separator or not title.strip() or match is None:
+            raise ValueError(
+                f"직접 입력 {line_number}행은 '제목 | 시작-끝' 형식이어야 합니다."
+            )
+        start, end = int(match.group(1)), int(match.group(2))
+        if start < 1 or end < start:
+            raise ValueError(
+                f"직접 입력 {line_number}행의 페이지 범위가 올바르지 않습니다."
+            )
+        if page_basis == "source":
+            if page_offset is None:
+                raise ValueError(
+                    "원문 페이지 번호를 PDF 페이지로 바꿀 오프셋이 확인되지 않았습니다."
+                )
+            pdf_pages = [start + page_offset, end + page_offset]
+            source_pages: list[int] | None = [start, end]
+        else:
+            pdf_pages = [start, end]
+            source_pages = _source_pages_for_pdf_range(pdf_pages, page_offset)
+        chapters.append({
+            "chapter_id": f"ch{len(chapters) + 1}",
+            "title": title.strip(),
+            "pdf_pages": pdf_pages,
+            "source_pages": source_pages,
+        })
+    if not chapters:
+        raise ValueError("직접 입력한 챕터가 없습니다.")
+    return chapters
+
+
+async def _elicit_manual_chapters(
+    ctx: Context,
+    work_id: str,
+) -> list[dict[str, Any]] | None:
+    outline = workspace.load_outline(work_id) or {}
+    recommendations = outline.get("recommendations") or {}
+    page_offset = recommendations.get("page_offset")
+    page_basis_choices = [
+        {"value": "pdf", "label": "PDF 페이지 번호", "desc": ""},
+    ]
+    if page_offset is not None:
+        page_basis_choices.append(
+            {"value": "source", "label": "원문 페이지 번호", "desc": ""},
+        )
+    schema = create_model(
+        "PdfLearnerManualChapterSelection",
+        __base__=_ElicitationSelection,
+        manual_chapters=(
+            str,
+            Field(
+                title="챕터 제목과 페이지 범위",
+                description="한 줄에 하나씩 '제목 | 시작-끝' 형식으로 입력",
+            ),
+        ),
+        manual_page_basis=(
+            str,
+            Field(
+                title="입력할 페이지 번호 기준",
+                json_schema_extra=_form_choice_schema(page_basis_choices),
+            ),
+        ),
+    )
+    message = (
+        "직접 구성할 챕터를 한 줄에 하나씩 입력해주세요.\n"
+        "예: 01. 소개 | 20-23"
+    )
+    result = await ctx.elicit(message=message, schema=schema)
+    if result.action != "accept" or result.data is None:
+        return None
+    page_basis = str(_resolve_form_choice(
+        result.data.manual_page_basis,
+        page_basis_choices,
+        error="지원하지 않는 페이지 번호 기준입니다.",
+    ))
+    return _parse_manual_chapters(
+        result.data.manual_chapters,
+        page_basis=page_basis,
+        page_offset=page_offset,
+    )
+
+
+async def _elicit_chunk_size(
+    ctx: Context,
+    work_id: str,
+) -> list[dict[str, Any]] | None:
+    state = workspace.load_state(work_id)
+    page_count = int(state.get("page_count") or 0)
+    default_chunk_size = max(1, min(chapter_mod.DEFAULT_CHUNK_SIZE, page_count))
+    schema = create_model(
+        "PdfLearnerChunkSizeSelection",
+        __base__=_ElicitationSelection,
+        chunk_size=(
+            int,
+            Field(
+                title="청크당 PDF 페이지 수",
+                description="PDF를 몇 페이지씩 나눌지 입력",
+                ge=1,
+                le=page_count,
+                default=default_chunk_size,
+            ),
+        ),
+    )
+    message = (
+        f"기본 분할 크기는 청크당 {default_chunk_size}페이지입니다. "
+        "필요하면 변경해주세요."
+    )
+    result = await ctx.elicit(message=message, schema=schema)
+    if result.action != "accept" or result.data is None:
+        return None
+    chapters = chapter_mod.make_chunks(page_count, result.data.chunk_size)
+    outline = workspace.load_outline(work_id) or {}
+    page_offset = (outline.get("recommendations") or {}).get("page_offset")
+    for chapter in chapters:
+        chapter["source_pages"] = _source_pages_for_pdf_range(
+            chapter["pdf_pages"],
+            page_offset,
+        )
+    return chapters
 
 
 async def _elicit_extraction_mode(ctx: Context, work_id: str) -> str | None:
     text_quality = workspace.load_state(work_id).get("text_quality")
     choices = processing_mode_contract.extraction_choices(text_quality)
-    allowed_values = tuple(choice["value"] for choice in choices)
     schema = create_model(
         "PdfLearnerExtractionModeSelection",
         __base__=_ElicitationSelection,
         extraction_mode=(
             str,
             Field(
-                description="사용자가 선택한 본문 추출 방식",
-                json_schema_extra={"enum": list(allowed_values)},
+                title="본문 추출 방식",
+                json_schema_extra=_form_choice_schema(choices),
             ),
         ),
     )
-    message = (
-        "[본문 추출 방식]\n"
-        + _choice_lines(choices)
-        + "\nOCR 본문 선처리는 실행 방식과 별개의 서버 내부 상한으로 제한됩니다."
-    )
+    if text_quality == "garbled":
+        message = "PDF 텍스트 인코딩이 깨져 있어 OCR 방식만 사용할 수 있습니다."
+    elif text_quality == "no_text_layer":
+        message = "PDF에 사용할 수 있는 텍스트 레이어가 없어 OCR 방식만 사용할 수 있습니다."
+    else:
+        message = "PDF 본문을 추출할 방식을 선택해주세요."
     result = await ctx.elicit(message=message, schema=schema)
     if result.action != "accept" or result.data is None:
         return None
-    selected = str(result.data.extraction_mode)
-    if selected not in allowed_values:
-        raise ValueError("지원하지 않는 본문 추출 방식입니다.")
-    return selected
+    return str(_resolve_form_choice(
+        result.data.extraction_mode,
+        choices,
+        error="지원하지 않는 본문 추출 방식입니다.",
+    ))
 
 
 async def _elicit_execution_mode(ctx: Context) -> str | None:
     choices = processing_mode_contract.execution_choices()
-    allowed_values = tuple(choice["value"] for choice in choices)
     schema = create_model(
         "PdfLearnerExecutionModeSelection",
         __base__=_ElicitationSelection,
         execution_mode=(
             str,
             Field(
-                description="사용자가 선택한 챕터 실행 방식",
-                json_schema_extra={"enum": list(allowed_values)},
+                title="챕터 실행 방식",
+                json_schema_extra=_form_choice_schema(choices),
             ),
         ),
     )
-    message = "[실행 방식]\n" + _choice_lines(choices)
+    message = "챕터를 처리할 방식을 선택해주세요."
     result = await ctx.elicit(message=message, schema=schema)
     if result.action != "accept" or result.data is None:
         return None
-    selected = str(result.data.execution_mode)
-    if selected not in allowed_values:
-        raise ValueError("지원하지 않는 챕터 실행 방식입니다.")
-    return selected
+    return str(_resolve_form_choice(
+        result.data.execution_mode,
+        choices,
+        error="지원하지 않는 챕터 실행 방식입니다.",
+    ))
 
 
 def _safe(label: str):
@@ -862,30 +1084,35 @@ async def init_work(
         allowed_actions = (
             ["resume", "replace"] if existing["can_resume"] else ["replace"]
         )
+        action_choices = [
+            {
+                "value": "resume",
+                "label": "이어가기",
+                "desc": "기존 상태에서 남은 작업을 계속",
+            },
+            {
+                "value": "replace",
+                "label": "교체",
+                "desc": "같은 결과 폴더에서 새 작업 시작",
+            },
+        ]
+        action_choices = [
+            choice for choice in action_choices
+            if choice["value"] in allowed_actions
+        ]
         action_schema = create_model(
             "PdfLearnerExistingWorkActionSelection",
             __base__=_ElicitationSelection,
             action=(
                 str,
                 Field(
-                    description="기존 출력 작업 처리 방식",
-                    json_schema_extra={"enum": allowed_actions},
+                    title="기존 작업 처리",
+                    json_schema_extra=_form_choice_schema(action_choices),
                 ),
             ),
         )
-        action_lines = []
-        if existing["can_resume"]:
-            action_lines.append(
-                "- 기존 작업 이어가기 (resume): 기존 상태에서 남은 작업을 계속합니다."
-            )
-        action_lines.append(
-            "- 기존 작업 교체 (replace): 같은 고정 출력 폴더에서 새로 시작합니다."
-        )
         action_result = await ctx.elicit(
-            message=(
-                "고정 출력 폴더에 기존 pdf-learner 작업이 있습니다.\n"
-                + "\n".join(action_lines)
-            ),
+            message="고정 출력 폴더에 기존 pdf-learner 작업이 있습니다.",
             schema=action_schema,
         )
         if action_result.action != "accept" or action_result.data is None:
@@ -893,9 +1120,11 @@ async def init_work(
                 "output_dir": resolved_dir,
                 "existing_work": existing,
             })
-        action = str(action_result.data.action)
-        if action not in allowed_actions:
-            raise ValueError("지원하지 않는 기존 작업 처리 방식입니다.")
+        action = str(_resolve_form_choice(
+            action_result.data.action,
+            action_choices,
+            error="지원하지 않는 기존 작업 처리 방식입니다.",
+        ))
         if action == "resume":
             state = workspace.resume_workspace(resolved_dir)
             return _resume_response(state)
@@ -913,7 +1142,6 @@ async def init_work(
     selected = await _elicit_question_setup(
         ctx,
         initial_setup,
-        output_dir=resolved_dir,
     )
     if selected is None:
         return _elicitation_cancelled({"output_dir": resolved_dir})
@@ -989,15 +1217,21 @@ async def resume_work(
     resolved = _resolve_output_dir(pdf_path)
     existing = workspace.inspect_output_dir(resolved)
     if existing["can_resume"]:
-        message = (
-            "- 기존 작업 이어가기 (resume): 기존 .work/state.json을 등록해 "
-            "남은 챕터부터 계속합니다."
-        )
+        message = "기존 작업 상태를 불러오면 남은 단계부터 계속할 수 있습니다."
         result = await ctx.elicit(message=message, schema=_ResumeSelection)
+        resume_confirmed = (
+            _resolve_form_choice(
+                result.data.resume_confirmed,
+                [dict(choice) for choice in _RESUME_CHOICES],
+                error="지원하지 않는 작업 재개 선택값입니다.",
+            )
+            if result.action == "accept" and result.data is not None
+            else False
+        )
         if (
             result.action != "accept"
             or result.data is None
-            or not result.data.resume_confirmed
+            or not resume_confirmed
         ):
             return _elicitation_cancelled({
                 "output_dir": resolved,
@@ -1164,20 +1398,17 @@ async def prepare_ocr(work_id: str, ctx: Context) -> dict[str, Any]:
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
-    message = (
-        f"{_ocr_language_setup()['question']}\n"
-        f"{_choice_lines([dict(choice) for choice in _OCR_LANGUAGE_CHOICES])}"
-    )
+    message = "PDF의 내용을 추출하기 위해 사용할 OCR 언어 모델을 선택해주세요."
     result = await ctx.elicit(message=message, schema=_OcrLanguageSelection)
     if result.action != "accept" or result.data is None:
         return _elicitation_cancelled(
             {"work_id": work_id},
         )
-    ocr_language = result.data.ocr_language
-    if ocr_language not in {
-        choice["value"] for choice in _OCR_LANGUAGE_CHOICES
-    }:
-        raise ValueError("지원하지 않는 OCR 언어입니다.")
+    ocr_language = str(_resolve_form_choice(
+        result.data.ocr_language,
+        [dict(choice) for choice in _OCR_LANGUAGE_CHOICES],
+        error="지원하지 않는 OCR 언어입니다.",
+    ))
     data = analysis.prepare_ocr_impl(work_id, ocr_language)
     data["ocr_language"] = ocr_language
     return _without_choice_fallback(_ok(data, next_action=(
@@ -1241,10 +1472,11 @@ async def set_chapters(
       옵셔널 표시용 메타로, 명시적 null까지 보존하되 범위를 검증하지 않습니다.
       구형 page_range/printed_range 입력은 읽기 호환을 위해 받지만 새 응답과
       저장 데이터에는 pdf_pages/source_pages만 사용합니다.
-    공개 MCP 입력은 work_id, chapters, 선택적 book_info뿐입니다. 서버는 챕터
-    구성·범위, 본문 추출 방식(text/OCR), 실행 방식(sequential/parallel)을 세 개의
-    form Elicitation으로 차례로 확인합니다. OCR을 고르면 prepare_ocr에서 이미
-    Elicitation으로 확정해 저장한 언어를 사용합니다.
+    공개 MCP 입력은 work_id, chapters, 선택적 book_info뿐입니다. 서버는 챕터 구성
+    방식, 본문 추출 방식(text/OCR), 실행 방식(sequential/parallel)을 form
+    Elicitation으로 차례로 확인합니다. 직접 입력과 균등 청크는 각각 페이지 범위와
+    청크 크기 form을 추가로 엽니다. OCR을 고르면 prepare_ocr에서 이미 Elicitation으로
+    확정해 저장한 언어를 사용합니다.
     - 각 chapter에 optional "skip": true 를 주면 그 챕터는 본문 추출과
       sub-agent 디스패치, 렌더링 모두에서 제외됩니다. **찾아보기·색인·
       판권·저자 소개 같은 비본문 페이지가 섞여 들어왔을 때 사용**하세요.
@@ -1277,13 +1509,26 @@ async def set_chapters(
                 "prepare_ocr → scan_toc_with_ocr 순서로 다시 구성하세요."
             ),
         )
-    if not chapter_selection["chapters_confirmed"]:
-        return _elicitation_cancelled({
-            "chapters": chapters,
-            "next_step": _set_chapters_next_step(
-                workspace.load_state(work_id).get("text_quality"),
-            ),
-        })
+    if chapter_selection["chapter_strategy"] == "manual_pdf_pages":
+        manual_chapters = await _elicit_manual_chapters(ctx, work_id)
+        if manual_chapters is None:
+            return _elicitation_cancelled({
+                "chapters": chapters,
+                "next_step": _set_chapters_next_step(
+                    workspace.load_state(work_id).get("text_quality"),
+                ),
+            })
+        chapters = manual_chapters
+    elif chapter_selection["chapter_strategy"] == "chunks":
+        chunk_chapters = await _elicit_chunk_size(ctx, work_id)
+        if chunk_chapters is None:
+            return _elicitation_cancelled({
+                "chapters": chapters,
+                "next_step": _set_chapters_next_step(
+                    workspace.load_state(work_id).get("text_quality"),
+                ),
+            })
+        chapters = chunk_chapters
     extraction_mode = await _elicit_extraction_mode(ctx, work_id)
     if extraction_mode is None:
         return _elicitation_cancelled({
@@ -1777,18 +2022,15 @@ async def finalize_study(
     capability_error = _elicitation_required(ctx)
     if capability_error is not None:
         return capability_error
-    message = (
-        "최종 학습 자료 형식을 선택하세요.\n"
-        f"{_choice_lines([dict(choice) for choice in _OUTPUT_FORMAT_CHOICES])}"
-    )
+    message = "완료된 챕터를 선택한 형식의 학습 자료로 만듭니다."
     result = await ctx.elicit(message=message, schema=_OutputFormatSelection)
     if result.action != "accept" or result.data is None:
         return _elicitation_cancelled({"work_id": work_id})
-    output_format = result.data.output_format
-    if output_format not in {
-        choice["value"] for choice in _OUTPUT_FORMAT_CHOICES
-    }:
-        raise ValueError("지원하지 않는 출력 형식입니다.")
+    output_format = str(_resolve_form_choice(
+        result.data.output_format,
+        [dict(choice) for choice in _OUTPUT_FORMAT_CHOICES],
+        error="지원하지 않는 출력 형식입니다.",
+    ))
     renderer_cls = RENDERERS.get(output_format)
     if renderer_cls is None:
         return _err(
@@ -1914,14 +2156,23 @@ async def cleanup_work(work_id: str, ctx: Context) -> dict[str, Any]:
     if capability_error is not None:
         return capability_error
     message = (
-        "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다. "
-        "삭제 후에는 이 중간 상태로 작업을 재개할 수 없습니다."
+        "삭제 후에는 이 중간 상태로 작업을 재개할 수 없습니다. "
+        "최종 학습 자료와 진도는 유지됩니다."
     )
     result = await ctx.elicit(message=message, schema=_CleanupSelection)
+    cleanup_confirmed = (
+        _resolve_form_choice(
+            result.data.cleanup_confirmed,
+            [dict(choice) for choice in _CLEANUP_CHOICES],
+            error="지원하지 않는 중간 작업 데이터 선택값입니다.",
+        )
+        if result.action == "accept" and result.data is not None
+        else False
+    )
     if (
         result.action != "accept"
         or result.data is None
-        or not result.data.cleanup_confirmed
+        or not cleanup_confirmed
     ):
         return _elicitation_cancelled({
             "work_id": work_id,

@@ -284,11 +284,14 @@ def test_mcp_init_work_uses_elicited_question_choices(
 ):
     ctx = ElicitationContext(
         cwd=tmp_path,
-        responses=[{
-            "enable_short_answer": False,
-            "enable_reflection": True,
-            "enable_extension": False,
-        }],
+        responses=[
+            {
+                "enable_short_answer": False,
+                "enable_reflection": True,
+                "enable_extension": False,
+            },
+            {"user_context": ""},
+        ],
     )
 
     response = asyncio.run(
@@ -305,7 +308,15 @@ def test_mcp_init_work_uses_elicited_question_choices(
         "reflection": True,
         "extension": False,
     }
-    assert len(ctx.messages) == 1
+    assert len(ctx.messages) == 4
+    assert ctx.messages[:3] == [
+        "학습자의 핵심 개념 이해를 빠르게 확인하기 위한 단답형 문제를 포함할까요?",
+        "학습자가 핵심 내용을 자신의 말로 설명할 수 있는지 확인하는 주관식 문제를 포함할까요?",
+        "확장 문제는 PDF 개념을 학습자의 현실·실무 맥락과 연결하는 응용 문제를 의미합니다.",
+    ]
+    assert ctx.messages[3] == (
+        "학습자에 최적화된 문제를 만들기 위해 학습자 정보를 제공해주세요."
+    )
 
 
 def test_mcp_existing_work_action_uses_codex_primitive_form_schema(
@@ -361,17 +372,19 @@ def test_mcp_init_work_allows_omitted_user_context(
 
     assert response["ok"] is True
     assert workspace.load_state(response["data"]["work_id"])["user_context"] == ""
-    assert str(tmp_path / "result" / "ko_short") in ctx.messages[0]
+    assert ctx.messages[0].startswith("학습자의 핵심 개념 이해")
+    assert response["data"]["output_dir"] == str(tmp_path / "result" / "ko_short")
 
 
-def test_mcp_init_work_uses_elicited_user_context(tmp_path, ko_short):
+def test_mcp_init_work_skips_user_context_when_optional_questions_disabled(
+    tmp_path, ko_short,
+):
     ctx = ElicitationContext(
         cwd=tmp_path,
         responses=[{
             "enable_short_answer": False,
             "enable_reflection": False,
             "enable_extension": False,
-            "user_context": "  입문자  ",
         }],
     )
 
@@ -380,10 +393,33 @@ def test_mcp_init_work_uses_elicited_user_context(tmp_path, ko_short):
     )
 
     assert response["ok"] is True
+    assert workspace.load_state(response["data"]["work_id"])["user_context"] == ""
+    assert len(ctx.messages) == 3
+
+
+def test_mcp_init_work_uses_conditional_elicited_user_context(
+    tmp_path, ko_short,
+):
+    ctx = ElicitationContext(
+        cwd=tmp_path,
+        responses=[
+            {
+                "enable_short_answer": True,
+                "enable_reflection": False,
+                "enable_extension": False,
+            },
+            {"user_context": "  입문자  "},
+        ],
+    )
+
+    response = asyncio.run(server.init_work(pdf_path=str(ko_short), ctx=ctx))
+
+    assert response["ok"] is True
     assert (
         workspace.load_state(response["data"]["work_id"])["user_context"]
         == "입문자"
     )
+    assert len(ctx.messages) == 4
 
 
 def test_mcp_init_work_elicits_resume_for_existing_work(
@@ -413,8 +449,13 @@ def test_mcp_init_work_elicits_resume_for_existing_work(
     assert response["ok"] is True
     assert response["data"]["work_id"] == original_work_id
     assert len(ctx.messages) == 1
-    assert "기존 작업 이어가기" in ctx.messages[0]
-    assert "기존 작업 교체" in ctx.messages[0]
+    assert ctx.messages[0] == "고정 출력 폴더에 기존 pdf-learner 작업이 있습니다."
+    action = ctx.schemas[0]["properties"]["action"]
+    assert action["title"] == "기존 작업 처리"
+    assert action["enum"] == [
+        "이어가기 — 기존 상태에서 남은 작업을 계속",
+        "교체 — 같은 결과 폴더에서 새 작업 시작",
+    ]
 
 
 def test_mcp_init_work_elicits_replace_for_existing_work(tmp_path, ko_short):
@@ -432,11 +473,11 @@ def test_mcp_init_work_elicits_replace_for_existing_work(tmp_path, ko_short):
         responses=[
             {"action": "replace"},
             {
-                "enable_short_answer": False,
+                "enable_short_answer": True,
                 "enable_reflection": False,
                 "enable_extension": False,
-                "user_context": "교체된 작업",
             },
+            {"user_context": "교체된 작업"},
         ],
     )
 
@@ -450,7 +491,7 @@ def test_mcp_init_work_elicits_replace_for_existing_work(tmp_path, ko_short):
         == "교체된 작업"
     )
     assert response["data"]["output_dir"] == str(output_dir)
-    assert len(ctx.messages) == 2
+    assert len(ctx.messages) == 5
 
 
 def test_mcp_resume_work_requires_elicited_confirmation(
@@ -478,8 +519,15 @@ def test_mcp_resume_work_requires_elicited_confirmation(
 
     assert response["ok"] is False
     assert called == []
-    assert "기존 작업 이어가기" in ctx.messages[0]
-    assert "기존 .work/state.json을 등록해 남은 챕터부터 계속합니다." in ctx.messages[0]
+    assert ctx.messages[0] == (
+        "기존 작업 상태를 불러오면 남은 단계부터 계속할 수 있습니다."
+    )
+    resume = ctx.schemas[0]["properties"]["resume_confirmed"]
+    assert resume == {
+        "enum": ["이어가기", "취소"],
+        "title": "기존 작업 이어가기",
+        "type": "string",
+    }
 
 
 def test_mcp_scan_pdf_uses_elicited_question_choices(
@@ -488,11 +536,14 @@ def test_mcp_scan_pdf_uses_elicited_question_choices(
     initialized = create_test_work(str(ko_short), str(tmp_path / "out"))
     work_id = initialized["data"]["work_id"]
     ctx = ElicitationContext(
-        responses=[{
-            "enable_short_answer": False,
-            "enable_reflection": True,
-            "enable_extension": False,
-        }],
+        responses=[
+            {
+                "enable_short_answer": False,
+                "enable_reflection": True,
+                "enable_extension": False,
+            },
+            {"user_context": ""},
+        ],
     )
 
     response = asyncio.run(
@@ -509,9 +560,29 @@ def test_mcp_scan_pdf_uses_elicited_question_choices(
         "reflection": True,
         "extension": False,
     }
-    assert "단답형 문제를 생성할까요?" in ctx.messages[0]
-    assert "단답형 문제 포함" in ctx.messages[0]
-    assert "챕터 핵심 개념을 짧은 문장으로 답하는 문제를 만듭니다." in ctx.messages[0]
+    assert ctx.messages[:3] == [
+        "학습자의 핵심 개념 이해를 빠르게 확인하기 위한 단답형 문제를 포함할까요?",
+        "학습자가 핵심 내용을 자신의 말로 설명할 수 있는지 확인하는 주관식 문제를 포함할까요?",
+        "확장 문제는 PDF 개념을 학습자의 현실·실무 맥락과 연결하는 응용 문제를 의미합니다.",
+    ]
+    assert [list(schema["properties"]) for schema in ctx.schemas[:3]] == [
+        ["enable_short_answer"],
+        ["enable_reflection"],
+        ["enable_extension"],
+    ]
+    short_answer = ctx.schemas[0]["properties"]["enable_short_answer"]
+    assert short_answer["title"] == "단답형 문제 생성"
+    assert "description" not in short_answer
+    assert short_answer["enum"] == [
+        "단답형 문제 포함",
+        "단답형 문제 제외",
+    ]
+    extension = ctx.schemas[2]["properties"]["enable_extension"]
+    assert extension["title"] == "확장 문제 생성"
+    assert "description" not in extension
+    assert ctx.messages[3] == (
+        "학습자에 최적화된 문제를 만들기 위해 학습자 정보를 제공해주세요."
+    )
     _assert_no_choice_fallback(response)
     _assert_no_removed_workflow_inputs(response)
 
@@ -531,10 +602,7 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
     assert scanned["ok"] is True, scanned
     ctx = ElicitationContext(
         responses=[
-            {
-                "chapter_strategy": "proceed",
-                "chapters_confirmed": True,
-            },
+            {"chapter_strategy": "proceed"},
             {"extraction_mode": "text"},
             {"execution_mode": "parallel"},
         ],
@@ -562,16 +630,124 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
     assert len(ctx.messages) == 3
     assert "사용자 확인 대상" in ctx.messages[0]
     assert "PDF p.1–12 · 원문 p.101–112" in ctx.messages[0]
-    assert "[챕터 구성과 범위]" in ctx.messages[0]
-    assert "[본문 추출 방식]" not in ctx.messages[0]
-    assert "[본문 추출 방식]" in ctx.messages[1]
-    assert "Text" in ctx.messages[1]
-    assert "OCR" in ctx.messages[1]
-    assert "Sequential" not in ctx.messages[1]
-    assert "[실행 방식]" in ctx.messages[2]
-    assert "Sequential" in ctx.messages[2]
-    assert "Parallel" in ctx.messages[2]
-    assert "OCR" not in ctx.messages[2]
+    assert ctx.messages[0].startswith("[pdf-learner가 분석한 챕터]\n")
+    assert ctx.messages[1] == "PDF 본문을 추출할 방식을 선택해주세요."
+    assert ctx.messages[2] == "챕터를 처리할 방식을 선택해주세요."
+    chapter_strategy = ctx.schemas[0]["properties"]["chapter_strategy"]
+    assert chapter_strategy["title"] == "챕터 구성 방식"
+    assert chapter_strategy["enum"] == [
+        "이대로 진행 — 현재 OCR 기반 챕터 구성과 범위 사용",
+        "직접 입력 — PDF 페이지 범위를 직접 지정",
+        "균등 청크 — 일정 페이지 수로 균등 분할",
+    ]
+    assert ctx.schemas[1]["properties"]["extraction_mode"] == {
+        "enum": [
+            "PyMuPDF — PDF 텍스트 레이어에서 본문을 직접 추출",
+            "PyMuPDF + PaddleOCR — PDF 페이지를 이미지로 렌더링한 뒤 OCR로 본문 추출",
+        ],
+        "title": "본문 추출 방식",
+        "type": "string",
+    }
+    assert ctx.schemas[2]["properties"]["execution_mode"] == {
+        "enum": [
+            "순차 처리",
+            "병렬 처리 — 최대 5개 챕터 동시 처리",
+        ],
+        "title": "챕터 실행 방식",
+        "type": "string",
+    }
+
+
+def test_mcp_set_chapters_collects_manual_pdf_page_ranges(
+    tmp_path, ko_short,
+):
+    initialized = create_test_work(
+        str(ko_short),
+        str(tmp_path / "manual"),
+        enable_short_answer=False,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    work_id = initialized["data"]["work_id"]
+    scanned = scan_with_question_options(work_id)
+    assert scanned["ok"] is True, scanned
+    ctx = ElicitationContext(responses=[
+        {"chapter_strategy": "manual_pdf_pages"},
+        {
+            "manual_page_basis": "pdf",
+            "manual_chapters": "01. 소개 | 1-4\n02. 본문 | 5-12",
+        },
+        {"extraction_mode": "text"},
+        {"execution_mode": "sequential"},
+    ])
+
+    response = asyncio.run(server.set_chapters(
+        work_id=work_id,
+        chapters=scanned["data"]["recommendations"]["suggested_chapters"],
+        ctx=ctx,
+    ))
+
+    assert response["ok"] is True, response
+    state = workspace.load_state(work_id)
+    assert state["chapters"]["ch1"]["title"] == "01. 소개"
+    assert state["chapters"]["ch1"]["pdf_pages"] == [1, 4]
+    assert state["chapters"]["ch2"]["pdf_pages"] == [5, 12]
+    assert len(ctx.messages) == 4
+    assert ctx.schemas[1]["properties"]["manual_page_basis"]["title"] == (
+        "입력할 페이지 번호 기준"
+    )
+    assert ctx.schemas[1]["properties"]["manual_chapters"]["description"] == (
+        "한 줄에 하나씩 '제목 | 시작-끝' 형식으로 입력"
+    )
+
+
+def test_mcp_set_chapters_collects_editable_chunk_size(tmp_path, ko_short):
+    initialized = create_test_work(
+        str(ko_short),
+        str(tmp_path / "chunks"),
+        enable_short_answer=False,
+        enable_reflection=False,
+        enable_extension=False,
+    )
+    work_id = initialized["data"]["work_id"]
+    scanned = scan_with_question_options(work_id)
+    assert scanned["ok"] is True, scanned
+    ctx = ElicitationContext(responses=[
+        {"chapter_strategy": "chunks"},
+        {"chunk_size": 5},
+        {"extraction_mode": "text"},
+        {"execution_mode": "sequential"},
+    ])
+
+    response = asyncio.run(server.set_chapters(
+        work_id=work_id,
+        chapters=scanned["data"]["recommendations"]["suggested_chapters"],
+        ctx=ctx,
+    ))
+
+    assert response["ok"] is True, response
+    state = workspace.load_state(work_id)
+    assert [
+        state["chapters"][chapter_id]["pdf_pages"]
+        for chapter_id in ("ch1", "ch2", "ch3")
+    ] == [[1, 5], [6, 10], [11, 12]]
+    assert ctx.schemas[1]["properties"]["chunk_size"]["default"] == 12
+    assert "기본 분할 크기는 청크당 12페이지" in ctx.messages[1]
+
+
+def test_manual_source_page_ranges_are_converted_to_pdf_pages():
+    chapters = server._parse_manual_chapters(
+        "소개 | 2-5",
+        page_basis="source",
+        page_offset=18,
+    )
+
+    assert chapters == [{
+        "chapter_id": "ch1",
+        "title": "소개",
+        "pdf_pages": [20, 23],
+        "source_pages": [2, 5],
+    }]
 
 
 @pytest.mark.parametrize(
@@ -580,14 +756,14 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
         ([{"_action": "cancel"}], 1),
         (
             [
-                {"chapter_strategy": "proceed", "chapters_confirmed": True},
+                {"chapter_strategy": "proceed"},
                 {"_action": "decline"},
             ],
             2,
         ),
         (
             [
-                {"chapter_strategy": "proceed", "chapters_confirmed": True},
+                {"chapter_strategy": "proceed"},
                 {"extraction_mode": "text"},
                 {"_action": "cancel"},
             ],
@@ -640,8 +816,12 @@ def test_mcp_extraction_elicitation_forces_ocr_for_garbled_text(
     selected = asyncio.run(server._elicit_extraction_mode(ctx, work_id))
 
     assert selected == "ocr"
-    assert "OCR" in ctx.messages[0]
-    assert "PDF 텍스트 레이어를 사용" not in ctx.messages[0]
+    assert ctx.schemas[0]["properties"]["extraction_mode"]["enum"] == [
+        "PyMuPDF + PaddleOCR — PDF 페이지를 이미지로 렌더링한 뒤 OCR로 본문 추출",
+    ]
+    assert ctx.messages[0] == (
+        "PDF 텍스트 인코딩이 깨져 있어 OCR 방식만 사용할 수 있습니다."
+    )
 
     invalid_ctx = ElicitationContext(responses=[{"extraction_mode": "text"}])
     with pytest.raises(ValueError):
@@ -665,7 +845,6 @@ def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
     ctx = ElicitationContext(
         responses=[{
             "chapter_strategy": "reanalyze_with_vision",
-            "chapters_confirmed": False,
         }],
     )
 
@@ -680,10 +859,9 @@ def test_mcp_set_chapters_honors_reanalyze_choice_without_changing_state(
     assert response["ok"] is False
     assert "force_vision=True" in response["next_action"]
     assert workspace.load_state(work_id)["phases"]["chapter_setup"] != "completed"
-    assert "목차 이미지로 재분석" in ctx.messages[0]
     assert (
-        "목차 페이지를 렌더한 뒤 OCR 텍스트와 이미지로 챕터를 다시 구성합니다."
-        in ctx.messages[0]
+        "목차 이미지로 재분석 — 목차 페이지 OCR로 챕터 다시 구성"
+        in ctx.schemas[0]["properties"]["chapter_strategy"]["enum"]
     )
     assert len(ctx.messages) == 1
 
@@ -720,8 +898,13 @@ def test_mcp_finalize_uses_elicited_format(monkeypatch, tmp_path, ko_short):
         "work_id": work_id,
         "output_format": "md_tui",
     }
-    assert "정적 웹사이트 — 브라우저로 열람 + 진도 저장 서버" in ctx.messages[0]
-    assert "챕터별 Markdown + 터미널 학습 TUI" in ctx.messages[0]
+    assert ctx.messages[0] == "완료된 챕터를 선택한 형식의 학습 자료로 만듭니다."
+    output_format = ctx.schemas[0]["properties"]["output_format"]
+    assert output_format["title"] == "최종 학습 자료 형식"
+    assert output_format["enum"] == [
+        "html — 브라우저에서 학습하고 진도 저장",
+        "md+tui — 터미널에서 학습하고 진도 저장",
+    ]
 
 
 def test_mcp_cleanup_requires_elicited_confirmation(monkeypatch):
@@ -740,7 +923,16 @@ def test_mcp_cleanup_requires_elicited_confirmation(monkeypatch):
 
     assert response["ok"] is False
     assert called == []
-    assert "최종 결과는 유지하고 이 작업의 .work 중간 데이터만 삭제합니다." in ctx.messages[0]
+    assert ctx.messages[0] == (
+        "삭제 후에는 이 중간 상태로 작업을 재개할 수 없습니다. "
+        "최종 학습 자료와 진도는 유지됩니다."
+    )
+    cleanup = ctx.schemas[0]["properties"]["cleanup_confirmed"]
+    assert cleanup == {
+        "enum": ["삭제", "유지"],
+        "title": "중간 작업 데이터 삭제",
+        "type": "string",
+    }
 
 
 def test_fastmcp_round_trip_uses_fixed_server_root_and_elicitation(
@@ -754,13 +946,18 @@ def test_fastmcp_round_trip_uses_fixed_server_root_and_elicitation(
     async def on_elicit(context, params):
         messages.append(params.message)
         schemas.append(params.requestedSchema)
-        return types.ElicitResult(
-            action="accept",
-            content={
+        properties = params.requestedSchema["properties"]
+        if "user_context" in properties:
+            content = {"user_context": ""}
+        else:
+            content = {
                 "enable_short_answer": False,
                 "enable_reflection": True,
                 "enable_extension": False,
-            },
+            }
+        return types.ElicitResult(
+            action="accept",
+            content=content,
         )
 
     async def scenario():
@@ -807,13 +1004,19 @@ def test_fastmcp_round_trip_uses_fixed_server_root_and_elicitation(
         "reflection": True,
         "extension": False,
     }
-    assert len(messages) == 1
-    assert len(schemas) == 1
-    _assert_codex_primitive_form_schema(schemas[0])
-    user_context = schemas[0]["properties"]["user_context"]
+    assert len(messages) == 4
+    assert len(schemas) == 4
+    for schema in schemas:
+        _assert_codex_primitive_form_schema(schema)
+    assert [list(schema["properties"]) for schema in schemas[:3]] == [
+        ["enable_short_answer"],
+        ["enable_reflection"],
+        ["enable_extension"],
+    ]
+    user_context = schemas[3]["properties"]["user_context"]
     assert user_context["type"] == "string"
     assert user_context["default"] == ""
-    assert "user_context" not in schemas[0]["required"]
+    assert "user_context" not in schemas[3].get("required", [])
 
 
 def test_fastmcp_set_chapters_uses_three_ordered_elicitations(
@@ -825,15 +1028,19 @@ def test_fastmcp_set_chapters_uses_three_ordered_elicitations(
     async def on_elicit(context, params):
         messages.append(params.message)
         schemas.append(params.requestedSchema)
-        if "[챕터 구성과 범위]" in params.message:
+        properties = params.requestedSchema["properties"]
+        if "chapter_strategy" in properties:
             content = {
-                "chapter_strategy": "proceed",
-                "chapters_confirmed": True,
+                "chapter_strategy": properties["chapter_strategy"]["enum"][0],
             }
-        elif "[본문 추출 방식]" in params.message:
-            content = {"extraction_mode": "text"}
-        elif "[실행 방식]" in params.message:
-            content = {"execution_mode": "parallel"}
+        elif "extraction_mode" in properties:
+            content = {
+                "extraction_mode": properties["extraction_mode"]["enum"][0],
+            }
+        elif "execution_mode" in properties:
+            content = {
+                "execution_mode": properties["execution_mode"]["enum"][1],
+            }
         else:
             raise AssertionError(params.message)
         return types.ElicitResult(action="accept", content=content)
@@ -872,9 +1079,9 @@ def test_fastmcp_set_chapters_uses_three_ordered_elicitations(
     assert result.structuredContent is not None
     assert result.structuredContent["ok"] is True
     assert len(messages) == 3
-    assert "[챕터 구성과 범위]" in messages[0]
-    assert "[본문 추출 방식]" in messages[1]
-    assert "[실행 방식]" in messages[2]
+    assert messages[0].startswith("[pdf-learner가 분석한 챕터]\n")
+    assert messages[1] == "PDF 본문을 추출할 방식을 선택해주세요."
+    assert messages[2] == "챕터를 처리할 방식을 선택해주세요."
     assert len(schemas) == 3
     for schema in schemas:
         _assert_codex_primitive_form_schema(schema)
@@ -919,10 +1126,15 @@ def test_fastmcp_static_choice_elicitations_use_supported_schemas(monkeypatch):
 
     async def on_elicit(context, params):
         schemas.append(params.requestedSchema)
-        if "OCR로 읽을 PDF의 언어" in params.message:
-            content = {"ocr_language": "english"}
-        elif "최종 학습 자료 형식" in params.message:
-            content = {"output_format": "md_tui"}
+        properties = params.requestedSchema["properties"]
+        if "ocr_language" in properties:
+            content = {
+                "ocr_language": properties["ocr_language"]["enum"][1],
+            }
+        elif "output_format" in properties:
+            content = {
+                "output_format": properties["output_format"]["enum"][1],
+            }
         else:
             raise AssertionError(params.message)
         return types.ElicitResult(action="accept", content=content)

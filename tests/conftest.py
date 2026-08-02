@@ -66,15 +66,34 @@ class ElicitationContext:
             check_client_capability=lambda _capability: supported,
         )
         self._responses = list(responses or [])
+        self._pending_response: dict | None = None
         self.messages: list[str] = []
+        self.schemas: list[dict] = []
 
     async def elicit(self, message, schema):
         self.messages.append(message)
-        response = dict(self._responses.pop(0))
+        self.schemas.append(schema.model_json_schema())
+        response = (
+            dict(self._pending_response)
+            if self._pending_response is not None
+            else dict(self._responses.pop(0))
+        )
+        self._pending_response = None
         action = response.pop("_action", "accept")
         if action != "accept":
             return SimpleNamespace(action=action, data=None)
-        return SimpleNamespace(action=action, data=schema(**response))
+        field_names = set(schema.model_fields)
+        selected = {
+            key: value for key, value in response.items()
+            if key in field_names
+        }
+        remaining = {
+            key: value for key, value in response.items()
+            if key not in field_names
+        }
+        if remaining:
+            self._pending_response = remaining
+        return SimpleNamespace(action=action, data=schema(**selected))
 
 
 def create_test_work(pdf_path: Path, output_dir: Path, **options) -> dict:
@@ -128,6 +147,24 @@ def create_test_work(pdf_path: Path, output_dir: Path, **options) -> dict:
     })
 
 
+def question_setup_responses(
+    *,
+    enable_short_answer: bool,
+    enable_reflection: bool,
+    enable_extension: bool,
+    user_context: str = "",
+) -> list[dict]:
+    """문제 유형 단일 필드 form과 조건부 학습자 정보 응답을 순서대로 만든다."""
+    responses = [
+        {"enable_short_answer": enable_short_answer},
+        {"enable_reflection": enable_reflection},
+        {"enable_extension": enable_extension},
+    ]
+    if enable_short_answer or enable_reflection or enable_extension:
+        responses.append({"user_context": user_context})
+    return responses
+
+
 def scan_with_question_options(work_id: str) -> dict:
     """미정인 문제 유형을 활성화해 렌더 테스트용 스캔을 실행한다."""
     setup = server._question_setup_payload(workspace.load_state(work_id))
@@ -136,11 +173,22 @@ def scan_with_question_options(work_id: str) -> dict:
         for field in setup["pending_fields"]
     }
     if setup["user_context_request"]:
-        selected["user_context"] = ""
+        context_response = (
+            [{"user_context": ""}]
+            if setup["has_enabled_optional_questions"] or any(selected.values())
+            else []
+        )
+    else:
+        context_response = []
     return asyncio.run(
         server.scan_pdf(
             work_id=work_id,
-            ctx=ElicitationContext(responses=[selected] if selected else []),
+            ctx=ElicitationContext(
+                responses=(
+                    [{field: selected[field]} for field in setup["pending_fields"]]
+                    + context_response
+                ),
+            ),
         ),
     )
 
@@ -153,7 +201,7 @@ def set_test_chapters(
     extraction_mode: str = "text",
     book_info: dict | None = None,
 ) -> dict:
-    """등록된 set_chapters의 세 Elicitation을 승인해 테스트 챕터를 구성한다."""
+    """등록된 set_chapters의 기본 Elicitation을 승인해 테스트 챕터를 구성한다."""
     if extraction_mode == "ocr":
         state = workspace.load_state(work_id)
         if state.get("ocr_language") is None:
@@ -165,7 +213,7 @@ def set_test_chapters(
         chapters=chapters,
         book_info=book_info,
         ctx=ElicitationContext(responses=[
-            {"chapter_strategy": "proceed", "chapters_confirmed": True},
+            {"chapter_strategy": "proceed"},
             {"extraction_mode": extraction_mode},
             {"execution_mode": execution_mode},
         ]),

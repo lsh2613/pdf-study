@@ -30,8 +30,9 @@ pdf-learner는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, 
 `result/<pdf-name>`을 고정 출력 폴더로 계산하며 요청 workspace와 프로세스 cwd는
 사용하지 않는다. 기존 관리 작업이 있으면 같은 호출 안에서 이어가기·교체
 Elicitation을 열고, 관리되지 않은 파일이 있으면 덮어쓰지 않는다. 새 작업은
-단답형·주관식·확장형 생성 여부와 선택적 학습자 정보를 하나의 Elicitation으로
-받은 뒤에만 만든다. 사용자는 `list_study_results()`로 같은 result 루트의 PDF별
+단답형·주관식·확장형 생성 여부를 먼저 받고, 하나라도 포함할 때만 선택적 학습자
+정보 Elicitation을 이어서 연다. 필요한 form을 모두 승인한 뒤에만 작업을 만든다.
+사용자는 `list_study_results()`로 같은 result 루트의 PDF별
 절대 경로를 조회할 수 있다.
 
 `scan_pdf(work_id, scan_size, force_vision)`는 PDF 메타데이터, 텍스트 레이어
@@ -42,8 +43,9 @@ Elicitation을 열고, 관리되지 않은 파일이 있으면 덮어쓰지 않�
 Elicitation을 열고, 이어서 `scan_toc_with_ocr`가 목차 OCR 텍스트를 반환한다.
 
 클라이언트가 `set_chapters(work_id, chapters, book_info)`를 호출하면 서버가 한
-도구 호출 안에서 챕터 구성·범위 확인, text/OCR 본문 추출 방식,
-sequential/parallel 실행 방식을 세 번의 독립된 elicitation으로 순서대로 요청한다.
+도구 호출 안에서 챕터 구성 방식, 본문 추출 방식, 실행 방식을 독립된
+Elicitation으로 순서대로 요청한다. 직접 입력은 페이지 번호 기준과 챕터 범위를,
+균등 청크는 청크당 PDF 페이지 수를 조건부 후속 form으로 추가 요청한다.
 어느 단계든 거절·취소되면 뒤 요청과 처리 본문을 실행하지 않는다. 모두 승인된 뒤
 스캔 여부와 입력 전체를 검증하고, 성공하면 모드·챕터와 처리 시작 phase를 하나의
 잠금 구간에서 상태 파일에 등록한다. 같은 작업의 다른 `set_chapters` 호출은 앞선

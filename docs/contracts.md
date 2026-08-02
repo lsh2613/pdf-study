@@ -30,6 +30,23 @@ Form의 `requestedSchema`는 Codex가 처리할 수 있는 MCP primitive schema
 `string | null`의 `anyOf`로 표현하지 않고 `type="string"`, `default=""`로
 표현하며 빈 문자열을 “학습자 정보 없음”으로 해석한다.
 
+각 form 필드는 한국어 표시 문구를 명시해 클라이언트가 내부 snake_case 필드명을
+영문 제목으로 자동 변환하지 않게 한다. Codex가 다중 필드 form의 탐색 순서를
+재배열할 수 있으므로 문제 유형은 각각 단일 필드 form으로 열고, 서버 호출 순서로
+`단답형 → 주관식 → 확장형`을 보장한다. 각 form의 `message`에는 먼저 읽어야 할
+질문·설명을, 필드 `title`에는 짧은 선택 항목명(`단답형 문제 생성` 등)을 둔다.
+문자열 선택지는
+간결한 한글 이름으로 표시하고, 구분에 필요한 설명이 있을 때만 `이름 — 설명` 형태로
+enum 값에 붙인다. 자명한 설명은 생략한다. `html`, `md+tui`, OCR처럼
+고유 형식명이나 약어는 그대로 쓸 수 있다. 표시용 enum 값은 Elicitation을 처리하는
+같은 async 함수 안에서 기존 내부값(`parallel`, `md_tui` 등)으로 변환하므로 상태와
+렌더러 계약은 바뀌지 않는다.
+
+`message`에는 챕터 목록, 텍스트 품질에 따른 제한, 삭제 후 재개 불가처럼
+해당 단계에서 별도로 알아야 하는 정보만 넣는다. 필드 선택지와 같은 label·설명을
+`message`에 다시 나열하지 않는다. 선택지의 정보는 `requestedSchema`의 enum에만
+한 번 표시한다.
+
 선택을 소비하는 각 워크플로는 form Elicitation과 승인 후 실행을 하나의 등록된
 async 함수에서 처리한다. `pdf_learner.server`에는 같은 작업을 선택 인자로 바로
 실행하는 별도 `_impl` 함수나 별도 MCP wrapper가 없다. 클라이언트는 모듈의 하위
@@ -59,8 +76,11 @@ cleanup_work(work_id)
 `result/<pdf_basename>`을 고정 출력 폴더로 계산한다. 공개 `output_dir`은 없고,
 요청 workspace, MCP file root, 프로세스 cwd에 따라 경로가 달라지지 않는다. 기존
 관리 작업은 `resume`/`replace` Elicitation으로 처리하고, 관리되지 않은 파일이
-있으면 덮어쓰지 않는다. 새 작업은 단답형·주관식·확장형과 선택적 `user_context`
-form을 승인한 뒤 만든다. 빈 context도 유효한 확정값이다.
+있으면 덮어쓰지 않는다. 새 작업은 단답형·주관식·확장형의 단일 필드 form을 이
+순서로 승인한 뒤, 세 유형
+중 하나라도 포함했을 때만 선택적 `user_context` form을 이어서 연다. 필요한 form을
+모두 승인한 뒤 작업을 만들며 빈 context도 유효한 확정값이다. 세 유형을 모두
+제외하면 context를 묻지 않고 빈 값으로 확정한다.
 
 `resume_work(pdf_path)`는 같은 고정 경로의 `.work/state.json`을
 `resume_confirmed` Elicitation 승인 뒤 다시 등록한다.
@@ -86,12 +106,17 @@ form을 승인한 뒤 만든다. 빈 context도 유효한 확정값이다.
 `prepare_ocr(work_id)`를 안내한다. 성공 next step은 `chapters`만 요구하는
 `set_chapters` 계약이다.
 
-`set_chapters(work_id, chapters, book_info)`는 챕터 구성·범위, text/OCR,
-sequential/parallel을 세 개의 순차 Elicitation으로 확인하고 모두 승인된 뒤에만
-처리 상태를 변경한다. 첫 번째 form은 `source_pages`가 있는 챕터를
+`set_chapters(work_id, chapters, book_info)`는 챕터 구성 방식, text/OCR,
+sequential/parallel을 순차 Elicitation으로 확인하고 모두 승인된 뒤에만 처리
+상태를 변경한다. 직접 입력을 선택하면 페이지 번호 기준과 챕터별 범위를 받는 form을,
+균등 청크를 선택하면 기본 분할 크기를 수정할 수 있는 정수 form을 중간에 추가한다.
+첫 번째 form은 `source_pages`가 있는 챕터를
 `PDF p.N–M · 원문 p.A–B` 형식으로 표시하며, 명시적 `null`은 오프셋 상태에 따라
-`원문 페이지 미상` 또는 `원문 페이지 없음`으로 표시한다. text 품질이 신뢰 불가면
-추출 form은 OCR만 허용한다.
+`원문 페이지 미상` 또는 `원문 페이지 없음`으로 표시한다. `message`에는 이 챕터
+목록만 두고 구성 전략 선택지는 `챕터 구성 방식` 필드에 설명형 enum으로 표시한다.
+별도 `chapters_confirmed` boolean은 사용하지 않는다. 직접 입력한 `pdf_pages`는 추출
+범위가 되고, 원문 페이지 기준 입력은 확인된 오프셋으로 PDF 페이지로 변환한다.
+text 품질이 신뢰 불가면 추출 form은 OCR만 허용하고 그 이유를 message에 표시한다.
 `pdf_pages=[start,end]`는 필수 1-based inclusive 범위이고 `source_pages`는 선택적
 표시 메타다. 입력 전체를 무부작용으로 검증한 뒤 모드·챕터·phase를 한 잠금 구간에서
 확정한다. OCR은 `prepare_ocr`에 저장된 언어를 사용하며 모델 캐시가 없으면
@@ -153,6 +178,8 @@ summary에 나타나야 한다. `summary_review.status`는 `passed`여야 하고
 `finalize_study(work_id)`는 HTML/Markdown+TUI Elicitation을 열고 승인된 형식으로
 최종 결과물을 만든다. `.work`는 항상 보존한다. 미완료 결과가 있어도 완료분만
 렌더하며 `data.omitted_chapters`와 `next_action`이 미반영 결과를 알린다.
+Form에는 `html`, `md+tui`로 표시하지만 승인값은 기존 내부 형식인 `html`,
+`md_tui`로 변환해 저장·렌더링한다.
 
 `cleanup_work(work_id)`는 삭제 Elicitation 승인 뒤 rendering phase가 완료된 작업의
 정확한 `.work`만 삭제한다. 결과 파일, manifest, 진도, 사용자 파일은 건드리지 않고

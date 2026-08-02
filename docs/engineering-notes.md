@@ -34,7 +34,7 @@
 대응: 선택값은 등록된 MCP async 함수가 여는 form Elicitation에서만 받는다. 공개
 스키마에서 선택 파라미터를 제거하고, 공개 응답에서도 `choices`,
 `user_choice_required`, `user_choice_instruction`, `question_setup`,
-`ocr_language_setup` 같은 fallback을 제거한다. 선택 정의는 Elicitation 메시지를
+`ocr_language_setup` 같은 fallback을 제거한다. 선택 정의는 Elicitation form을
 구성하는 private helper 안에만 둔다. 공개 도구 설명, 오류와 `next_action`도 실제
 등록된 입력만 예시로 사용하고, 선택이 필요하면 도구가 form을 연다고 안내한다.
 번호형 자유 텍스트 선택지는 구조화 fallback과 같은 우회 경로로 취급한다.
@@ -53,6 +53,18 @@ JSON Schema는 최상위 `title`도 만든다. 둘 다 Codex의 엄격한 MCP pr
 FastMCP round-trip 테스트에서 실제 `requestedSchema`의 최상위 키, 각 필드의
 primitive `type`, nullable `anyOf`와 `$ref` 부재를 검사한다. Codex 세션 자체의
 승인 정책이 `never`이면 유효한 form도 자동 거절되므로 서버 스키마 오류와 구분한다.
+
+선택지별 표시명과 내부값을 나누려고 `enumNames`를 보내면 현재 FastMCP 요청 모델이
+`Invalid request parameters`로 거절한다. 따라서 지원되는 단순 문자열 `enum` 값
+자체를 `한글 이름 — 요약 설명`으로 만들고, 승인 뒤 같은 Elicitation 함수에서
+기존 내부값으로 변환한다. 필드 `title`은 한국어로 명시하되 form 최상위 모델
+`title`은 계속 제거한다. 선택지 설명은 `message`에 중복하지 않는다.
+
+Codex 클라이언트는 다중 필드 form의 탐색 순서를 서버의 속성 선언 순서와 다르게
+표시할 수 있다. 문제 유형처럼 순서가 계약인 입력은 하나의 다중 필드 form에 넣지
+않고 단일 필드 form을 `단답형 → 주관식 → 확장형` 순서로 호출한다. 각 form은
+질문·설명을 `message`, 짧은 항목명을 `title`에 넣는다. 모든 선택은 메모리에만
+모았다가 필요한 form이 전부 승인된 뒤 상태를 변경한다.
 
 ## Python 직접 실행으로 Elicitation 우회
 
@@ -90,10 +102,11 @@ MCP wrapper는 만들지 않는다. 회귀 테스트는 7개 등록 함수가 as
 거절·취소 또는 미지원 세션이면 처리 본문을 실행하지 않는다. 새 작업 form에는
 계산된 절대 출력 폴더를 안내하되 별도 확인 boolean은 요구하지 않는다.
 
-`set_chapters`는 `[챕터 구성과 범위]`, `[본문 추출 방식]`, `[실행 방식]`의 세 form을
-순서대로 연다. 앞선 form의 승인값은 메모리에만 두고 세 form이 모두 승인된 뒤에만
-처리 상태를 변경한다. 따라서 두 번째나 세 번째 form에서 취소해도 rollback할 상태
-변경이 없다. FastMCP form schema는 primitive 필드만 허용하므로 문자열 선택은
+`set_chapters`는 챕터 구성 방식, 본문 추출 방식, 실행 방식 form을 순서대로 연다.
+직접 입력과 균등 청크는 각각 범위 입력 또는 청크 크기 후속 form을 조건부로 연다.
+앞선 form의 승인값은 메모리에만 두고 필요한 form이 모두 승인된 뒤에만 처리 상태를
+변경한다. 따라서 중간 form에서 취소해도 rollback할 상태 변경이 없다. FastMCP form
+schema는 primitive 필드만 허용하므로 문자열 선택은
 `str` 필드의 JSON Schema `enum`으로 표시하고, 수신값을 서버 허용 목록으로 다시
 검증한다.
 
