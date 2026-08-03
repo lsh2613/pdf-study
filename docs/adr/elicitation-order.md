@@ -54,4 +54,4 @@ stdio MCP 서버는 Python 소스 변경을 자동으로 다시 읽지 않는다
 - 각 문제 유형 화면은 `Field 1/1`로 표시되며, 하나의 `Field 1/3` form보다 승인
   왕복 횟수가 늘어난다. 순서와 조건부 학습자 정보 동작을 보장하기 위해 이 비용을
   수용한다.
-- 이 결정은 [0009 요청 workspace 경로와 서버 주도 사용자 선택](tracking/decisions/0009-request-context-and-elicitation.md)의 Elicitation 원칙을 구체화한다.
+- 이 결정은 [0009 요청 workspace 경로와 서버 주도 사용자 선택](../tracking/decisions/0009-request-context-and-elicitation.md)의 Elicitation 원칙을 구체화한다.
