@@ -18,10 +18,9 @@ pdf-learner는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, 
 - `renderer/`는 저장된 중립 JSON을 HTML 사이트 또는 Markdown+TUI 폴더로 변환한다. 렌더러는 PDF를 다시 읽지 않는다.
 - `renderer/output_manager.py`는 렌더 staging, 학습 fingerprint, `.pdf-learner-manifest.json`, 관리 경로 교체와 실패 rollback을 담당한다. 개별 렌더러는 비어 있는 staging 폴더에 한 세대만 만든다.
 - `templates/`는 최종 결과물에 복사되는 런처, 정적 자산, TUI 엔진을 담는다. HTML 런처는 렌더링한 프로젝트 환경의 Python으로 loopback 전용 `study_html.py`를 실행하며, `start_study.sh`와 `start_study.bat`은 포트 `0`으로 사용 가능한 포트를 자동 배정한다.
-- `scripts/setup_mcp.sh`는 저장소 안의 `.venv`를 만들고 검증한 뒤 Claude Code,
-  Codex CLI, Antigravity CLI의 전역 MCP 설정에 `.venv/bin/python` 절대 경로를
-  자동 적용한다. Codex 전역 승인 정책이 `never`이면 다른 승인은 계속 자동
-  거절하고 MCP Elicitation만 표시하는 granular 정책으로 바꾸고 원본을 백업한다.
+- `scripts/setup_mcp.sh`는 저장소 안의 `.venv`를 만들고 검증한 뒤 Codex CLI의 전역
+  MCP 설정에 `.venv/bin/python` 절대 경로를 자동 적용한다. Codex 전역 승인 정책이
+  `never`이면 모든 granular 승인 범주를 `true`로 바꾸고 원본을 백업한다.
 
 ## 대표 흐름
 

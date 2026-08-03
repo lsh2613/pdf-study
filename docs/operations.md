@@ -15,19 +15,16 @@
 이 명령은 저장소 안에 `.venv`가 없으면 새로 만들고, 이미 있으면 재사용한다. 그
 환경에 패키지를 editable로 다시 설치하고 `mcp`, `fitz`, `PIL`, `rich`,
 `markdown_it`, `paddle`, `paddleocr`, `pdf_learner` import를 확인한다. 검증이 끝나면
-Codex CLI의 **전역** MCP 설정을 자동 적용한다. Claude Code와 Antigravity CLI는
-각각 `--claude`, `--antigravity-cli`를 명시했을 때만 설정한다.
+Codex CLI의 **전역** MCP 설정을 자동 적용한다.
 
 서버는 MCP Python SDK v1의 `mcp.server.fastmcp` API를 사용하므로 런타임 의존성은
 `mcp>=1.28,<2` 범위로 제한한다. MCP SDK v2로 전환하려면 import·Elicitation·응답
 계약을 별도 마이그레이션하고 전체 서버 테스트를 다시 통과시켜야 한다.
 
-Claude Code와 Antigravity CLI의 기존 JSON 설정이 손상됐거나 예상한 객체 구조가
-아니면 기존 파일을 덮어쓰지 않고 설치를 중단한다. 이 두 설정은 같은 위치의
-`.pdf-learner.bak` 백업을 만든 뒤 원자적으로 교체한다. Codex CLI는
-`codex mcp add`로 전역 등록한 뒤 `codex mcp get pdf-learner`로 등록을 확인한다.
-Codex 전역 `config.toml`의 `approval_policy`가 없거나 정확히 `"never"`이면 다른
-승인 종류는 계속 자동 거절하면서 MCP form만 표시하는 granular 정책으로 바꾼다.
+Codex CLI는 `codex mcp add`로 전역 등록한 뒤 `codex mcp get pdf-learner`로 등록을
+확인한다.
+Codex 전역 `config.toml`의 `approval_policy`가 없거나 정확히 `"never"`이면 모든
+승인 종류와 MCP form을 사용자에게 표시하는 granular 정책으로 바꾼다.
 정책이 없더라도 실행 surface의 기본값이 `never`로 확정될 수 있으므로 명시적으로
 설정한다. 변경 전 파일은 `config.toml.pdf-learner.bak`으로 백업한다.
 같은 등록 과정에서 `pdf-learner` 서버에는
@@ -43,10 +40,8 @@ pdf-learner의 일반 MCP 도구 호출은 개별 승인 없이 실행되며, �
 
 `--dev`는 런타임 의존성에 pytest를 추가로 설치하고 개발 환경 검증까지 수행한다. 일반 사용자는 기본 설치만으로 별도 Python 패키지 설치 없이 MCP를 실행할 수 있다.
 
-기본 대상은 Codex CLI다. 다른 클라이언트를 갱신하거나 여러 클라이언트를 함께
-갱신하려면 `--claude`, `--codex`, `--antigravity-cli` 중 필요한 옵션을 붙인다.
-MCP 클라이언트 설정은 항상 전역에 적용하며, `--global`은 기존 호출과의 호환을 위해
-허용한다. `--local`은 지원하지 않는다.
+설치 스크립트는 Codex CLI만 설정하며 MCP 설정은 항상 전역에 적용한다. `--global`은
+기존 호출과의 호환을 위해 허용하고, `--local`은 지원하지 않는다.
 
 설정만 다시 출력하려면 다음 명령을 쓴다.
 
@@ -146,18 +141,25 @@ codex --ask-for-approval on-request
 codex --sandbox danger-full-access
 ```
 
-다른 승인 종류는 자동 거절하면서 MCP form만 표시하려면 Codex의 granular
-`approval_policy`에서 `mcp_elicitations=true`를 사용한다. 기본 설치 스크립트는
-전역 설정에 `approval_policy`가 없거나 정확히 `approval_policy="never"`일 때
-다음과 같은 정책으로 자동 변환한다.
+Codex의 granular `approval_policy`에서 모든 필드를 `true`로 두면 필요한 승인과 MCP
+form을 사용자에게 표시할 수 있다. 기본 설치 스크립트는 전역 설정에
+`approval_policy`가 없거나 정확히 `approval_policy="never"`일 때 다음 정책을 생성한다.
 
 ```toml
-approval_policy = { granular = { sandbox_approval = false, rules = false, mcp_elicitations = true, request_permissions = false, skill_approval = false } }
+[approval_policy.granular]
+sandbox_approval = true
+rules = true
+mcp_elicitations = true
+request_permissions = true
+skill_approval = true
 ```
 
-이미 `on-request`, `untrusted`이거나 MCP Elicitation이 활성화된 granular 정책이면
-설정을 바꾸지 않는다. granular 정책에서 `mcp_elicitations=false`를 명시한 경우에는
-사용자의 명시적 선택을 덮어쓰지 않고 설치를 중단한다. 명령줄의 `-a never`,
+이미 `on-request`, `untrusted`이거나 다섯 granular 승인 범주가 모두 `true`이면 설정을
+바꾸지 않는다. 기존 granular 정책에 누락되었거나 `false`인 승인 범주가 있으면 다섯
+값을 모두 `true`로 바꾼다.
+과거 설치 흐름이 만든 알려진 여러 줄 inline-table 문법 오류는 원본을
+`config.toml.pdf-learner.bak`으로 백업한 뒤 위 정책으로 복구한다. 그 밖의 TOML
+오류는 파일을 수정하지 않고 중단한다. 명령줄의 `-a never`,
 `--dangerously-bypass-approvals-and-sandbox`, 선택한 profile, 조직의 managed
 policy처럼 전역 `config.toml`보다 우선순위가 높은 설정은 설치 스크립트가 바꿀 수
 없다. 설치 스크립트는 Codex 등록 뒤 이 우선순위 주의와 form을 유지하는 실행 명령을

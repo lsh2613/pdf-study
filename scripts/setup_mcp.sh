@@ -3,18 +3,13 @@ set -euo pipefail
 
 usage() {
   cat <<'INNER_EOF'
-Usage: scripts/setup_mcp.sh [--global] [--print-config] [--check] [--dev] [--claude] [--codex] [--antigravity-cli] [--help]
+Usage: scripts/setup_mcp.sh [--global] [--print-config] [--check] [--dev] [--help]
 
 Create a project-local .venv for pdf-learner, install this package into it,
-verify required runtime dependencies, and automatically apply MCP config to clients.
+verify required runtime dependencies, and automatically apply the Codex CLI MCP config.
 
 Options:
-  --global         Accepted for compatibility. MCP configuration is always global.
-  
-  --claude         Apply config to Claude Code.
-  --codex          Apply config to Codex CLI.
-  --antigravity-cli Apply config to Antigravity CLI.
-  (If no targets are specified, config is applied only to Codex CLI.)
+  --global         Accepted for compatibility. Codex MCP configuration is always global.
 
   --print-config   Print the MCP config JSON for this checkout and exit.
   --check          Verify the existing .venv can import required dependencies.
@@ -62,10 +57,7 @@ PY
 apply_config() {
   "$VENV_PY" "$SCRIPT_DIR/apply_mcp_config.py" \
     --command "$VENV_PY" \
-    --cache-dir "$PADDLEOCR_CACHE_DIR" \
-    --scope "$SCOPE" \
-    --project-dir "$REPO_DIR" \
-    "$@"
+    --cache-dir "$PADDLEOCR_CACHE_DIR"
 }
 
 check_env() {
@@ -124,8 +116,6 @@ print(f"pdf-learner development environment OK (pytest): {sys.executable}")
 PY
 }
 
-TARGETS=()
-SCOPE="global"
 DEV_MODE=0
 
 while [[ $# -gt 0 ]]; do
@@ -156,10 +146,6 @@ while [[ $# -gt 0 ]]; do
       DEV_MODE=1
       shift
       ;;
-    --claude|--codex|--antigravity-cli)
-      TARGETS+=("${1#--}")
-      shift
-      ;;
     *)
       echo "Unknown option: $1" >&2
       usage >&2
@@ -167,10 +153,6 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-
-if [[ ${#TARGETS[@]} -eq 0 ]]; then
-  TARGETS=("codex")
-fi
 
 INSTALL_SPEC="$REPO_DIR"
 if [[ "$DEV_MODE" -eq 1 ]]; then
@@ -238,5 +220,5 @@ if [[ "$DEV_MODE" -eq 1 ]]; then
 fi
 
 echo ""
-echo "Applying MCP config to selected clients: ${TARGETS[*]}"
-apply_config "${TARGETS[@]}"
+echo "Applying MCP config to Codex CLI"
+apply_config

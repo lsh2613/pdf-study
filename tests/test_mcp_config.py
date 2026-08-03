@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import stat
 import subprocess
 import sys
@@ -67,106 +66,6 @@ def test_choice_workflows_have_only_elicitation_python_entrypoints():
         assert not hasattr(server, f"_mcp_{name}_tool")
 
 
-def test_global_config_uses_home_dir_not_project_dir(tmp_path: Path) -> None:
-    project_dir = tmp_path / "project"
-    home_dir = tmp_path / "home"
-    project_dir.mkdir()
-    home_dir.mkdir()
-
-    paths = apply_mcp_config.apply_configs(
-        command=str(project_dir / ".venv/bin/python"),
-        cache_dir=project_dir / ".paddleocr",
-        project_dir=project_dir,
-        scope="global",
-        targets=["claude"],
-        home_dir=home_dir,
-    )
-
-    assert paths == [home_dir / ".claude.json"]
-    assert (home_dir / ".claude.json").exists()
-    assert not (project_dir / ".claude.json").exists()
-
-
-def test_antigravity_cli_uses_current_global_mcp_config_path(tmp_path: Path) -> None:
-    project_dir = tmp_path / "project"
-    home_dir = tmp_path / "home"
-    project_dir.mkdir()
-    home_dir.mkdir()
-
-    paths = apply_mcp_config.apply_configs(
-        command=str(project_dir / ".venv/bin/python"),
-        cache_dir=project_dir / ".paddleocr",
-        project_dir=project_dir,
-        scope="global",
-        targets=["antigravity-cli"],
-        home_dir=home_dir,
-    )
-
-    expected = home_dir / ".gemini/config/mcp_config.json"
-    assert paths == [expected]
-    assert expected.exists()
-    assert not (home_dir / ".gemini/antigravity-cli/mcp_config.json").exists()
-
-
-def test_config_paths_rejects_project_local_scope(tmp_path: Path) -> None:
-    with pytest.raises(apply_mcp_config.ConfigError, match="global"):
-        apply_mcp_config.config_paths("local", tmp_path)
-
-
-def test_invalid_existing_config_fails_without_modifying_any_target(tmp_path: Path) -> None:
-    project_dir = tmp_path / "project"
-    home_dir = tmp_path / "home"
-    project_dir.mkdir()
-    home_dir.mkdir()
-    claude_config = home_dir / ".claude.json"
-    claude_config.write_text('{"mcpServers":', encoding="utf-8")
-
-    with pytest.raises(apply_mcp_config.ConfigError, match="invalid JSON"):
-        apply_mcp_config.apply_configs(
-            command=str(project_dir / ".venv/bin/python"),
-            cache_dir=project_dir / ".paddleocr",
-            project_dir=project_dir,
-            scope="global",
-            targets=["claude", "antigravity-cli"],
-            home_dir=home_dir,
-        )
-
-    assert claude_config.read_text(encoding="utf-8") == '{"mcpServers":'
-    assert not (home_dir / ".gemini/config/mcp_config.json").exists()
-
-
-def test_existing_config_is_backed_up_before_atomic_replacement(tmp_path: Path) -> None:
-    project_dir = tmp_path / "project"
-    home_dir = tmp_path / "home"
-    project_dir.mkdir()
-    home_dir.mkdir()
-    claude_config = home_dir / ".claude.json"
-    original = '{"globalMcpServers": {"other": {"command": "other"}}}\n'
-    claude_config.write_text(original, encoding="utf-8")
-
-    apply_mcp_config.apply_configs(
-        command=str(project_dir / ".venv/bin/python"),
-        cache_dir=project_dir / ".paddleocr",
-        project_dir=project_dir,
-        scope="global",
-        targets=["claude"],
-        home_dir=home_dir,
-    )
-
-    assert (home_dir / ".claude.json.pdf-learner.bak").read_text(encoding="utf-8") == original
-    data = json.loads(claude_config.read_text(encoding="utf-8"))
-    assert set(data["globalMcpServers"]) == {"other", "pdf-learner"}
-    assert not list(home_dir.glob("..claude.json.*.tmp"))
-
-
-def test_gitignore_covers_local_mcp_config_paths() -> None:
-    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
-
-    assert ".claude.json" in gitignore
-    assert ".agents/mcp_config.json" in gitignore
-    assert "*.pdf-learner.bak" in gitignore
-
-
 def test_global_codex_registration_uses_cli_and_verifies_result(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -214,13 +113,7 @@ def test_codex_never_policy_becomes_mcp_elicitation_only(tmp_path: Path) -> None
     assert changed is True
     parsed = tomllib.loads(config.read_text(encoding="utf-8"))
     assert parsed["approval_policy"] == {
-        "granular": {
-            "sandbox_approval": False,
-            "rules": False,
-            "mcp_elicitations": True,
-            "request_permissions": False,
-            "skill_approval": False,
-        },
+        "granular": apply_mcp_config.GRANULAR_APPROVALS_ENABLED,
     }
     assert parsed["model"] == "gpt-test"
     assert parsed["mcp_servers"]["other"]["command"] == "other"
@@ -230,6 +123,9 @@ def test_codex_never_policy_becomes_mcp_elicitation_only(tmp_path: Path) -> None
     assert config.with_name("config.toml.pdf-learner.bak").read_text(
         encoding="utf-8"
     ) == original
+    assert "[approval_policy.granular]\nsandbox_approval = true" in config.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_codex_missing_policy_becomes_mcp_elicitation_only(
@@ -249,19 +145,27 @@ def test_codex_missing_policy_becomes_mcp_elicitation_only(
     assert changed is True
     parsed = tomllib.loads(config.read_text(encoding="utf-8"))
     assert parsed["approval_policy"] == {
-        "granular": {
-            "sandbox_approval": False,
-            "rules": False,
-            "mcp_elicitations": True,
-            "request_permissions": False,
-            "skill_approval": False,
-        },
+        "granular": apply_mcp_config.GRANULAR_APPROVALS_ENABLED,
     }
     assert parsed["model"] == "gpt-test"
     assert parsed["mcp_servers"]["other"]["command"] == "other"
     assert config.with_name("config.toml.pdf-learner.bak").read_text(
         encoding="utf-8"
     ) == original
+
+
+def test_codex_missing_config_creates_minimal_elicitation_policy(tmp_path: Path) -> None:
+    config = tmp_path / "codex-home" / "config.toml"
+
+    changed = apply_mcp_config.ensure_codex_elicitation_allowed(config)
+
+    assert changed is True
+    assert tomllib.loads(config.read_text(encoding="utf-8")) == {
+        "approval_policy": {
+            "granular": apply_mcp_config.GRANULAR_APPROVALS_ENABLED,
+        },
+    }
+    assert not config.with_name("config.toml.pdf-learner.bak").exists()
 
 
 @pytest.mark.parametrize("policy", ["on-request", "untrusted"])
@@ -279,13 +183,14 @@ def test_codex_interactive_policy_is_left_unchanged(
     assert not config.with_name("config.toml.pdf-learner.bak").exists()
 
 
-def test_codex_compatible_granular_policy_is_left_unchanged(
+def test_codex_enabled_granular_policy_is_left_unchanged(
     tmp_path: Path,
 ) -> None:
     config = tmp_path / "config.toml"
     original = (
         "approval_policy = { granular = { "
-        "mcp_elicitations = true, sandbox_approval = false } }\n"
+        "sandbox_approval = true, rules = true, mcp_elicitations = true, "
+        "request_permissions = true, skill_approval = true } }\n"
     )
     config.write_text(original, encoding="utf-8")
 
@@ -295,7 +200,7 @@ def test_codex_compatible_granular_policy_is_left_unchanged(
     assert config.read_text(encoding="utf-8") == original
 
 
-def test_codex_explicitly_disabled_granular_elicitation_fails_closed(
+def test_codex_granular_policy_enables_every_approval_category(
     tmp_path: Path,
 ) -> None:
     config = tmp_path / "config.toml"
@@ -305,10 +210,73 @@ def test_codex_explicitly_disabled_granular_elicitation_fails_closed(
     )
     config.write_text(original, encoding="utf-8")
 
-    with pytest.raises(
-        apply_mcp_config.ConfigError,
-        match="explicitly does not allow mcp_elicitations",
-    ):
+    changed = apply_mcp_config.ensure_codex_elicitation_allowed(config)
+
+    assert changed is True
+    parsed = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert parsed["approval_policy"]["granular"] == apply_mcp_config.GRANULAR_APPROVALS_ENABLED
+    assert config.with_name("config.toml.pdf-learner.bak").read_text(
+        encoding="utf-8"
+    ) == original
+
+
+def test_codex_granular_policy_replaces_missing_categories_with_enabled_values(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "config.toml"
+    original = (
+        "[approval_policy.granular]\n"
+        "rules = true\n"
+        "sandbox_approval = false\n"
+    )
+    config.write_text(original, encoding="utf-8")
+
+    changed = apply_mcp_config.ensure_codex_elicitation_allowed(config)
+
+    assert changed is True
+    parsed = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert parsed["approval_policy"]["granular"] == apply_mcp_config.GRANULAR_APPROVALS_ENABLED
+    assert config.with_name("config.toml.pdf-learner.bak").read_text(
+        encoding="utf-8"
+    ) == original
+
+
+def test_codex_repairs_known_multiline_granular_policy_to_minimal_table(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "config.toml"
+    original = (
+        'model = "gpt-test"\n\n'
+        "approval_policy = { granular = {\n"
+        "  mcp_elicitations = true,\n"
+        "  rules = true,\n"
+        "  sandbox_approval = false\n"
+        "} }\n\n"
+        "[tui]\n"
+        "status_line_use_colors = true\n"
+    )
+    config.write_text(original, encoding="utf-8")
+
+    changed = apply_mcp_config.ensure_codex_elicitation_allowed(config)
+
+    assert changed is True
+    parsed = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert parsed["approval_policy"] == {
+        "granular": apply_mcp_config.GRANULAR_APPROVALS_ENABLED,
+    }
+    assert parsed["model"] == "gpt-test"
+    assert parsed["tui"]["status_line_use_colors"] is True
+    assert config.with_name("config.toml.pdf-learner.bak").read_text(
+        encoding="utf-8"
+    ) == original
+
+
+def test_codex_unknown_invalid_toml_is_not_modified(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    original = 'model = "gpt-test"\ninvalid = {\n'
+    config.write_text(original, encoding="utf-8")
+
+    with pytest.raises(apply_mcp_config.ConfigError, match="invalid TOML"):
         apply_mcp_config.ensure_codex_elicitation_allowed(config)
 
     assert config.read_text(encoding="utf-8") == original
@@ -376,11 +344,6 @@ def test_config_cli_updates_never_policy_before_codex_registration(
             str(tmp_path / ".venv/bin/python"),
             "--cache-dir",
             str(tmp_path / ".paddleocr"),
-            "--scope",
-            "global",
-            "--project-dir",
-            str(tmp_path),
-            "codex",
         ],
     )
 

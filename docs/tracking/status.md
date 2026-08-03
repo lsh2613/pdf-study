@@ -24,10 +24,11 @@
 - 프로젝트 로컬 `.venv` 설치 스크립트와 전역 MCP 클라이언트 설정 자동 적용, 환경
   확인 명령이 있다. 기존 venv는 재사용하며 MCP Python SDK는 FastMCP v1 호환 범위인
   `>=1.28,<2`로 제한한다. 기본 설치는 런타임만 준비하고 `setup_mcp.sh --dev`는
-  pytest까지 준비·검증한다. Claude Code·Antigravity CLI의 손상된 기존 JSON 설정은
-  백업·덮어쓰지 않으며, Codex CLI는 공식 `codex mcp add` 뒤 조회로 등록을 확인한다.
-  Codex의 전역 `never` 승인 정책은 원본 설정을 백업한 뒤 MCP Elicitation만 허용하는
-  granular 정책으로 변환한다.
+  pytest까지 준비·검증한다. Codex CLI는 공식 `codex mcp add` 뒤 조회로 등록을
+  확인한다.
+  Codex의 전역 `never` 승인 정책은 원본 설정을 백업한 뒤 모든 granular 승인 범주가
+  `true`인 정책으로 변환한다. 과거 설치 흐름이 만든 알려진 여러 줄 TOML 정책은 같은
+  정책으로 복구하며, 다른 TOML 오류는 수정하지 않는다.
 - 배포 wheel은 서버·렌더러·템플릿만 포함하고 개발용 `pdf_learner.tests*` 패키지는 포함하지 않는다. 저장소에서의 pytest와 fixture 생성은 소스 트리를 사용한다.
 - HTML과 Markdown+TUI 렌더러 테스트는 `tests/conftest.py`의 공용 작업 준비 helper를 사용해 같은 MCP 저장·렌더 흐름을 검증한다.
 - 처리 모드 선택지는 `processing_mode_contract.py`가 Elicitation용 독립

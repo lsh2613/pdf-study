@@ -83,9 +83,12 @@ def test_setup_script_reuses_existing_project_venv():
     assert 'echo "Reusing existing project-local venv: $VENV_DIR"' in text
 
 
-def test_setup_script_defaults_to_codex_only():
-    """대상 옵션을 생략하면 Codex만 설정해야 한다."""
+def test_setup_script_exposes_only_codex_registration():
+    """설치 스크립트는 다른 MCP 클라이언트 선택지를 노출하지 않아야 한다."""
     text = SCRIPT.read_text(encoding="utf-8")
 
-    assert 'TARGETS=("codex")' in text
-    assert 'TARGETS=("claude" "codex" "antigravity-cli")' not in text
+    assert "Applying MCP config to Codex CLI" in text
+    assert "TARGETS=" not in text
+    assert "--claude" not in text
+    assert "--antigravity-cli" not in text
+    assert "--codex" not in text
