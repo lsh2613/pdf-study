@@ -674,6 +674,8 @@ def _elicitation_cancelled(data: dict[str, Any]) -> dict[str, Any]:
 async def _elicit_question_setup(
     ctx: Context,
     setup: dict[str, Any],
+    *,
+    require_user_context: bool = False,
 ) -> dict[str, Any] | None:
     selected: dict[str, Any] = {}
     # Codex 클라이언트가 다중 필드 form의 탐색 순서를 재배열할 수 있으므로 문제
@@ -707,21 +709,35 @@ async def _elicit_question_setup(
             error="지원하지 않는 문제 유형 선택값입니다.",
         )
 
-    context_is_useful = setup["has_enabled_optional_questions"] or any(
-        selected.get(question["field"]) is True
-        for question in setup["questions"]
+    context_is_useful = (
+        require_user_context
+        or setup["has_enabled_optional_questions"]
+        or any(
+            selected.get(question["field"]) is True
+            for question in setup["questions"]
+        )
     )
     if setup["user_context_request"] and context_is_useful:
+        if require_user_context:
+            context_field = Field(
+                title="학습자 정보",
+                description=(
+                    "학습 목적, 배경지식, 관심 분야, 현재 수준 등을 입력해주세요."
+                ),
+                min_length=1,
+            )
+        else:
+            context_field = Field(
+                default="",
+                title="학습자 정보 (선택)",
+                description="학습 목적, 배경지식, 관심 분야, 현재 수준 등",
+            )
         context_schema = create_model(
             "PdfLearnerUserContextSelection",
             __base__=_ElicitationSelection,
             user_context=(
                 str,
-                Field(
-                    default="",
-                    title="학습자 정보 (선택)",
-                    description="학습 목적, 배경지식, 관심 분야, 현재 수준 등",
-                ),
+                context_field,
             ),
         )
         context_message = (
@@ -1059,10 +1075,10 @@ async def init_work(
 
     공개 MCP 입력은 pdf_path 하나뿐입니다. 출력 폴더는 MCP 서버 프로젝트 루트의
     `result/<pdf_basename>/`으로 고정하며 요청 workspace나 프로세스 cwd에 따라
-    달라지지 않습니다. 문제 유형과 선택적 user_context는 서버가 form
-    Elicitation으로 직접 받습니다. 기존 관리 작업이 있으면 재개/교체도 같은 호출
-    안의 Elicitation으로 확인합니다. Elicitation을 지원하지 않으면 상태를 바꾸지
-    않고 실패합니다.
+    달라지지 않습니다. 문제 유형과 필수 학습자 정보는 서버가 form Elicitation으로
+    직접 받습니다. 기존 관리 작업이 있으면 재개/교체도 같은 호출 안의
+    Elicitation으로 확인합니다. Elicitation을 지원하지 않으면 상태를 바꾸지 않고
+    실패합니다.
 
     처리 모드(순차/병렬 · text/OCR)는 set_chapters 호출 중 별도 Elicitation으로
     확정합니다.
@@ -1142,10 +1158,17 @@ async def init_work(
     selected = await _elicit_question_setup(
         ctx,
         initial_setup,
+        require_user_context=True,
     )
     if selected is None:
         return _elicitation_cancelled({"output_dir": resolved_dir})
     user_context = (selected.pop("user_context", None) or "").strip()
+    if not user_context:
+        return _err(
+            "학습자 정보는 비워둘 수 없습니다.",
+            data={"output_dir": resolved_dir},
+            next_action="학습자 정보를 입력해 같은 init_work를 다시 호출하세요.",
+        )
     options = {
         "multiple_choice": True,
         "short_answer": selected["enable_short_answer"],

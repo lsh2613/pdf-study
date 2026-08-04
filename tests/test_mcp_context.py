@@ -130,11 +130,14 @@ def test_init_work_uses_fixed_server_result_root_without_workspace_context(
 
     response = asyncio.run(server.init_work(
         pdf_path=str(ko_short),
-        ctx=ElicitationContext(responses=[{
-            "enable_short_answer": False,
-            "enable_reflection": False,
-            "enable_extension": False,
-        }]),
+        ctx=ElicitationContext(responses=[
+            {
+                "enable_short_answer": False,
+                "enable_reflection": False,
+                "enable_extension": False,
+            },
+            {"user_context": "핵심 개념을 객관식으로 점검하려는 입문자"},
+        ]),
     ))
 
     expected = server.RESULT_ROOT / ko_short.stem
@@ -256,11 +259,14 @@ def test_mcp_init_work_ignores_request_workspace_for_fixed_server_root(
     monkeypatch.chdir(server_cwd)
     ctx = ElicitationContext(
         cwd=agent_cwd,
-        responses=[{
-            "enable_short_answer": False,
-            "enable_reflection": False,
-            "enable_extension": False,
-        }],
+        responses=[
+            {
+                "enable_short_answer": False,
+                "enable_reflection": False,
+                "enable_extension": False,
+            },
+            {"user_context": "핵심 개념을 객관식으로 점검하려는 입문자"},
+        ],
     )
 
     response = asyncio.run(
@@ -290,7 +296,7 @@ def test_mcp_init_work_uses_elicited_question_choices(
                 "enable_reflection": True,
                 "enable_extension": False,
             },
-            {"user_context": ""},
+            {"user_context": "데이터베이스를 처음 배우는 직장인"},
         ],
     )
 
@@ -330,6 +336,8 @@ def test_mcp_existing_work_action_uses_codex_primitive_form_schema(
                 "enable_short_answer": False,
                 "enable_reflection": False,
                 "enable_extension": False,
+            }, {
+                "user_context": "핵심 개념을 객관식으로 점검하려는 입문자",
             }],
         ),
     ))
@@ -354,50 +362,68 @@ def test_mcp_existing_work_action_uses_codex_primitive_form_schema(
     _assert_codex_primitive_form_schema(schemas[0])
 
 
-def test_mcp_init_work_allows_omitted_user_context(
+def test_mcp_init_work_requires_user_context_form_even_without_optional_questions(
     tmp_path, ko_short,
 ):
     ctx = ElicitationContext(
         cwd=tmp_path,
-        responses=[{
-            "enable_short_answer": False,
-            "enable_reflection": False,
-            "enable_extension": False,
-        }],
+        responses=[
+            {
+                "enable_short_answer": False,
+                "enable_reflection": False,
+                "enable_extension": False,
+            },
+            {"user_context": "  객관식으로 핵심을 점검하려는 입문자  "},
+        ],
     )
 
     response = asyncio.run(
         server.init_work(pdf_path=str(ko_short), ctx=ctx)
     )
 
-    assert response["ok"] is True
-    assert workspace.load_state(response["data"]["work_id"])["user_context"] == ""
+    assert response["ok"] is True, response
+    assert (
+        workspace.load_state(response["data"]["work_id"])["user_context"]
+        == "객관식으로 핵심을 점검하려는 입문자"
+    )
     assert ctx.messages[0].startswith("학습자의 핵심 개념 이해")
+    assert len(ctx.messages) == 4
+    user_context_schema = ctx.schemas[3]
+    user_context = user_context_schema["properties"]["user_context"]
+    assert user_context_schema["required"] == ["user_context"]
+    assert user_context["title"] == "학습자 정보"
+    assert user_context["minLength"] == 1
+    assert "default" not in user_context
     assert response["data"]["output_dir"] == str(tmp_path / "result" / "ko_short")
 
 
-def test_mcp_init_work_skips_user_context_when_optional_questions_disabled(
+def test_mcp_init_work_rejects_whitespace_user_context_without_creating_work(
     tmp_path, ko_short,
 ):
     ctx = ElicitationContext(
         cwd=tmp_path,
-        responses=[{
-            "enable_short_answer": False,
-            "enable_reflection": False,
-            "enable_extension": False,
-        }],
+        responses=[
+            {
+                "enable_short_answer": True,
+                "enable_reflection": False,
+                "enable_extension": False,
+            },
+            {"user_context": "   "},
+        ],
     )
 
     response = asyncio.run(
         server.init_work(pdf_path=str(ko_short), ctx=ctx)
     )
 
-    assert response["ok"] is True
-    assert workspace.load_state(response["data"]["work_id"])["user_context"] == ""
-    assert len(ctx.messages) == 3
+    assert response["ok"] is False
+    assert "학습자 정보" in response["error"]
+    assert "비워둘 수 없습니다" in response["error"]
+    assert len(ctx.messages) == 4
+    assert not (server.RESULT_ROOT / ko_short.stem).exists()
 
 
-def test_mcp_init_work_uses_conditional_elicited_user_context(
+def test_mcp_init_work_trims_required_user_context(
     tmp_path, ko_short,
 ):
     ctx = ElicitationContext(
@@ -948,7 +974,7 @@ def test_fastmcp_round_trip_uses_fixed_server_root_and_elicitation(
         schemas.append(params.requestedSchema)
         properties = params.requestedSchema["properties"]
         if "user_context" in properties:
-            content = {"user_context": ""}
+            content = {"user_context": "데이터베이스를 처음 배우는 직장인"}
         else:
             content = {
                 "enable_short_answer": False,
@@ -1015,8 +1041,10 @@ def test_fastmcp_round_trip_uses_fixed_server_root_and_elicitation(
     ]
     user_context = schemas[3]["properties"]["user_context"]
     assert user_context["type"] == "string"
-    assert user_context["default"] == ""
-    assert "user_context" not in schemas[3].get("required", [])
+    assert user_context["title"] == "학습자 정보"
+    assert user_context["minLength"] == 1
+    assert "default" not in user_context
+    assert schemas[3]["required"] == ["user_context"]
 
 
 def test_fastmcp_set_chapters_uses_three_ordered_elicitations(

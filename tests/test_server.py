@@ -259,7 +259,9 @@ def test_set_chapters_preserves_page_metadata_end_to_end(tmp_path, ko_short):
 # init_work — 모드 인자를 더 이상 받지 않는다 (set_chapters에서 결정)
 # ---------------------------------------------------------------------------
 
-def test_init_work_elicits_optional_question_types_and_user_context(tmp_path, ko_short):
+def test_init_work_elicits_optional_question_types_and_required_user_context(
+    tmp_path, ko_short,
+):
     ctx = ElicitationContext(
         cwd=tmp_path,
         responses=[
@@ -378,7 +380,7 @@ def test_scan_pdf_does_not_silently_change_confirmed_choice(tmp_path, ko_short):
                 "enable_reflection": False,
                 "enable_extension": False,
             },
-            {"user_context": ""},
+            {"user_context": "데이터베이스를 처음 배우는 직장인"},
         ]),
     ))
     assert first["ok"], first
@@ -410,7 +412,7 @@ def test_init_work_uses_server_result_root_and_pdf_basename(
                 "enable_reflection": True,
                 "enable_extension": True,
             },
-            {"user_context": ""},
+            {"user_context": "리팩터링을 처음 배우는 개발자"},
         ]),
     ))
     _check_envelope(r)
@@ -458,7 +460,7 @@ def test_init_work_fixed_dir_sanitizes_pdf_name(tmp_path):
                 "enable_reflection": True,
                 "enable_extension": True,
             },
-            {"user_context": ""},
+            {"user_context": "리팩터링을 처음 배우는 개발자"},
         ]),
     ))
     assert r["ok"], r
