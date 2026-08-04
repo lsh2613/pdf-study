@@ -49,10 +49,12 @@ JSON Schema는 최상위 `title`도 만든다. 둘 다 Codex의 엄격한 MCP pr
 계약 밖이라 요청이 도구 실행 전에 거절될 수 있다.
 
 대응: 모든 정적·동적 form 모델은 공통 Elicitation 기반 모델을 상속한다. 이 기반은
-최상위 `title`을 제거하고, 선택적 문자열은 `str`과 빈 문자열 기본값으로 표현한다.
-FastMCP round-trip 테스트에서 실제 `requestedSchema`의 최상위 키, 각 필드의
-primitive `type`, nullable `anyOf`와 `$ref` 부재를 검사한다. Codex 세션 자체의
-승인 정책이 `never`이면 유효한 form도 자동 거절되므로 서버 스키마 오류와 구분한다.
+최상위 `title`을 제거한다. 선택 입력은 `str`과 빈 문자열 기본값으로 표현하고, 새
+`init_work`의 학습자 정보는 `str`, `required`, `minLength=1`, default 없음으로
+표현한다. FastMCP round-trip 테스트에서 실제 `requestedSchema`의 최상위 키, 각
+필드의 primitive `type`, nullable `anyOf`와 `$ref` 부재, 학습자 정보의 필수 계약을
+검사한다. Codex 세션 자체의 승인 정책이 `never`이면 유효한 form도 자동 거절되므로
+서버 스키마 오류와 구분한다.
 
 선택지별 표시명과 내부값을 나누려고 `enumNames`를 보내면 현재 FastMCP 요청 모델이
 `Invalid request parameters`로 거절한다. 따라서 지원되는 단순 문자열 `enum` 값

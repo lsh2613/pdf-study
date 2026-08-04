@@ -28,7 +28,8 @@ Form의 `requestedSchema`는 Codex가 처리할 수 있는 MCP primitive schema
 부분집합만 사용한다. 최상위 키는 `$schema`, `type`, `properties`, `required`로
 제한하고 Pydantic 모델 이름인 `title`을 전송하지 않는다. 선택적 문자열은
 `string | null`의 `anyOf`로 표현하지 않고 `type="string"`, `default=""`로
-표현하며 빈 문자열을 “학습자 정보 없음”으로 해석한다.
+표현한다. 새 `init_work`의 학습자 정보는 선택적 문자열이 아니라
+`required=["user_context"]`, `minLength=1`, default 없음인 필수 문자열이다.
 
 각 form 필드는 한국어 표시 문구를 명시해 클라이언트가 내부 snake_case 필드명을
 영문 제목으로 자동 변환하지 않게 한다. Codex가 다중 필드 form의 탐색 순서를
@@ -77,10 +78,11 @@ cleanup_work(work_id)
 요청 workspace, MCP file root, 프로세스 cwd에 따라 경로가 달라지지 않는다. 기존
 관리 작업은 `resume`/`replace` Elicitation으로 처리하고, 관리되지 않은 파일이
 있으면 덮어쓰지 않는다. 새 작업은 단답형·주관식·확장형의 단일 필드 form을 이
-순서로 승인한 뒤, 세 유형
-중 하나라도 포함했을 때만 선택적 `user_context` form을 이어서 연다. 필요한 form을
-모두 승인한 뒤 작업을 만들며 빈 context도 유효한 확정값이다. 세 유형을 모두
-제외하면 context를 묻지 않고 빈 값으로 확정한다.
+순서로 승인한 뒤, 세 선택과 무관하게 필수 `user_context` form을 네 번째로 연다.
+학습자 정보는 비어 있지 않아야 하며 공백뿐인 값도 서버 검증에서 거부한다. 필요한
+form을 모두 승인하고 학습자 정보를 검증한 뒤에만 작업을 만든다. 기존 작업의
+미확정 설정을 보완하는 `scan_pdf` 흐름은 호환성을 위해 선택적 학습자 정보와 빈
+문자열을 계속 허용한다.
 
 `resume_work(pdf_path)`는 같은 고정 경로의 `.work/state.json`을
 `resume_confirmed` Elicitation 승인 뒤 다시 등록한다.

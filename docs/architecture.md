@@ -29,8 +29,10 @@ pdf-learner는 하나의 로컬 MCP 서버가 PDF 처리, 작업 상태 저장, 
 `result/<pdf-name>`을 고정 출력 폴더로 계산하며 요청 workspace와 프로세스 cwd는
 사용하지 않는다. 기존 관리 작업이 있으면 같은 호출 안에서 이어가기·교체
 Elicitation을 열고, 관리되지 않은 파일이 있으면 덮어쓰지 않는다. 새 작업은
-단답형·주관식·확장형 생성 여부를 먼저 받고, 하나라도 포함할 때만 선택적 학습자
-정보 Elicitation을 이어서 연다. 필요한 form을 모두 승인한 뒤에만 작업을 만든다.
+단답형·주관식·확장형 생성 여부를 먼저 받고, 세 선택과 무관하게 필수 학습자 정보
+Elicitation을 네 번째로 연다. 빈 문자열과 공백뿐인 값은 거부하며, 필요한 form을
+모두 승인한 뒤에만 작업을 만든다. 기존 작업의 미확정 설정을 보완하는 `scan_pdf`는
+선택적 학습자 정보 동작을 유지한다.
 사용자는 `list_study_results()`로 같은 result 루트의 PDF별
 절대 경로를 조회할 수 있다.
 
@@ -67,7 +69,7 @@ Markdown+TUI 결과물을 staging에 만들고 성공한 세대만 설치한다.
 
 ```mermaid
 flowchart TD
-    A["init_work(pdf_path)"] --> A0["기존 작업 action + 문제 유형 + 선택적 context Elicitation"]
+    A["init_work(pdf_path)"] --> A0["기존 작업 action + 문제 유형 + 필수 context Elicitation"]
     A0 --> B["scan_pdf(work_id)"]
     B --> C{"목차/OCR 필요?"}
     C -->|예| D["prepare_ocr(work_id): 언어 Elicitation"]
