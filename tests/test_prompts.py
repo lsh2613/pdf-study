@@ -112,7 +112,12 @@ def test_user_context_and_book_info_are_injected():
         assert value in out["summarizer_prompt"]
     assert "문제 관점" in out["summarizer_prompt"]
     assert "학부생 대상" in out["basic_question_prompt"]
-    assert "문제 관점" in out["extension_prompt"]
+    assert "난이도, 용어 수준, 예시의 친숙도, 문제 관점" in out["basic_question_prompt"]
+    assert "위의 요약 근거 제한보다 우선하지 않습니다" in out["basic_question_prompt"]
+    assert "학부생 대상" in out["extension_prompt"]
+    assert "난이도와 현실 맥락" in out["extension_prompt"]
+    assert "summary,\n  key_points와 학습자 컨텍스트만" in out["extension_prompt"]
+    assert "학부생 대상" not in out["review_prompt"]
     for value in ("테스트 책", "샘플 저자", "샘플 출판", "데이터베이스 개론서"):
         assert value not in out["basic_question_prompt"]
         assert value not in out["extension_prompt"]
