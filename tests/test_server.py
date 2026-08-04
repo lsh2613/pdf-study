@@ -380,7 +380,7 @@ def test_scan_pdf_does_not_silently_change_confirmed_choice(tmp_path, ko_short):
                 "enable_reflection": False,
                 "enable_extension": False,
             },
-            {"user_context": "데이터베이스를 처음 배우는 직장인"},
+            {"user_context": ""},
         ]),
     ))
     assert first["ok"], first
