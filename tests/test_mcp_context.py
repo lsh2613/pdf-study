@@ -640,9 +640,18 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
             chapters=[
                 {
                     "chapter_id": "ch1",
-                    "title": "사용자 확인 대상",
-                    "pdf_pages": [1, 12],
-                    "source_pages": [101, 112],
+                    "title": (
+                        "사용자 확인 대상 "
+                        "(PDF p.1-5, 원문 p.101-105)"
+                    ),
+                    "pdf_pages": [1, 5],
+                    "source_pages": [101, 105],
+                },
+                {
+                    "chapter_id": "ch2",
+                    "title": "MyPDF p.6-12",
+                    "pdf_pages": [6, 12],
+                    "source_pages": [106, 112],
                 },
             ],
             ctx=ctx,
@@ -653,9 +662,17 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
     state = workspace.load_state(work_id)
     assert state["execution_mode"] == "parallel"
     assert state["extraction_mode"] == "text"
+    assert state["chapters"]["ch1"]["title"] == (
+        "사용자 확인 대상 (PDF p.1-5, 원문 p.101-105)"
+    )
+    assert state["chapters"]["ch2"]["title"] == "MyPDF p.6-12"
     assert len(ctx.messages) == 3
-    assert "사용자 확인 대상" in ctx.messages[0]
-    assert "PDF p.1–12 · 원문 p.101–112" in ctx.messages[0]
+    assert ctx.messages[0].splitlines()[1] == (
+        "- ch1: 사용자 확인 대상 / PDF p.1–5 · 원문 p.101–105"
+    )
+    assert ctx.messages[0].splitlines()[2] == (
+        "- ch2: MyPDF p.6-12 / PDF p.6–12 · 원문 p.106–112"
+    )
     assert ctx.messages[0].startswith("[pdf-learner가 분석한 챕터]\n")
     assert ctx.messages[1] == "PDF 본문을 추출할 방식을 선택해주세요."
     assert ctx.messages[2] == "챕터를 처리할 방식을 선택해주세요."
@@ -682,6 +699,54 @@ def test_mcp_set_chapters_uses_elicited_mode_and_confirms_chapters(
         "title": "챕터 실행 방식",
         "type": "string",
     }
+
+
+@pytest.mark.parametrize(
+    ("chapter", "expected"),
+    [
+        (
+            {
+                "title": "파트 1 (PDF p.1-5)",
+                "pdf_pages": [1, 5],
+            },
+            "파트 1",
+        ),
+        (
+            {
+                "title": "서문 (PDF p.1-5, 원문 페이지 미상)",
+                "pdf_pages": [1, 5],
+                "source_pages": None,
+            },
+            "서문",
+        ),
+        (
+            {
+                "title": "서문 (PDF p.1-5, 원문 페이지 없음)",
+                "pdf_pages": [1, 5],
+                "source_pages": None,
+            },
+            "서문",
+        ),
+        (
+            {
+                "title": "MyPDF p.1-5",
+                "pdf_pages": [1, 5],
+            },
+            "MyPDF p.1-5",
+        ),
+        (
+            {
+                "title": "부록 (PDF p.1-6)",
+                "pdf_pages": [1, 5],
+            },
+            "부록 (PDF p.1-6)",
+        ),
+    ],
+)
+def test_chapter_display_title_only_removes_matching_parenthesized_metadata(
+    chapter, expected,
+):
+    assert server._chapter_display_title(chapter) == expected
 
 
 def test_mcp_set_chapters_collects_manual_pdf_page_ranges(

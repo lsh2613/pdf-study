@@ -785,8 +785,9 @@ async def _elicit_chapter_setup(
     page_offset = recommendations.get("page_offset")
     for chapter in chapters:
         page_label = format_page_label(chapter, page_offset=page_offset)
+        title = _chapter_display_title(chapter)
         chapter_lines.append(
-            f"- {chapter.get('chapter_id')}: {chapter.get('title')} / {page_label}"
+            f"- {chapter.get('chapter_id')}: {title} / {page_label}"
         )
     message = (
         "[pdf-learner가 분석한 챕터]\n"
@@ -802,6 +803,46 @@ async def _elicit_chapter_setup(
         error="지원하지 않는 챕터 구성 방식입니다.",
     )
     return selected
+
+
+def _chapter_display_title(chapter: dict[str, Any]) -> str:
+    """Form 제목 끝의 중복 페이지 메타만 제거한다."""
+    title = str(chapter.get("title") or "").strip()
+    normalized = workspace.canonicalize_chapter_page_metadata(chapter)
+    pdf_pages = normalized.get("pdf_pages")
+    if not isinstance(pdf_pages, (list, tuple)) or len(pdf_pages) != 2:
+        return title
+
+    separator = r"\s*[-–—~]\s*"
+    pdf_range = (
+        rf"{re.escape(str(pdf_pages[0]))}{separator}"
+        rf"{re.escape(str(pdf_pages[1]))}"
+    )
+    pdf_label = rf"PDF\s*p\.\s*{pdf_range}"
+
+    source_present = "source_pages" in normalized
+    source_pages = normalized.get("source_pages")
+    source_label = ""
+    if isinstance(source_pages, (list, tuple)) and len(source_pages) == 2:
+        source_range = (
+            rf"{re.escape(str(source_pages[0]))}{separator}"
+            rf"{re.escape(str(source_pages[1]))}"
+        )
+        source_label = rf"원문\s*p\.\s*{source_range}"
+    elif source_present and source_pages is None:
+        source_label = r"원문\s*페이지\s*(?:미상|없음)"
+
+    source_suffix = (
+        rf"(?:\s*[,\u00b7/]\s*{source_label}|\s*\(\s*{source_label}\s*\))?"
+        if source_label
+        else ""
+    )
+    suffix = (
+        rf"\s*\(\s*{pdf_label}{source_suffix}\s*\)"
+        rf"\s*$"
+    )
+    cleaned = re.sub(suffix, "", title, flags=re.IGNORECASE).rstrip()
+    return cleaned or title
 
 
 def _source_pages_for_pdf_range(
