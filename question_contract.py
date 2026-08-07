@@ -59,7 +59,8 @@ def summary_payload_example() -> dict[str, Any]:
 def agent_summary_payload_example() -> dict[str, Any]:
     """생성 agent가 반환할 객관식 정답·오답 분리 예시."""
     example = summary_payload_example()
-    # 내용 목록과 검토 결과는 별도 단계에서 생성한 뒤 최종 저장 payload에 합친다.
+    # 구조 목록과 검토 결과는 별도 단계에서 생성한 뒤 최종 저장 payload에 합친다.
+    example.pop("section_inventory", None)
     example.pop("content_map", None)
     example.pop("summary_review", None)
     multiple_choice = example["questions"]["multiple_choice"][0]

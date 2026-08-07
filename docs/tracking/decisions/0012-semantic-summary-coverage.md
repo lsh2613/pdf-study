@@ -1,5 +1,9 @@
 # 요약 품질은 의미 coverage로 판정
 
+> `content_map`의 important point를 먼저 선정하는 부분은
+> [0015-section-first-summary.md](0015-section-first-summary.md)로 대체됐다.
+> 고정 분량 대신 중요 누락·왜곡 검토를 쓰는 결정은 유지한다.
+
 ## 배경
 
 기존 프롬프트는 번호형 서브 챕터를 Markdown 섹션으로 유지하도록 지시했지만,

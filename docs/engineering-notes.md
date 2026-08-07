@@ -151,12 +151,14 @@ cwd는 경로 계산에 참여하지 않는다. `list_study_results`는 같은 �
 대응: 서버 경계에서 활성 문제 유형별 필수값을 검사한 뒤에만 `completed`로 바꾼다. 새 문제 유형이나 저장 스키마를 추가하면 누락 검사를 먼저 확장해야 한다.
 
 요약 문자열과 핵심 포인트가 비어 있지 않은 것만으로는 의미 보존을 확인할 수 없다.
-요약 전에는 챕터 전체에서 `content_map`을 만들고, 명시적인 서브 챕터는 각각
-section으로 보존한다. 요약 후에는 원문·content map·초안을 대조한
-`summary_review`가 모든 section과 important point를 coverage로 확인하고 중요한
-누락·왜곡이 없을 때만 `passed`가 된다. 서버는 이 증거와 명시적 서브 챕터 heading의
-Markdown 포함을 검증한 뒤에만 완료 처리한다. 글자 수나 원문 대비 압축률은 문서별
-정보 밀도를 반영하지 못하므로 품질 게이트로 사용하지 않는다.
+요약 전에는 챕터 전체에서 실제 제목·순서·계층만 `section_inventory`로 만들고,
+명시적인 서브 챕터가 없으면 챕터 전체 section 하나만 둔다. inventory를 내용 필터로
+쓰지 않고 각 section의 원문 전체를 읽어 요약한다. 요약 후에는
+원문·section inventory·초안을 대조한 `summary_review`가 모든 section의 중요 누락·
+왜곡 부재를 각각 확인하고 챕터 전체 흐름도 확인한 뒤에만 `passed`가 된다. 서버는 이
+증거와 명시적 서브 챕터 heading의 Markdown 포함을 검증한 뒤에만 완료 처리한다.
+글자 수나 원문 대비 압축률은 문서별 정보 밀도를 반영하지 못하므로 품질 게이트로
+사용하지 않는다.
 
 ## 재개 시 완료 결과 재처리
 
@@ -174,10 +176,10 @@ Markdown 포함을 검증한 뒤에만 완료 처리한다. 글자 수나 원문
 원인: 같은 생성 단계나 sub-agent에 원문과 요약을 함께 전달하면 문제 프롬프트가
 요약 근거 제한을 적어도 모델이 원문의 세부 내용을 다시 사용할 수 있다.
 
-대응: 원문은 content map, 요약 작성과 독립 검토까지만 전달한다. 검토 통과 뒤 기본
+대응: 원문은 section inventory, 요약 작성과 독립 검토까지만 전달한다. 검토 통과 뒤 기본
 문제 생성 단계에는 `summary`, `key_points`, `source_char_count`만 전달한다. 확장
 문제는 `get_chapter_summary`가 챕터 식별 메타와 함께 같은 세 입력 필드를 반환하며
-원문, content map, 검토 내부 정보는 노출하지 않는다. `source_char_count`는 문제
+원문, section inventory, 검토 내부 정보는 노출하지 않는다. `source_char_count`는 문제
 개수 상한 계산에만 쓴다.
 
 ## 결과 파일과 상태 저장 순서

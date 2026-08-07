@@ -9,11 +9,11 @@
 
 ## 결정
 
-- 원문 text와 content map은 요약 생성과 의미 보존 검토까지만 사용한다.
+- 원문 text와 section inventory는 요약 생성과 의미 보존 검토까지만 사용한다.
 - 검토를 통과한 뒤 별도 기본 문제 생성 단계에는 `summary`, `key_points`와 문제
   개수 상한 계산용 `source_char_count`만 전달한다.
 - 확장 문제도 `get_chapter_summary`가 반환한 동일한 요약 입력만 사용한다.
-- `get_chapter_summary`는 원문 text, content map, summary review 내부 정보를
+- `get_chapter_summary`는 원문 text, section inventory, summary review 내부 정보를
   반환하지 않는다.
 - `source_char_count`는 문제 개수 상한을 고르는 메타일 뿐 문제 내용의 근거가
   아니다.

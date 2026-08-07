@@ -11,6 +11,7 @@
 - `0009-request-context-and-elicitation.md` - agent workspace 기준 경로와 서버 주도 필수 선택을 사용한다. 경로 결정은 0011, 새 작업의 선택적 학습자 정보는 0014로 대체됐다.
 - `0010-single-elicitation-entrypoint.md` - 선택형 워크플로는 Elicitation과 실행을 결합한 등록 함수 하나만 둔다.
 - `0011-server-project-result-root.md` - 서버 프로젝트의 고정 result 루트와 읽기 전용 결과 조회를 사용한다.
-- `0012-semantic-summary-coverage.md` - 요약은 고정 분량 대신 전체 내용 목록과 누락·왜곡 검토로 완료를 판정한다.
+- `0012-semantic-summary-coverage.md` - 요약은 고정 분량 대신 의미 누락·왜곡 검토로 완료를 판정한다. point 기반 내용 목록은 0015로 대체됐다.
 - `0013-summary-grounded-questions.md` - 모든 문제는 검토를 통과한 챕터 요약만 내용 근거로 사용한다.
 - `0014-required-user-context.md` - 새 작업은 문제 생성 조정에 사용할 비어 있지 않은 학습자 정보를 필수로 받는다.
+- `0015-section-first-summary.md` - 원문 구조 inventory 뒤 각 section 전체를 직접 요약하고 section별로 검토한다.

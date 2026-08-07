@@ -388,7 +388,7 @@ def _pending_guidance(
         actions: list[str] = []
         if "summary" in kinds:
             actions.append(
-                "content_map_prompt → summary_prompt → review_prompt → "
+                "section_inventory_prompt → summary_prompt → review_prompt → "
                 "basic_question_prompt 순서로 요약을 먼저 확정하고, 문제 단계에는 "
                 "요약·핵심 포인트만 전달한 뒤 "
                 f'save_chapter_result(work_id="{work_id}", '
@@ -433,7 +433,7 @@ def _pending_guidance(
     instructions: list[str] = []
     if summary_pending:
         instructions.append(
-            f"summary_pending={summary_pending}는 content_map_prompt → "
+            f"summary_pending={summary_pending}는 section_inventory_prompt → "
             "summary_prompt → review_prompt로 요약을 확정한 뒤 "
             "basic_question_prompt에는 요약만 전달하고 save_chapter_result로 "
             "함께 저장하세요"
@@ -1841,7 +1841,7 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
     pending_actions: list[str] = []
     if summary_pending:
         pending_actions.append(
-            f"summary_pending_chapter_ids({summary_pending})는 content_map_prompt → "
+            f"summary_pending_chapter_ids({summary_pending})는 section_inventory_prompt → "
             "summary_prompt → review_prompt로 요약을 확정한 뒤 "
             "basic_question_prompt에는 요약만 전달하고, 합친 결과를 "
             "save_chapter_result로 저장하세요"
@@ -1875,7 +1875,7 @@ def save_chapter_result(
 ) -> dict[str, Any]:
     """summarizer sub-agent의 챕터 결과 JSON을 저장합니다.
 
-    스키마와 생성 순서는 get_subagent_prompts의 content_map_prompt,
+    스키마와 생성 순서는 get_subagent_prompts의 section_inventory_prompt,
     summary_prompt, review_prompt, basic_question_prompt에 명시. 동시성 안전.
 
     저장 전 의미 coverage 증거, prompts.py의 기본 결과 JSON 스키마와 활성 문제
@@ -1892,7 +1892,7 @@ def save_chapter_result(
 
     # 에이전트가 예전 프롬프트나 환각으로 body_text를 보내더라도
     # 서버의 캐시(get_chapter_content에서 추출한 text)를 덮어쓰지 않도록 제거
-    data_to_save = dict(data) if isinstance(data, dict) else data
+    data_to_save = summary_contract.normalize_summary_quality_payload(data)
     if isinstance(data_to_save, dict):
         data_to_save.pop("body_text", None)
 
@@ -1917,7 +1917,8 @@ def save_chapter_result(
         return _err(
             f"챕터 결과에 필수 값이 비었거나 누락됐습니다: {missing}. "
             "요약(summary)·핵심포인트(key_points)·활성 문제와 함께, 전체 본문에서 "
-            "작성한 content_map 및 누락·왜곡 없이 passed된 summary_review를 채워 "
+            "작성한 section_inventory 및 모든 section별 누락·왜곡 없이 passed된 "
+            "summary_review를 채워 "
             f'save_chapter_result(work_id="{work_id}", chapter_id="{chapter_id}", '
             "data=...)로 다시 저장하세요. review가 needs_revision이면 먼저 요약을 "
             "보완하고 전체 text와 다시 대조하세요.",

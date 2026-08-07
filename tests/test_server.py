@@ -1290,6 +1290,7 @@ def test_get_chapter_summary_returns_only_question_basis(tmp_path, ko_short):
     assert response["data"]["source_char_count"] > 0
     assert "text" not in response["data"]
     assert "content_map" not in response["data"]
+    assert "section_inventory" not in response["data"]
     assert "summary_review" not in response["data"]
     assert "extension_prompt" in response["next_action"]
     state = workspace.load_state(wid)
@@ -1340,7 +1341,7 @@ def test_save_chapter_result_rejects_missing_summary(tmp_path, ko_short):
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
 
 
-def test_save_chapter_result_requires_semantic_content_map_and_review(
+def test_save_chapter_result_requires_section_inventory_and_review(
     tmp_path, ko_short,
 ):
     wid = _init(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
@@ -1348,12 +1349,12 @@ def test_save_chapter_result_requires_semantic_content_map_and_review(
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
 
     data = _result()
-    data.pop("content_map")
+    data.pop("section_inventory")
     data.pop("summary_review")
     response = server.save_chapter_result(wid, "ch1", data)
 
     assert response["ok"] is False
-    assert response["data"]["missing"] == ["content_map", "summary_review"]
+    assert response["data"]["missing"] == ["section_inventory", "summary_review"]
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
     assert not (workspace.summaries_dir(wid) / "ch1.json").exists()
     assert not (workspace.quiz_dir(wid) / "ch1.json").exists()
@@ -1368,13 +1369,13 @@ def test_save_chapter_result_rejects_review_with_uncovered_meaning(
 
     data = _result()
     data["summary_review"]["status"] = "needs_revision"
-    data["summary_review"]["covered_point_ids"] = []
+    data["summary_review"]["section_reviews"] = []
     data["summary_review"]["missing_significant_content"] = ["핵심 예외 조건"]
     response = server.save_chapter_result(wid, "ch1", data)
 
     assert response["ok"] is False
     assert "summary_review.status" in response["data"]["missing"]
-    assert "summary_review.covered_point_ids" in response["data"]["missing"]
+    assert "summary_review.section_reviews" in response["data"]["missing"]
     assert "summary_review.missing_significant_content" in response["data"]["missing"]
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
 
@@ -1387,30 +1388,92 @@ def test_save_chapter_result_rejects_missing_explicit_subchapter_heading(
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
 
     data = _result(summary="## 1.1 첫 절\n첫 절만 반영")
-    content_map = data["content_map"]
-    content_map["has_explicit_subchapters"] = True
-    content_map["sections"][0].update(
+    inventory = data["section_inventory"]
+    inventory["has_explicit_subchapters"] = True
+    inventory["sections"][0].update(
         heading="1.1 첫 절",
         explicit_subchapter=True,
     )
-    content_map["sections"].append({
+    inventory["sections"].append({
         "id": "section_2",
         "heading": "1.2 둘째 절",
+        "level": 1,
+        "parent_id": None,
         "explicit_subchapter": True,
-        "important_points": [{
-            "id": "point_2",
-            "content": "둘째 절 핵심",
-            "significance": "둘째 절의 핵심 결론",
-        }],
     })
-    data["summary_review"]["covered_section_ids"].append("section_2")
-    data["summary_review"]["covered_point_ids"].append("point_2")
+    data["summary_review"]["section_reviews"].append({
+        "section_id": "section_2",
+        "status": "passed",
+        "missing_significant_content": [],
+        "distortions": [],
+    })
 
     response = server.save_chapter_result(wid, "ch1", data)
 
     assert response["ok"] is False
-    assert "content_map.sections[1].heading" in response["data"]["missing"]
+    assert "section_inventory.sections[1].heading" in response["data"]["missing"]
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+
+
+def test_save_chapter_result_normalizes_legacy_content_map_without_points(
+    tmp_path, ko_short,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_legacy_quality"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+
+    data = _result(summary="## 챕터 전체\n본문 요약 내용입니다.")
+    data.pop("section_inventory")
+    data["content_map"] = {
+        "has_explicit_subchapters": False,
+        "sections": [{
+            "id": "section_1",
+            "heading": "챕터 전체",
+            "explicit_subchapter": False,
+            "important_points": [{
+                "id": "point_1",
+                "content": "과거 핵심 내용",
+                "significance": "과거 중요 이유",
+            }],
+        }],
+    }
+    data["summary_review"] = {
+        "status": "passed",
+        "reviewed_against": ["chapter_text", "content_map", "draft_summary"],
+        "covered_section_ids": ["section_1"],
+        "covered_point_ids": ["point_1"],
+        "missing_significant_content": [],
+        "distortions": [],
+    }
+
+    response = server.save_chapter_result(wid, "ch1", data)
+
+    assert response["ok"] is True, response
+    saved = workspace.get_chapter_summary(wid, "ch1")
+    assert "content_map" not in saved
+    assert "section_inventory" in saved
+    assert "important_points" not in saved["section_inventory"]["sections"][0]
+
+
+def test_save_chapter_result_strips_points_from_canonical_inventory(
+    tmp_path, ko_short,
+):
+    work_id = _init(
+        str(ko_short), str(tmp_path / "out_canonical_quality"),
+    )["data"]["work_id"]
+    _scan(work_id)
+    _sc(work_id, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    data = _result()
+    data["section_inventory"]["sections"][0]["important_points"] = [{
+        "id": "point_1",
+        "content": "저장되면 안 되는 선별 데이터",
+    }]
+
+    response = server.save_chapter_result(work_id, "ch1", data)
+
+    assert response["ok"] is True
+    saved = workspace.get_chapter_summary(work_id, "ch1")
+    assert "important_points" not in saved["section_inventory"]["sections"][0]
 
 
 def test_save_chapter_result_rejects_empty_enabled_question_type(tmp_path, ko_short):

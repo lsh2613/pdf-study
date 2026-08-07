@@ -50,11 +50,11 @@ def test_prompts_embed_agent_question_examples(monkeypatch):
     assert '"contract_probe": true' in prompt
 
 
-def test_prompts_embed_separate_content_map_and_review_examples(monkeypatch):
+def test_prompts_embed_separate_section_inventory_and_review_examples(monkeypatch):
     monkeypatch.setattr(
         summary_contract,
-        "content_map_example",
-        lambda: {"content_map_probe": True},
+        "section_inventory_example",
+        lambda: {"section_inventory_probe": True},
     )
     monkeypatch.setattr(
         summary_contract,
@@ -64,9 +64,10 @@ def test_prompts_embed_separate_content_map_and_review_examples(monkeypatch):
 
     out = prompts.build_prompts(_state())
 
-    assert '"content_map_probe": true' in out["content_map_prompt"]
+    assert '"section_inventory_probe": true' in out["section_inventory_prompt"]
+    assert out["content_map_prompt"] == out["section_inventory_prompt"]
     assert '"review_probe": true' in out["review_prompt"]
-    assert "content_map_probe" not in out["summarizer_prompt"]
+    assert "section_inventory_probe" not in out["summarizer_prompt"]
     assert "review_probe" not in out["summarizer_prompt"]
 
 
@@ -188,18 +189,45 @@ def test_summary_format_requires_markdown_subchapters_without_images():
 def test_summary_workflow_is_semantic_and_has_no_character_target():
     out = prompts.build_prompts(_state())
 
-    assert "text 전체" in out["content_map_prompt"]
-    assert "모든 서브 챕터" in out["content_map_prompt"]
-    assert "고정 상한이나 목표가 없습니다" in out["content_map_prompt"]
+    inventory_prompt = out["section_inventory_prompt"]
+    assert "text 전체" in inventory_prompt
+    assert "원문 구조만" in inventory_prompt
+    assert "important point" not in inventory_prompt
+    assert "요약하지 마세요" in inventory_prompt
     assert "짧은 초록이 아니라" in out["summarizer_prompt"]
     assert "특정 글자 수나 압축률을 목표로 삼지 마세요" in out["summarizer_prompt"]
+    assert "내용 선별 목록" not in out["summary_prompt"]
+    assert "각 section의 원문 전체" in out["summary_prompt"]
+    assert "소제목으로 구획을 나눠" not in out["summary_prompt"]
+    assert '"summary": "## 개요' not in out["summary_prompt"]
     assert "needs_revision" in out["review_prompt"]
     assert "글자 수나 원문 대비 비율은 통과 기준으로 사용하지 않습니다" in (
         out["review_prompt"]
     )
     workflow = out["workflow_instructions"]
-    assert workflow.index("content_map_prompt") < workflow.index("summary_prompt")
+    assert workflow.index("section_inventory_prompt") < workflow.index("summary_prompt")
     assert workflow.index("summary_prompt") < workflow.index("review_prompt")
+
+
+def test_section_inventory_prompt_handles_varied_hierarchy_and_false_mentions():
+    prompt = prompts.build_prompts(_state())["section_inventory_prompt"]
+
+    assert "번호가 없는 제목" in prompt
+    assert "깊이가 서로 다른 계층" in prompt
+    assert "3장을 참고" in prompt
+    assert "문장 안의 단순 언급" in prompt
+    assert "페이지 머리말" in prompt
+    assert "has_explicit_subchapters=false" in prompt
+    assert "챕터 전체" in prompt
+
+
+def test_review_prompt_reviews_every_inventory_section_without_points():
+    prompt = prompts.build_prompts(_state())["review_prompt"]
+
+    assert "section_inventory의 모든 section" in prompt
+    assert "section_reviews" in prompt
+    assert "important point" not in prompt
+    assert "covered_point_ids" not in prompt
 
 
 def test_question_counts_are_quality_limits_not_targets():
@@ -214,7 +242,7 @@ def test_basic_question_guidelines_ground_questions_in_reviewed_summary():
     prompt = prompts.build_prompts(_state())["basic_question_prompt"]
     assert "[기본 문제 작성 기준 — 요약만 사용]" in prompt
     assert "summary와 key_points만으로" in prompt
-    assert "원문 text나 content_map은" in prompt
+    assert "원문 text나 section_inventory는" in prompt
     assert "source_char_count" in prompt
     assert "그림, 도표, 이미지의 시각 정보에 의존하는 문제는 만들지 마세요" in prompt
     assert "reflection도 기본 문제" in prompt

@@ -36,14 +36,14 @@ SUMMARY_FORMAT = """\
 [요약 작성 형식 — 마크다운]
 summary는 **마크다운**으로 작성하세요. 렌더러가 그대로 마크다운으로 해석합니다
 (평문 나열 금지). 다음을 적극 활용하세요:
-- `##`/`###` 소제목으로 구획을 나눠 가독성을 높이기
 - **굵게**, *기울임*, `인라인 코드`, 코드블록(```), 목록(-, 1.), 표(| … |)
 - 정의·수식·예약어는 코드/표로 정리하면 더 또렷해집니다
 
-본문에 `3.1`, `3.2` 같은 번호가 붙은 서브 챕터가 있으면 **각 서브 챕터마다**
-독립된 `## 3.1 ...`, `## 3.2 ...` 섹션을 만들어 요약하세요. 서브 챕터 번호가
-없으면 본문의 실제 소제목이나 의미 단락을 기준으로 `##`/`###` 섹션을 나누세요.
-챕터 전체를 하나의 덩어리 문단으로만 요약하지 마세요.
+section_inventory에 명시적인 서브 챕터가 있으면 **모든 서브 챕터의 제목과 상대
+계층**을 Markdown 제목으로 보존하세요. 번호 유무와 무관하며, level이 깊어질수록
+Markdown 제목 단계도 깊어져야 합니다. inventory에 명시적인 서브 챕터가 없으면
+원문에 없던 서브 챕터나 계층을 만들지 마세요. 가독성이 필요하면 원문 구조처럼
+보이는 추가 제목 대신 목록·표·문단을 사용하세요.
 
 이미지(그림)는 넣지 마세요 — `![...]()` 같은 이미지 문법은 사용하지 않습니다.
 필요한 그림 내용은 글/표로 풀어 설명하세요.""".strip()
@@ -51,8 +51,8 @@ summary는 **마크다운**으로 작성하세요. 렌더러가 그대로 마크
 
 # ---------------------------------------------------------------------------
 # 의미 보존 요약 기준
-#   길이로 품질을 대신 판단하지 않고, 원문 성격에 맞는 중요 정보의 coverage를
-#   먼저 만들고 최종 요약을 독립적으로 검토한다.
+#   구조 inventory는 내용 필터가 아니다. 각 section의 원문 전체를 직접 읽어
+#   학습 자료를 만들고 최종 요약을 독립적으로 검토한다.
 # ---------------------------------------------------------------------------
 SEMANTIC_COMPLETENESS_GUIDELINES = """\
 [의미 보존 기준]
@@ -60,41 +60,43 @@ SEMANTIC_COMPLETENESS_GUIDELINES = """\
 특정 글자 수나 압축률을 목표로 삼지 마세요. 원문의 전달 방식과 정보 밀도에 맞춰
 필요한 만큼 충분히 설명하세요.
 
-- 먼저 content_map에 정리된 모든 section과 important point를 반영하세요.
-- 원문에 명시적인 서브 챕터가 있으면 제목과 계층을 반드시 summary에 드러내고,
-  각 서브 챕터의 유의미한 내용을 해당 섹션에서 설명하세요.
-- 명시적인 서브 챕터가 없으면 챕터 전체의 논리와 흐름을 유지하면서 실제 주제나
-  의미 단락을 가독성 좋은 섹션으로 구성하세요. 새 챕터 경계를 만들지는 마세요.
+- section_inventory는 원문 구조만 안내하며 요약 범위를 제한하지 않습니다. inventory
+  항목만 보고 요약하지 말고 각 section의 원문 전체를 직접 읽으세요.
+- 원문에 명시적인 서브 챕터가 있으면 모든 제목과 계층을 summary에 드러내고,
+  각 서브 챕터가 독립적으로 복습 가능한 학습 설명을 갖게 하세요.
+- 명시적인 서브 챕터가 없으면 챕터 전체의 논리와 흐름을 유지해 요약하세요.
+  원문에 없는 서브 챕터 경계를 발명하지 마세요.
 - 문서 성격에 따라 핵심 주장, 개념과 정의, 원리와 인과관계, 절차와 선후관계,
   조건과 예외, 비교와 트레이드오프, 근거와 대표 사례, 주의사항 중 실제로 중요한
   요소를 보존하세요.
 - 반복, 장식적 문장, 같은 의미의 중복 사례는 줄일 수 있지만 서로 다른 의미,
   전제, 예외, 단계, 판단 근거를 짧게 만들기 위해 삭제하지 마세요.
-- content_map 항목을 이름만 나열하지 말고 학습자가 이해할 수 있도록 관계와 맥락을
+- 제목이나 용어만 나열하지 말고 학습자가 이해할 수 있도록 관계와 맥락을
   설명하세요.""".strip()
 
 
-CONTENT_MAP_GUIDELINES = """\
-[내용 목록 작성 기준]
-요약문을 쓰기 전에 챕터 text 전체를 읽고, 빠뜨리면 의미 전달이 손상되는 내용을
-content_map으로 정리하세요. 이 단계에서 요약 분량을 줄이거나 결론 몇 개만 고르지
-마세요.
+SECTION_INVENTORY_GUIDELINES = """\
+[section inventory 작성 기준 — 원문 구조만]
+챕터 text 전체를 읽고 요약을 쓰기 전에 원문이 실제로 가진 서브 챕터 구조만
+section_inventory로 정리하세요. 이 단계에서는 내용을 요약하지 마세요. 중요 내용을
+선정하는 단계도 아닙니다.
 
-- 원문에 명시적인 서브 챕터가 있으면 `has_explicit_subchapters=true`로 두고,
-  모든 서브 챕터를 원래 순서대로 각각 sections 항목으로 만드세요. 원문 제목을
-  heading에 보존하고 `explicit_subchapter=true`로 표시하세요.
-- 명시적인 서브 챕터가 없으면 `has_explicit_subchapters=false`로 두고, 챕터 전체를
-  나타내는 sections 항목 하나만 만드세요. 그 안의 important_points가 챕터 전체의
-  유의미한 내용을 담당합니다.
-- 교재·기술 문서는 개념, 정의, 구조, 동작 원리, 설정, 절차, 비교, 조건, 예외,
-  장애·주의점과 대표 예시를 살피세요.
-- 논증·보고서는 주장, 근거, 전제, 반론, 한계와 결론을 살피세요.
-- 역사·서사 문서는 인물·사건, 관계, 원인과 결과, 전환점과 주제를 살피세요.
-- 위 분류를 억지로 모두 채우지 말고 실제 원문의 의미 전달 방식에 맞추세요.
-- section id와 point id는 영문자·숫자·`_`·`-`만 사용하고 챕터 안에서 각각
-  중복되지 않게 만드세요.
-- important point의 content에는 보존할 내용을, significance에는 그것이 중요한
-  이유를 구체적으로 적으세요. 중요 항목 수에는 고정 상한이나 목표가 없습니다.""".strip()
+- 번호가 붙은 제목, 번호가 없는 제목, 글자 형태가 다른 제목, 깊이가 서로 다른 계층을
+  모두 허용합니다. 번호 패턴 하나에 의존하지 말고 제목이 뒤따르는 내용을
+  조직하는 실제 구조인지 판단하세요.
+- 독립된 제목 줄, 앞뒤 여백, 반복되는 제목 형식, 뒤따르는 본문, 이웃 제목과의
+  계층 관계를 함께 보세요. PDF 텍스트 추출 때문에 줄이나 공백이 어색해도 의미상
+  같은 제목이면 자연스럽게 복원할 수 있습니다.
+- `3장을 참고`, `앞 장에서 설명했듯이`, `2.1에서 살펴본`처럼 문장 안의 단순 언급,
+  인용·교차 참조, 목록 번호, 표·그림 번호, 페이지 머리말·꼬리말, 목차 조각의 반복은
+  현재 챕터의 서브 챕터로 등록하지 마세요.
+- 명시적인 서브 챕터가 하나라도 있으면 `has_explicit_subchapters=true`로 두고 모든
+  실제 서브 챕터를 원래 순서대로 기록하세요. `level`은 현재 챕터 안의 상대 깊이를
+  1부터 시작하고, `parent_id`로 가장 가까운 상위 section을 연결하세요.
+- 명시적인 서브 챕터가 없으면 `has_explicit_subchapters=false`로 두고 `챕터 전체`
+  section 하나만 만드세요. 의미 단락을 원문 서브 챕터처럼 발명하지 마세요.
+- section id는 영문자·숫자·`_`·`-`만 사용하고 챕터 안에서 중복되지 않게 만드세요.
+- 아직 summary, key_points, 문제나 내용 선별 목록을 만들지 마세요.""".strip()
 
 
 # ---------------------------------------------------------------------------
@@ -163,10 +165,10 @@ get_chapter_content가 제공한 text가 PaddleOCR CPU로 미리 읽은 챕터 �
 # Summarizer 템플릿
 # ---------------------------------------------------------------------------
 
-_CONTENT_MAP = """\
-당신은 PDF 학습 자료의 내용 보존을 담당하는 분석자입니다.
-get_chapter_content가 제공한 챕터 text 전체를 읽고, 최종 요약에서 빠뜨리면 안 되는
-내용 목록을 한국어로 작성하세요. 아직 요약문이나 문제를 만들지 마세요.
+_SECTION_INVENTORY = """\
+당신은 PDF 학습 자료의 원문 구조를 정리하는 분석자입니다.
+get_chapter_content가 제공한 챕터 text 전체를 읽고, 실제 서브 챕터의 제목·순서·
+계층만 section_inventory로 작성하세요. 아직 내용을 요약하거나 문제를 만들지 마세요.
 
 [책 정보]
 {book_info_block}
@@ -176,18 +178,20 @@ get_chapter_content가 제공한 챕터 text 전체를 읽고, 최종 요약에�
 
 {input_mode_block}
 
-{content_map_guidelines_block}
+{section_inventory_guidelines_block}
 
 [출력 형식 — JSON]
 반드시 다음 스키마의 JSON 객체 하나만 반환하세요. 코드펜스는 사용하지 마세요.
 
-{content_map_json_example}
+{section_inventory_json_example}
 """
 
 _SUMMARY = """\
 당신은 PDF 학습 자료를 만드는 어시스턴트입니다.
-원문 언어와 무관하게 주어진 챕터 text와 별도 분석자가 만든 content_map을 함께 읽고
-한국어 summary와 key_points의 초안을 생성하세요. 문제는 만들지 마세요.
+원문 언어와 무관하게 주어진 챕터 text와 별도 분석자가 만든 section_inventory를
+함께 읽고 한국어 summary와 key_points의 초안을 생성하세요. 문제는 만들지 마세요.
+section_inventory는 원문 구조만 나타내며 요약 범위를 제한하지 않습니다. 각
+section의 원문 전체를 직접 읽어 학습용 설명을 작성하세요.
 문제 생성기는 검토를 통과한 이 요약만 입력으로 받아 별도로 실행됩니다.
 
 [책 정보]
@@ -211,14 +215,14 @@ summary에는 한국어 요약을 넣으세요.
 
 {summary_only_json_example}
 
-아직 save_chapter_result를 호출하지 마세요. review_prompt가 text·content_map·이
+아직 save_chapter_result를 호출하지 마세요. review_prompt가 text·section_inventory·이
 초안을 대조해 `passed`를 반환한 뒤에만 basic_question_prompt로 넘어갑니다.
 """
 
 
 _BASIC_QUESTIONS = """\
 당신은 검토를 통과한 챕터 요약으로 학습 확인 문제를 만드는 어시스턴트입니다.
-입력으로 전달받은 summary와 key_points만 읽으세요. 원문 text나 content_map은
+입력으로 전달받은 summary와 key_points만 읽으세요. 원문 text나 section_inventory는
 입력으로 받거나 참조하지 마세요.
 
 [학습자 컨텍스트]
@@ -249,8 +253,10 @@ _BASIC_QUESTIONS = """\
 # 결합 프롬프트다. 새 workflow는 summary_prompt와 basic_question_prompt를 분리한다.
 _SUMMARIZER_COMPAT = """\
 당신은 PDF 학습 자료를 만드는 어시스턴트입니다.
-주어진 챕터 text와 content_map으로 먼저 summary와 key_points를 작성해 확정하세요.
-그 다음 원문과 content_map을 다시 참조하지 말고, 방금 확정한 summary와 key_points만
+주어진 챕터 text와 section_inventory로 먼저 summary와 key_points를 작성해 확정하세요.
+section_inventory는 구조만 안내하며 요약 범위를 제한하지 않습니다. 각 section의 원문
+전체를 직접 읽으세요. 그 다음 원문과 section_inventory를 다시 참조하지 말고,
+방금 확정한 summary와 key_points만
 근거로 객관식/단답형/주관식 문제를 만드세요.
 
 [책 정보]
@@ -289,13 +295,17 @@ _SUMMARIZER_COMPAT = """\
 
 _SUMMARY_REVIEW = """\
 당신은 PDF 학습 요약의 독립 검토자입니다.
-챕터 text 전체, content_map, 작성된 요약·핵심 포인트 초안을 직접 비교하세요.
+챕터 text 전체, section_inventory, 작성된 요약·핵심 포인트 초안을 직접 비교하세요.
 형식이 채워졌다는 이유로 통과시키지 말고 의미 보존 여부를 판단하세요.
 
 [검토 기준]
-- content_map의 모든 section과 important point가 실제 요약에 의미 있게 반영됐는가
-- 명시적인 서브 챕터가 있으면 모든 제목과 내용이 원래 계층에 맞게 드러나는가
-- 서브 챕터가 없으면 챕터 전체의 핵심 흐름과 유의미한 정보가 반영됐는가
+- section_inventory 자체가 실제 원문 구조를 올바르게 반영하는가. 문장 속 다른 장의
+  단순 언급이나 페이지 머리말을 section으로 잘못 분류하지 않았고 실제 제목을
+  빠뜨리지 않았는가
+- section_inventory의 모든 section이 실제 요약에 있고 원래 계층에 맞게 드러나는가
+- 각 section의 원문 전체를 직접 읽었을 때 개념·관계·절차·조건·예외·근거·사례·
+  주의점 등 학습에 필요한 내용이 해당 section 요약에 충분히 설명됐는가
+- 서브 챕터가 없으면 챕터 전체의 흐름과 유의미한 정보가 반영됐는가
 - 핵심 주장·개념·관계·절차·조건·예외·근거·사례·주의점 중 원문에서 중요한
   내용이 과도한 압축으로 사라지지 않았는가
 - 원문의 의미가 단순화 과정에서 왜곡되거나 잘못 연결되지 않았는가
@@ -305,9 +315,10 @@ _SUMMARY_REVIEW = """\
 missing_significant_content 또는 distortions에 구체적으로 적으세요. 작성자가 그
 피드백을 반영해 초안을 고친 뒤 검토를 다시 수행해야 합니다.
 
-모든 section과 point가 실제로 반영되고 중요한 누락·왜곡이 없을 때만 아래와 같이
-`passed`를 반환하세요. covered id에는 content_map의 모든 id를 정확히 한 번씩
-넣으세요.
+각 inventory section마다 section_reviews 항목을 정확히 하나 만들고, 중요한 누락이나
+왜곡이 있으면 해당 section을 `needs_revision`으로 두세요. section 경계를 넘는 전체
+흐름·관계의 누락이나 왜곡은 최상위 배열에도 기록하세요. 모든 section과 챕터 전체에
+중요한 누락·왜곡이 없을 때만 최상위 `status=passed`를 반환하세요.
 
 [출력 형식 — JSON]
 반드시 다음 스키마의 JSON 객체 하나만 반환하세요. 코드펜스는 사용하지 마세요.
@@ -354,13 +365,16 @@ WORKFLOW_INSTRUCTIONS_SEQUENTIAL = """\
    extension_pending_chapter_ids 양쪽의 포함 여부를 확인
 2) summary_pending_chapter_ids에 있으면 다음 순서를 지키기
    a. get_chapter_content(work_id, chapter_id)로 원문 text와 char_count 받기
-   b. content_map_prompt로 text 전체의 유의미한 내용 목록 작성
-   c. text와 content_map을 summary_prompt에 전달해 summary·key_points 초안 작성
-   d. 가능하면 작성자와 분리된 검토자가 review_prompt로 text·content_map·초안 대조
-   e. needs_revision이면 피드백을 반영해 초안을 고치고 다시 검토(최대 2회)
-   f. passed이면 별도 문제 생성 단계에 원문 text와 content_map을 전달하지 말고,
+   b. section_inventory_prompt로 text 전체의 실제 제목·순서·계층만 정리
+   c. text와 section_inventory를 summary_prompt에 전달하고 각 section의 원문 전체를
+      직접 읽어 summary·key_points 초안 작성
+   d. 가능하면 작성자와 분리된 검토자가 review_prompt로
+      text·section_inventory·초안을 대조
+   e. needs_revision이면 inventory 오류와 요약 누락·왜곡 피드백을 반영해 고치고
+      다시 검토(최대 2회)
+   f. passed이면 별도 문제 생성 단계에 원문 text와 section_inventory를 전달하지 말고,
       summary·key_points·source_char_count만 basic_question_prompt에 전달
-   g. 요약, 문제, content_map, summary_review를 하나의 payload로 합쳐
+   g. 요약, 문제, section_inventory, summary_review를 하나의 payload로 합쳐
       save_chapter_result(work_id, chapter_id, data)로 저장
    검토가 통과하지 않으면 불완전한 초안을 저장하지 않기
 3) extension_pending_chapter_ids에 있으면 요약 저장이 끝난 뒤
@@ -376,10 +390,11 @@ WORKFLOW_INSTRUCTIONS_PARALLEL = """\
 최대 5개 챕터를 동시에 sub-agent로 디스패치하세요.
 - 각 sub-agent는 chapter_id가 summary_pending_chapter_ids와
   extension_pending_chapter_ids에 각각 포함되는지 먼저 확인합니다.
-- summary pending이면 챕터별로 get_chapter_content → content_map_prompt →
+- summary pending이면 챕터별로 get_chapter_content → section_inventory_prompt →
   summary_prompt → review_prompt 순서를 지킵니다. review가 needs_revision이면
-  피드백을 반영해 최대 2회 다시 검토합니다. passed이면 원문과 content_map을 제외한
-  summary·key_points·source_char_count만 별도 basic_question_prompt에 전달합니다.
+  inventory 오류와 요약 누락·왜곡 피드백을 반영해 최대 2회 다시 검토합니다.
+  passed이면 원문과 section_inventory를 제외한 summary·key_points·
+  source_char_count만 별도 basic_question_prompt에 전달합니다.
   요약·문제·검증 근거를 합쳐 save_chapter_result로 저장하고, 검토가 통과하지 않으면
   저장하지 않습니다.
 - extension pending이면 같은 챕터의 요약 저장이 끝난 뒤 get_chapter_summary를
@@ -458,7 +473,8 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     Returns:
         {
             "mode": "sequential" | "parallel",
-            "content_map_prompt": str,
+            "section_inventory_prompt": str,
+            "content_map_prompt": str,      # 기존 키 존재 호환 alias
             "summary_prompt": str,
             "basic_question_prompt": str,
             "summarizer_prompt": str,        # 기존 클라이언트 호환용 결합 프롬프트
@@ -486,7 +502,7 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     )
     summary_only_json_example = json.dumps(
         {
-            "summary": "## 개요\n한국어 마크다운 요약",
+            "summary": "한국어 마크다운 요약",
             "key_points": ["핵심 포인트 1", "핵심 포인트 2"],
         },
         ensure_ascii=False,
@@ -499,18 +515,18 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         ensure_ascii=False,
         indent=2,
     )
-    content_map_json_example = json.dumps(
-        summary_contract.content_map_example(), ensure_ascii=False, indent=2,
+    section_inventory_json_example = json.dumps(
+        summary_contract.section_inventory_example(), ensure_ascii=False, indent=2,
     )
     summary_review_json_example = json.dumps(
         summary_contract.summary_review_example(), ensure_ascii=False, indent=2,
     )
-    content_map_prompt = _CONTENT_MAP.format(
+    section_inventory_prompt = _SECTION_INVENTORY.format(
         book_info_block=book_info_block,
         user_context_block=user_context_block,
         input_mode_block=input_mode_block,
-        content_map_guidelines_block=CONTENT_MAP_GUIDELINES,
-        content_map_json_example=content_map_json_example,
+        section_inventory_guidelines_block=SECTION_INVENTORY_GUIDELINES,
+        section_inventory_json_example=section_inventory_json_example,
     )
     summary_prompt = _SUMMARY.format(
         book_info_block=book_info_block,
@@ -581,7 +597,9 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     return {
         "mode": mode,
         "extraction_mode": "ocr" if ocr_mode else "text",
-        "content_map_prompt": content_map_prompt,
+        "section_inventory_prompt": section_inventory_prompt,
+        # 기존 키를 바로 제거하지 않고 새 inventory 프롬프트의 alias로 제공한다.
+        "content_map_prompt": section_inventory_prompt,
         "summary_prompt": summary_prompt,
         "basic_question_prompt": basic_question_prompt,
         "summarizer_prompt": summarizer_prompt,
