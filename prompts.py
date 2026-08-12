@@ -39,11 +39,14 @@ summary는 **마크다운**으로 작성하세요. 렌더러가 그대로 마크
 - **굵게**, *기울임*, `인라인 코드`, 코드블록(```), 목록(-, 1.), 표(| … |)
 - 정의·수식·예약어는 코드/표로 정리하면 더 또렷해집니다
 
-section_inventory에 명시적인 서브 챕터가 있으면 **모든 서브 챕터의 제목과 상대
-계층**을 Markdown 제목으로 보존하세요. 번호 유무와 무관하며, level이 깊어질수록
-Markdown 제목 단계도 깊어져야 합니다. inventory에 명시적인 서브 챕터가 없으면
-원문에 없던 서브 챕터나 계층을 만들지 마세요. 가독성이 필요하면 원문 구조처럼
-보이는 추가 제목 대신 목록·표·문단을 사용하세요.
+section_inventory에 명시적인 서브 챕터가 있으면 **반드시 모든 서브 챕터**를
+summary에 포함하세요. `sections` 배열의 순서를 그대로 따라 각 `heading`을 Markdown
+제목으로 먼저 쓰고, 해당 section의 요약 내용을 그 제목 아래에 작성하세요.
+`level`과 `parent_id`가 나타내는 상대 계층도 Markdown 제목 단계로 보존해야 합니다.
+제목을 합치거나, 생략하거나, 순서를 바꾸거나, 다른 제목으로 바꾸지 마세요.
+inventory에 명시적인 서브 챕터가 없으면 원문에 없던 서브 챕터나 계층을 만들지
+마세요. 가독성이 필요하면 원문 구조처럼 보이는 추가 제목 대신 목록·표·문단을
+사용하세요.
 
 이미지(그림)는 넣지 마세요 — `![...]()` 같은 이미지 문법은 사용하지 않습니다.
 필요한 그림 내용은 글/표로 풀어 설명하세요.""".strip()
@@ -188,7 +191,9 @@ _SUMMARY = """\
 원문 언어와 무관하게 주어진 챕터 text와 별도 분석자가 만든 section_inventory를
 함께 읽고 한국어 summary와 key_points의 초안을 생성하세요. 문제는 만들지 마세요.
 section_inventory는 원문 구조만 나타내며 요약 범위를 제한하지 않습니다. 각
-section의 원문 전체를 직접 읽어 학습용 설명을 작성하세요.
+section의 원문 전체를 직접 읽어 학습용 설명을 작성하세요. summary를 쓰기 전에
+section_inventory.sections를 처음부터 끝까지 순회 계획으로 삼고, 명시적인 서브
+챕터 각각에 대응하는 Markdown 제목과 설명이 빠짐없이 생성되도록 하세요.
 학습자 정보와의 관련성으로 내용을 고르거나 버리지 마세요. 이 summary는 특정 관심사에
 맞춘 발췌가 아니라 PDF 내용을 최대한 보존해 복습하는 **학습용 요약**입니다.
 문제 생성기는 검토를 통과한 이 요약만 입력으로 받아 별도로 실행됩니다.
@@ -211,8 +216,8 @@ summary에는 한국어 요약을 넣으세요.
 
 {summary_only_json_example}
 
-아직 save_chapter_result를 호출하지 마세요. review_prompt가 text·section_inventory·이
-초안을 대조해 `passed`를 반환한 뒤에만 basic_question_prompt로 넘어갑니다.
+아직 save_chapter_result를 호출하지 마세요. review_prompt가 text와 이 초안의 의미
+보존을 대조해 `passed`를 반환한 뒤에만 basic_question_prompt로 넘어갑니다.
 """
 
 
@@ -294,17 +299,15 @@ section_inventory는 구조만 안내하며 요약 범위를 제한하지 않습
 
 _SUMMARY_REVIEW = """\
 당신은 PDF 학습 요약의 독립 검토자입니다.
-챕터 text 전체, section_inventory, 작성된 요약·핵심 포인트 초안을 직접 비교하세요.
+챕터 text 전체와 작성된 요약·핵심 포인트 초안을 직접 비교하세요.
 형식이 채워졌다는 이유로 통과시키지 말고 의미 보존 여부를 판단하세요.
+앞 단계의 section 구조·제목·순서·계층은 이 단계에서 다시 검증하지 마세요. 이
+검토는 원문 의미의 중요한 누락과 왜곡만 판단합니다.
 
 [검토 기준]
-- section_inventory 자체가 실제 원문 구조를 올바르게 반영하는가. 문장 속 다른 장의
-  단순 언급이나 페이지 머리말을 section으로 잘못 분류하지 않았고 실제 제목을
-  빠뜨리지 않았는가
-- section_inventory의 모든 section이 실제 요약에 있고 원래 계층에 맞게 드러나는가
-- 각 section의 원문 전체를 직접 읽었을 때 개념·관계·절차·조건·예외·근거·사례·
-  주의점 등 학습에 필요한 내용이 해당 section 요약에 충분히 설명됐는가
-- 서브 챕터가 없으면 챕터 전체의 흐름과 유의미한 정보가 반영됐는가
+- 챕터 text 전체를 직접 읽었을 때 개념·관계·절차·조건·예외·근거·사례·주의점 등
+  학습에 필요한 내용이 요약에 충분히 설명됐는가
+- 챕터 전체의 흐름과 유의미한 정보가 반영됐는가
 - 핵심 주장·개념·관계·절차·조건·예외·근거·사례·주의점 중 원문에서 중요한
   내용이 과도한 압축으로 사라지지 않았는가
 - 원문의 의미가 단순화 과정에서 왜곡되거나 잘못 연결되지 않았는가
@@ -314,10 +317,7 @@ _SUMMARY_REVIEW = """\
 missing_significant_content 또는 distortions에 구체적으로 적으세요. 작성자가 그
 피드백을 반영해 초안을 고친 뒤 검토를 다시 수행해야 합니다.
 
-각 inventory section마다 section_reviews 항목을 정확히 하나 만들고, 중요한 누락이나
-왜곡이 있으면 해당 section을 `needs_revision`으로 두세요. section 경계를 넘는 전체
-흐름·관계의 누락이나 왜곡은 최상위 배열에도 기록하세요. 모든 section과 챕터 전체에
-중요한 누락·왜곡이 없을 때만 최상위 `status=passed`를 반환하세요.
+챕터 전체에서 중요한 누락·왜곡이 없을 때만 `status=passed`를 반환하세요.
 
 [출력 형식 — JSON]
 반드시 다음 스키마의 JSON 객체 하나만 반환하세요. 코드펜스는 사용하지 마세요.
@@ -367,9 +367,8 @@ WORKFLOW_INSTRUCTIONS_SEQUENTIAL = """\
    b. section_inventory_prompt로 text 전체의 실제 제목·순서·계층만 정리
    c. text와 section_inventory를 summary_prompt에 전달하고 각 section의 원문 전체를
       직접 읽어 summary·key_points 초안 작성
-   d. 가능하면 작성자와 분리된 검토자가 review_prompt로
-      text·section_inventory·초안을 대조
-   e. needs_revision이면 inventory 오류와 요약 누락·왜곡 피드백을 반영해 고치고
+   d. 가능하면 작성자와 분리된 검토자가 review_prompt로 text와 초안의 의미를 대조
+   e. needs_revision이면 요약 누락·왜곡 피드백을 반영해 고치고
       다시 검토(최대 2회)
    f. passed이면 별도 문제 생성 단계에 원문 text와 section_inventory를 전달하지 말고,
       summary·key_points·source_char_count만 basic_question_prompt에 전달
@@ -391,7 +390,7 @@ WORKFLOW_INSTRUCTIONS_PARALLEL = """\
   extension_pending_chapter_ids에 각각 포함되는지 먼저 확인합니다.
 - summary pending이면 챕터별로 get_chapter_content → section_inventory_prompt →
   summary_prompt → review_prompt 순서를 지킵니다. review가 needs_revision이면
-  inventory 오류와 요약 누락·왜곡 피드백을 반영해 최대 2회 다시 검토합니다.
+  요약 누락·왜곡 피드백을 반영해 최대 2회 다시 검토합니다.
   passed이면 원문과 section_inventory를 제외한 summary·key_points·
   source_char_count만 별도 basic_question_prompt에 전달합니다.
   요약·문제·검증 근거를 합쳐 save_chapter_result로 저장하고, 검토가 통과하지 않으면

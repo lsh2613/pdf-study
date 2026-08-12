@@ -183,9 +183,12 @@ def test_prompt_chapter_ids_are_pending_union_by_result_type():
 
 
 def test_summary_format_requires_markdown_subchapters_without_images():
-    prompt = prompts.build_prompts(_state())["summarizer_prompt"]
+    out = prompts.build_prompts(_state())
+    prompt = out["summary_prompt"]
     assert "[요약 작성 형식 — 마크다운]" in prompt
-    assert "서브 챕터" in prompt
+    assert "반드시 모든 서브 챕터" in prompt
+    assert "`sections` 배열의 순서" in prompt
+    assert "`level`과 `parent_id`" in prompt
     assert "이미지(그림)는 넣지 마세요" in prompt
     assert "fig:" not in prompt
 
@@ -227,11 +230,15 @@ def test_section_inventory_prompt_handles_varied_hierarchy_and_false_mentions():
     assert "챕터 전체" in prompt
 
 
-def test_review_prompt_reviews_every_inventory_section_without_points():
+def test_review_prompt_skips_section_structure_validation():
     prompt = prompts.build_prompts(_state())["review_prompt"]
 
-    assert "section_inventory의 모든 section" in prompt
-    assert "section_reviews" in prompt
+    assert "section_inventory" not in prompt
+    assert "section_reviews" not in prompt
+    assert "section 구조" in prompt
+    assert "검증하지 마세요" in prompt
+    assert "챕터 text 전체" in prompt
+    assert "작성된 요약·핵심 포인트 초안" in prompt
     assert "important point" not in prompt
     assert "covered_point_ids" not in prompt
 

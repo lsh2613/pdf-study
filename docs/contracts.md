@@ -158,35 +158,28 @@ pending 판정의 정확한 상태 매핑은 다음과 같다.
 `save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다.
 `summary`는 비어 있지 않은 문자열, `key_points`는 비어 있지 않은 문자열 배열이어야
 한다. 또한 전체 챕터에서 만든 `section_inventory`와 `summary_review`가 필수다.
-`section_inventory.sections`는 비어 있지 않아야 하고 각 section은 유일하고 안전한
-`id`, 비어 있지 않은 `heading`, 1 이상의 `level`, 앞서 나온 상위 section을 가리키는
-선택적 `parent_id`, `explicit_subchapter` boolean을 가진다. 서브 챕터가 없으면
-`has_explicit_subchapters=false`와 챕터 전체 section 하나를 사용한다. 있으면
-`has_explicit_subchapters=true`와 모든 명시적 서브 챕터를 원래 순서·상대 계층대로
-기록하며 각 heading이 최종 Markdown summary에 나타나야 한다. inventory에는 요약할
-내용이나 중요 point 목록을 넣지 않는다.
-서버는 저장 시 canonical raw `text`에서 현재 챕터 번호와 일치하는 첫 줄 제목·반복 제목,
-연속 번호형 목차와 그 하위 계층처럼 확실한 구조 신호를 보수적으로 찾아 inventory와
-대조한다. 빠지거나 다른 제목은 `section_inventory.source_headings[번호]`, 잘못된
-순서는 `section_inventory.source_headings.order`, 잘못된 깊이·부모는 그 하위
-`.level`·`.parent_id` 경로로 거부한다. 번호 없는 제목과 불규칙 OCR 구조는
-프롬프트와 독립 검토가 담당하며, 이 검증을 챕터 경계 판단에 사용하지 않는다.
+`section_inventory`는 요약 전에 분석한 구조를 요약 생성기에 전달했다는 증거로 객체
+형태만 요구한다. 생성 프롬프트는 `sections`의 모든 명시적 서브 챕터를 원래 제목·
+순서·상대 계층에 맞는 Markdown 제목으로 반드시 작성하게 한다. inventory에는 요약할
+내용이나 중요 point 목록을 넣지 않는다. 요약이 생성된 뒤 서버는 inventory 내부
+구조, canonical raw의 번호형 제목과의 일치, 최종 Markdown heading 포함 여부를
+재검증하지 않는다.
 
 `summary_review.status`는 `passed`여야 하고 `reviewed_against`는 `chapter_text`,
-`section_inventory`, `draft_summary`를 포함해야 한다. `section_reviews`는 inventory의
-각 section과 정확히 일대일로 대응하고 모두 `passed`여야 한다. section별 및 최상위
-`missing_significant_content`, `distortions`는 모두 빈 배열이어야 한다. 요약 품질에
-고정 글자 수나 압축률 제한은 적용하지 않는다. 구형 클라이언트가 `content_map`과
-coverage id를 보내면 서버는 저장 전에 구조 정보만 새 계약으로 변환하고
-`important_points`와 coverage id는 저장하지 않는다.
+`draft_summary`만 포함해야 한다. 최상위 `missing_significant_content`, `distortions`는
+모두 빈 배열이어야 한다. 검토 단계는 section 구조·제목·순서·계층을 다시 검증하지
+않는다. 구형 `section_reviews`와 coverage id는 입력 호환을 위해 허용하지만 저장 전에
+제거한다. 요약 품질에 고정 글자 수나 압축률 제한은 적용하지 않는다. 구형 클라이언트가
+`content_map`을 보내면 서버는 저장 전에 구조 정보만 `section_inventory`로 변환하고
+`important_points`도 저장하지 않는다.
 Agent가 `source_char_count`를 보내도 서버는 저장 전에 raw `char_count`가 실제
 `text` 길이 및 상태 값과 같은지 검증하고 그 값으로 덮어쓴다. 분리 workflow에서는
-학습자 정보를 inventory·요약·검토 프롬프트에 주입하지 않고 기본·확장 문제의 난이도·
+학습자 정보를 inventory·요약·전체 의미 검토 프롬프트에 주입하지 않고 기본·확장 문제의 난이도·
 표현·예시·관점 조정에만 사용한다. 호환용 결합
 `summarizer_prompt`는 같은 입력을 포함하지만 요약을 먼저 전체 원문 기준으로 확정한
 뒤 문제 단계에서만 학습자 정보를 사용하도록 명시한다.
 
-`questions`는 객체여야 하며 `multiple_choice`, `short_answer`, `reflection` 키를 모두 배열로 가져야 한다. 활성화된 기본 문제 유형은 빈 배열이면 실패하고, 비활성화된 유형도 키는 유지해야 한다. 객관식은 agent 입력으로 비어 있지 않은 `id`, `question`, `explanation`, 하나의 `correct_answer`, 하나 이상의 비어 있지 않고 중복되지 않은 `incorrect_answers`를 받을 수 있다. 서버는 성공적으로 저장할 때만 정답·오답을 한 번 섞어 저장 형식의 최소 2개 비어 있지 않은 `options`와 범위 안의 정수 `answer_index`로 바꾸며, 이후 렌더·재개·재최종화는 저장된 순서를 바꾸지 않는다. 호환을 위해 agent는 기존 저장 형식인 `options`와 `answer_index`를 직접 보내도 되며, 이 경우 순서는 바꾸지 않는다. 단답형과 성찰형 항목은 비어 있지 않은 `id`, `question`, `model_answer`를 가져야 한다. 문제 ID는 영문자·숫자·`_`·`-`만 쓸 수 있고, 기본·확장 문제를 합친 같은 챕터 안에서 유일해야 한다. 각 유형의 개수는 raw 본문의 `char_count`별 최대치(3,000 미만: 3/1/1/1, 3,000–9,999: 5/2/2/1, 10,000–24,999: 7/3/2/2, 25,000 이상: 10/4/3/3; 객관식/단답형/주관식/확장형)를 넘을 수 없다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 하고, `title`이 있으면 문자열이어야 한다. 실패하면 `data.missing`에 `section_inventory`, `section_inventory.sections[0].heading`, `summary_review.status`, `summary_review.section_reviews`, `questions.multiple_choice[0].correct_answer`, `questions.multiple_choice[0].incorrect_answers`, `questions.multiple_choice[0].options`, `questions.multiple_choice[0].id`, `work_id`, `chapter_id`, `state` 같은 경로를 담고, 해당 챕터를 completed로 바꾸거나 요약·퀴즈 파일을 남기면 안 된다. `body_text`는 요구하지 않으며, 들어오더라도 저장 전에 제거되어 `chapters_raw`의 canonical `text`와 `char_count`를 덮어쓰지 않는다.
+`questions`는 객체여야 하며 `multiple_choice`, `short_answer`, `reflection` 키를 모두 배열로 가져야 한다. 활성화된 기본 문제 유형은 빈 배열이면 실패하고, 비활성화된 유형도 키는 유지해야 한다. 객관식은 agent 입력으로 비어 있지 않은 `id`, `question`, `explanation`, 하나의 `correct_answer`, 하나 이상의 비어 있지 않고 중복되지 않은 `incorrect_answers`를 받을 수 있다. 서버는 성공적으로 저장할 때만 정답·오답을 한 번 섞어 저장 형식의 최소 2개 비어 있지 않은 `options`와 범위 안의 정수 `answer_index`로 바꾸며, 이후 렌더·재개·재최종화는 저장된 순서를 바꾸지 않는다. 호환을 위해 agent는 기존 저장 형식인 `options`와 `answer_index`를 직접 보내도 되며, 이 경우 순서는 바꾸지 않는다. 단답형과 성찰형 항목은 비어 있지 않은 `id`, `question`, `model_answer`를 가져야 한다. 문제 ID는 영문자·숫자·`_`·`-`만 쓸 수 있고, 기본·확장 문제를 합친 같은 챕터 안에서 유일해야 한다. 각 유형의 개수는 raw 본문의 `char_count`별 최대치(3,000 미만: 3/1/1/1, 3,000–9,999: 5/2/2/1, 10,000–24,999: 7/3/2/2, 25,000 이상: 10/4/3/3; 객관식/단답형/주관식/확장형)를 넘을 수 없다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 하고, `title`이 있으면 문자열이어야 한다. 실패하면 `data.missing`에 `section_inventory`, `summary_review.status`, `summary_review.reviewed_against`, `summary_review.missing_significant_content`, `questions.multiple_choice[0].correct_answer`, `questions.multiple_choice[0].incorrect_answers`, `questions.multiple_choice[0].options`, `questions.multiple_choice[0].id`, `work_id`, `chapter_id`, `state` 같은 경로를 담고, 해당 챕터를 completed로 바꾸거나 요약·퀴즈 파일을 남기면 안 된다. `body_text`는 요구하지 않으며, 들어오더라도 저장 전에 제거되어 `chapters_raw`의 canonical `text`와 `char_count`를 덮어쓰지 않는다.
 
 `save_extension_result(work_id, chapter_id, data)`는 외부 검색 없이 `get_chapter_summary`가 반환한 요약과 학습자 정보로 만든 확장 문제를 저장한다. 확장형이 비활성인 작업은 실패한다. `questions.extension`은 비어 있지 않은 배열이어야 하고, 각 항목은 비어 있지 않은 `id`, `question`, `model_answer`를 가져야 한다. ID 문자·챕터 전체 유일성·본문 글자 수별 최대 개수 규칙은 `save_chapter_result`와 같다. 저장 스키마에 없는 추가 필드는 제거한다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 한다. 실패하면 `data.missing`에 필드 경로나 `work_id`, `chapter_id`, `state`를 담고, 해당 챕터의 extension 상태를 completed로 바꾸거나 확장 문제 파일을 남기면 안 된다. `body_text`가 들어오면 저장 전에 제거된다.
 

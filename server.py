@@ -1948,16 +1948,14 @@ def save_chapter_result(
     )
     missing.extend(summary_contract.missing_summary_quality_fields(
         data_to_save,
-        chapter_text=chapter_text,
-        chapter_title=entry.get("title"),
     ))
     missing = list(dict.fromkeys(missing))
     if missing:
         return _err(
             f"챕터 결과에 필수 값이 비었거나 누락됐습니다: {missing}. "
             "요약(summary)·핵심포인트(key_points)·활성 문제와 함께, 전체 본문에서 "
-            "작성한 section_inventory 및 모든 section별 누락·왜곡 없이 passed된 "
-            "summary_review를 채워 "
+            "작성에 사용한 section_inventory 및 전체 원문에서 중요한 누락·왜곡 없이 "
+            "passed된 summary_review를 채워 "
             f'save_chapter_result(work_id="{work_id}", chapter_id="{chapter_id}", '
             "data=...)로 다시 저장하세요. review가 needs_revision이면 먼저 요약을 "
             "보완하고 전체 text와 다시 대조하세요.",

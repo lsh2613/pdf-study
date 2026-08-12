@@ -14,5 +14,6 @@
 - `0012-semantic-summary-coverage.md` - 요약은 고정 분량 대신 의미 누락·왜곡 검토로 완료를 판정한다. point 기반 내용 목록은 0015로 대체됐다.
 - `0013-summary-grounded-questions.md` - 모든 문제는 검토를 통과한 챕터 요약만 내용 근거로 사용한다.
 - `0014-required-user-context.md` - 새 작업은 문제 생성 조정에 사용할 비어 있지 않은 학습자 정보를 필수로 받는다.
-- `0015-section-first-summary.md` - 원문 구조 inventory 뒤 각 section 전체를 직접 요약하고 section별로 검토한다.
-- `0016-source-structure-summary-gate.md` - 확실한 raw 번호 계층을 저장 시 대조하고 학습자 정보는 문제 조정에만 사용한다.
+- `0015-section-first-summary.md` - 원문 구조 inventory 뒤 각 section 전체를 직접 요약한다. section별 검토 결정은 0017로 대체됐다.
+- `0016-source-structure-summary-gate.md` - 학습자 정보는 문제 조정에만 사용한다. raw 구조 저장 게이트는 0017로 대체됐다.
+- `0017-section-guided-summary.md` - inventory를 요약 생성에 강제하고 이후 section 구조 재검증을 제거한다.

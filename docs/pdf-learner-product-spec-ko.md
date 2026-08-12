@@ -880,10 +880,10 @@ section inventory, 요약, 의미 보존 검토에는 전달하지 않는다. �
 - 문장 속 다른 장의 단순 언급, 교차 참조, 목록·표·그림 번호, 페이지 머리말·꼬리말,
   반복된 목차 조각은 현재 챕터의 section으로 만들지 않는다.
 - inventory는 내용을 선별하지 않으며 각 section의 원문 전체를 직접 읽어 요약한다.
-- 요약 뒤 원문·inventory·초안을 대조해 section별 및 챕터 전체의 중요한 누락이나
-  왜곡이 있으면 보완한다.
-- 저장 시 raw에서 확실히 식별되는 번호형 제목·순서·계층을 inventory에 직접 대조하고,
-  빠졌거나 다르면 `passed` 검토 결과도 거부한다.
+- 요약 생성기는 inventory의 모든 제목·순서·계층을 Markdown 구조로 반드시 반영한다.
+- 요약 뒤 원문과 초안을 대조해 챕터 전체의 중요한 누락이나 왜곡이 있으면 보완한다.
+- 독립 검토와 저장 단계에서는 section 구조, raw 번호형 제목과 inventory의 일치,
+  Markdown heading 포함 여부를 다시 검증하지 않는다.
 - HTML과 Markdown+TUI 결과에는 PDF 원문 복습을 위한 `학습용 요약`임을 표시한다.
 
 ### 14.3 핵심 포인트
@@ -1064,9 +1064,8 @@ URL 필드를 두지 않는다.
 
 - 비어 있지 않은 `summary`
 - 비어 있지 않은 `key_points`
-- 전체 챕터에서 만든 유효한 `section_inventory`
-- 모든 section과 챕터 전체에 중요 누락·왜곡이 없는 `passed` 상태의
-  `summary_review`
+- 전체 챕터에서 만들고 요약 생성에 사용한 `section_inventory` 객체
+- 챕터 전체에 중요 누락·왜곡이 없는 `passed` 상태의 `summary_review`
 - `questions` 객체
 - 모든 기본 문제 유형 배열
 - 활성화된 각 기본 문제 유형의 비어 있지 않은 배열

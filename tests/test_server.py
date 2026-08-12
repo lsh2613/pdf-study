@@ -1365,7 +1365,7 @@ def test_save_chapter_result_requires_section_inventory_and_review(
     assert not (workspace.quiz_dir(wid) / "ch1.json").exists()
 
 
-def test_save_chapter_result_rejects_false_whole_chapter_inventory(
+def test_save_chapter_result_does_not_revalidate_source_inventory(
     tmp_path, ko_short, monkeypatch,
 ):
     wid = _init(str(ko_short), str(tmp_path / "out_source_structure"))["data"]["work_id"]
@@ -1386,9 +1386,8 @@ def test_save_chapter_result_rejects_false_whole_chapter_inventory(
 
     response = server.save_chapter_result(wid, "ch1", _result())
 
-    assert response["ok"] is False
-    assert "section_inventory.source_headings[2.1]" in response["data"]["missing"]
-    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+    assert response["ok"] is True
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "completed"
 
 
 def test_save_chapter_result_rejects_blank_raw_text(
@@ -1484,12 +1483,11 @@ def test_save_chapter_result_rejects_review_with_uncovered_meaning(
 
     assert response["ok"] is False
     assert "summary_review.status" in response["data"]["missing"]
-    assert "summary_review.section_reviews" in response["data"]["missing"]
     assert "summary_review.missing_significant_content" in response["data"]["missing"]
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
 
 
-def test_save_chapter_result_rejects_missing_explicit_subchapter_heading(
+def test_save_chapter_result_does_not_revalidate_summary_section_headings(
     tmp_path, ko_short,
 ):
     wid = _init(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
@@ -1510,18 +1508,10 @@ def test_save_chapter_result_rejects_missing_explicit_subchapter_heading(
         "parent_id": None,
         "explicit_subchapter": True,
     })
-    data["summary_review"]["section_reviews"].append({
-        "section_id": "section_2",
-        "status": "passed",
-        "missing_significant_content": [],
-        "distortions": [],
-    })
-
     response = server.save_chapter_result(wid, "ch1", data)
 
-    assert response["ok"] is False
-    assert "section_inventory.sections[1].heading" in response["data"]["missing"]
-    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+    assert response["ok"] is True
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "completed"
 
 
 def test_save_chapter_result_normalizes_legacy_content_map_without_points(
@@ -1562,6 +1552,36 @@ def test_save_chapter_result_normalizes_legacy_content_map_without_points(
     assert "content_map" not in saved
     assert "section_inventory" in saved
     assert "important_points" not in saved["section_inventory"]["sections"][0]
+    assert "section_reviews" not in saved["summary_review"]
+    assert saved["summary_review"]["reviewed_against"] == [
+        "chapter_text",
+        "draft_summary",
+    ]
+
+
+@pytest.mark.parametrize("unknown", ["unexpected_source", 123])
+def test_save_chapter_result_rejects_unknown_review_inputs(
+    tmp_path, ko_short, unknown,
+):
+    wid = _init(
+        str(ko_short), str(tmp_path / "out_bad_review_input"),
+    )["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    data = _result()
+    data["summary_review"]["reviewed_against"].append(unknown)
+
+    response = server.save_chapter_result(wid, "ch1", data)
+
+    assert response["ok"] is False
+    assert any(
+        field.startswith("summary_review.reviewed_against")
+        for field in response["data"]["missing"]
+    )
+    assert (
+        workspace.load_state(wid)["chapters"]["ch1"]["summary_status"]
+        != "completed"
+    )
 
 
 def test_save_chapter_result_strips_points_from_canonical_inventory(
