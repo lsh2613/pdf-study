@@ -73,6 +73,7 @@ def _summary_md(
     page_label = format_page_label(chapter["meta"], page_offset=page_offset)
     if page_label:
         lines.append(f"> {page_label}")
+    lines.append("> **학습용 요약:** PDF 원문을 복습하기 위한 학습 자료입니다.")
     lines.append("")
 
     # 요약은 이미 마크다운 — 그대로 둔다(rich가 렌더).

@@ -165,6 +165,12 @@ pending 판정의 정확한 상태 매핑은 다음과 같다.
 `has_explicit_subchapters=true`와 모든 명시적 서브 챕터를 원래 순서·상대 계층대로
 기록하며 각 heading이 최종 Markdown summary에 나타나야 한다. inventory에는 요약할
 내용이나 중요 point 목록을 넣지 않는다.
+서버는 저장 시 canonical raw `text`에서 현재 챕터 번호와 일치하는 첫 줄 제목·반복 제목,
+연속 번호형 목차와 그 하위 계층처럼 확실한 구조 신호를 보수적으로 찾아 inventory와
+대조한다. 빠지거나 다른 제목은 `section_inventory.source_headings[번호]`, 잘못된
+순서는 `section_inventory.source_headings.order`, 잘못된 깊이·부모는 그 하위
+`.level`·`.parent_id` 경로로 거부한다. 번호 없는 제목과 불규칙 OCR 구조는
+프롬프트와 독립 검토가 담당하며, 이 검증을 챕터 경계 판단에 사용하지 않는다.
 
 `summary_review.status`는 `passed`여야 하고 `reviewed_against`는 `chapter_text`,
 `section_inventory`, `draft_summary`를 포함해야 한다. `section_reviews`는 inventory의
@@ -173,6 +179,12 @@ pending 판정의 정확한 상태 매핑은 다음과 같다.
 고정 글자 수나 압축률 제한은 적용하지 않는다. 구형 클라이언트가 `content_map`과
 coverage id를 보내면 서버는 저장 전에 구조 정보만 새 계약으로 변환하고
 `important_points`와 coverage id는 저장하지 않는다.
+Agent가 `source_char_count`를 보내도 서버는 저장 전에 raw `char_count`가 실제
+`text` 길이 및 상태 값과 같은지 검증하고 그 값으로 덮어쓴다. 분리 workflow에서는
+학습자 정보를 inventory·요약·검토 프롬프트에 주입하지 않고 기본·확장 문제의 난이도·
+표현·예시·관점 조정에만 사용한다. 호환용 결합
+`summarizer_prompt`는 같은 입력을 포함하지만 요약을 먼저 전체 원문 기준으로 확정한
+뒤 문제 단계에서만 학습자 정보를 사용하도록 명시한다.
 
 `questions`는 객체여야 하며 `multiple_choice`, `short_answer`, `reflection` 키를 모두 배열로 가져야 한다. 활성화된 기본 문제 유형은 빈 배열이면 실패하고, 비활성화된 유형도 키는 유지해야 한다. 객관식은 agent 입력으로 비어 있지 않은 `id`, `question`, `explanation`, 하나의 `correct_answer`, 하나 이상의 비어 있지 않고 중복되지 않은 `incorrect_answers`를 받을 수 있다. 서버는 성공적으로 저장할 때만 정답·오답을 한 번 섞어 저장 형식의 최소 2개 비어 있지 않은 `options`와 범위 안의 정수 `answer_index`로 바꾸며, 이후 렌더·재개·재최종화는 저장된 순서를 바꾸지 않는다. 호환을 위해 agent는 기존 저장 형식인 `options`와 `answer_index`를 직접 보내도 되며, 이 경우 순서는 바꾸지 않는다. 단답형과 성찰형 항목은 비어 있지 않은 `id`, `question`, `model_answer`를 가져야 한다. 문제 ID는 영문자·숫자·`_`·`-`만 쓸 수 있고, 기본·확장 문제를 합친 같은 챕터 안에서 유일해야 한다. 각 유형의 개수는 raw 본문의 `char_count`별 최대치(3,000 미만: 3/1/1/1, 3,000–9,999: 5/2/2/1, 10,000–24,999: 7/3/2/2, 25,000 이상: 10/4/3/3; 객관식/단답형/주관식/확장형)를 넘을 수 없다. `chapter_id`가 payload에 있으면 요청 `chapter_id`와 같아야 하고, `title`이 있으면 문자열이어야 한다. 실패하면 `data.missing`에 `section_inventory`, `section_inventory.sections[0].heading`, `summary_review.status`, `summary_review.section_reviews`, `questions.multiple_choice[0].correct_answer`, `questions.multiple_choice[0].incorrect_answers`, `questions.multiple_choice[0].options`, `questions.multiple_choice[0].id`, `work_id`, `chapter_id`, `state` 같은 경로를 담고, 해당 챕터를 completed로 바꾸거나 요약·퀴즈 파일을 남기면 안 된다. `body_text`는 요구하지 않으며, 들어오더라도 저장 전에 제거되어 `chapters_raw`의 canonical `text`와 `char_count`를 덮어쓰지 않는다.
 
@@ -209,6 +221,9 @@ Markdown+TUI 출력은 `book.md`, 루트 `study_tui.py`, 챕터별 `summary.md`,
 Markdown+TUI에서 `progress.json.answers`가 비어 있지 않고 `completed=false`이면, 챕터 launcher와 루트 TUI는 선택 메뉴를 먼저 묻지 않고 문제 순서상 첫 미응답 문제부터 자동으로 이어서 푼다. 저장된 답안이 있는 문제는 다시 묻지 않는다.
 
 두 출력 형식은 같은 저장 결과를 읽는다. 같은 `work_id`에서 출력 형식만 바꾸어 다시 `finalize_study`를 호출하면 같은 내용의 다른 표시 형식을 만들 수 있다.
+
+HTML 챕터 화면은 요약 section 제목을 `학습용 요약`으로 표시한다. Markdown+TUI의
+`summary.md`도 본문 앞에 PDF 원문 복습용 학습 자료라는 안내를 표시한다.
 
 두 출력 형식의 챕터 페이지 표기는 같은 규칙을 사용한다. `source_pages`가 배열이면 `PDF p.N–M · 원문 p.A–B`, 명시적 `null`이면서 오프셋을 모르면 `원문 페이지 미상`, 오프셋을 알면 번호가 없는 앞부분으로 보아 `원문 페이지 없음`을 표시한다. `source_pages` 입력 자체가 없으면 `PDF p.N–M`만 표시한다.
 

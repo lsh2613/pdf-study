@@ -7,12 +7,16 @@ become an accidental ceiling on the resulting study summary.
 """
 from __future__ import annotations
 
+from collections import Counter
 import re
 from typing import Any
 
 
 EVIDENCE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 REVIEW_INPUTS = ("chapter_text", "section_inventory", "draft_summary")
+NUMBERED_HEADING_PATTERN = re.compile(
+    r"^\s*(?P<number>\d+(?:\.\d+)+)\s+(?P<heading>\S.*?)\s*$",
+)
 
 
 def quality_payload_example() -> dict[str, Any]:
@@ -84,6 +88,213 @@ def _markdown_heading_texts(value: str) -> list[str]:
         if match:
             headings.append(_normalize_visible_text(match.group(1)))
     return headings
+
+
+def _chapter_number(chapter_title: str | None) -> str | None:
+    if not isinstance(chapter_title, str):
+        return None
+    match = re.match(r"^\s*0*(\d+)\s*(?:[.:：]|\s)", chapter_title)
+    return str(int(match.group(1))) if match else None
+
+
+def _confident_numbered_source_headings(
+    chapter_text: str,
+    chapter_title: str | None,
+) -> list[tuple[str, int, str]]:
+    """Return conservative numbered headings that can be checked locally.
+
+    Numberless and irregular headings remain the inventory model's job. This
+    guard only recognizes repeated headings, a title-like first source line,
+    contiguous mini-TOCs, and their descendants. It validates study-summary
+    structure; it never chooses PDF chapter boundaries.
+    """
+    source_lines = chapter_text.splitlines()
+    first_nonempty_line = next(
+        (index for index, line in enumerate(source_lines) if line.strip()),
+        None,
+    )
+    candidates: list[tuple[int, str, str]] = []
+    for line_index, line in enumerate(source_lines):
+        if len(line.strip()) > 140:
+            continue
+        match = NUMBERED_HEADING_PATTERN.fullmatch(line)
+        if match:
+            candidates.append((
+                line_index,
+                match.group("number"),
+                match.group("heading"),
+            ))
+    if not candidates:
+        return []
+
+    expected_root = _chapter_number(chapter_title)
+    if expected_root is None:
+        # 서문에 반복된 책 전체 목차가 섞인 경우가 많다. 현재 챕터 번호를 제목에서
+        # 확정할 수 없으면 다른 챕터의 목차 조각을 강제 section으로 오인하지 않는다.
+        return []
+    candidates = [
+        item for item in candidates if item[1].split(".", 1)[0] == expected_root
+    ]
+    if not candidates:
+        return []
+
+    occurrences = Counter(number for _, number, _ in candidates)
+    confident = {number for number, count in occurrences.items() if count >= 2}
+
+    run: list[str] = []
+    previous_line: int | None = None
+    for line_index, number, heading in candidates:
+        toc_like_title = re.search(r"[.!?。！？]\s*$", heading) is None
+        if toc_like_title and (
+            previous_line is None or line_index == previous_line + 1
+        ):
+            run.append(number)
+        else:
+            if len(run) >= 2:
+                confident.update(run)
+            run = [number] if toc_like_title else []
+        previous_line = line_index if toc_like_title else None
+    if len(run) >= 2:
+        confident.update(run)
+
+    first_candidate = candidates[0]
+    if (
+        not confident
+        and first_candidate[0] == first_nonempty_line
+        and re.search(r"[.!?。！？]\s*$", first_candidate[2]) is None
+    ):
+        confident.add(first_candidate[1])
+
+    candidate_numbers = {number for _, number, _ in candidates}
+    for number in sorted(
+        candidate_numbers - confident,
+        key=lambda value: (
+            value.count("."),
+            tuple(int(part) for part in value.split(".")),
+        ),
+    ):
+        if number.rsplit(".", 1)[0] in confident:
+            confident.add(number)
+
+    title_by_number: dict[str, str] = {}
+    last_index_by_number: dict[str, int] = {}
+    for line_index, number, heading in candidates:
+        title_by_number.setdefault(number, heading)
+        last_index_by_number[number] = line_index
+    return [
+        (number, number.count("."), title_by_number[number])
+        for number in sorted(
+            confident,
+            key=lambda value: last_index_by_number[value],
+        )
+    ]
+
+
+def _validate_source_heading_coverage(
+    inventory: dict[str, Any],
+    chapter_text: str,
+    chapter_title: str | None,
+    missing: list[str],
+) -> None:
+    expected = _confident_numbered_source_headings(chapter_text, chapter_title)
+    if not expected:
+        return
+    sections = inventory.get("sections")
+    if not isinstance(sections, list):
+        return
+
+    indexed_sections = [
+        (index, section)
+        for index, section in enumerate(sections)
+        if isinstance(section, dict)
+    ]
+    used_section_indexes: set[int] = set()
+    matched: dict[str, dict[str, Any]] = {}
+    resolved_numbers: dict[str, str] = {}
+    matched_indexes: list[int] = []
+    for number, _, source_heading in expected:
+        normalized_source_heading = _normalize_visible_text(source_heading)
+        number_candidates = [
+            (index, section)
+            for index, section in indexed_sections
+            if index not in used_section_indexes
+            and isinstance(section.get("heading"), str)
+            and (
+                heading_match := NUMBERED_HEADING_PATTERN.fullmatch(
+                    section["heading"],
+                )
+            ) is not None
+            and heading_match.group("number") == number
+            and _normalize_visible_text(heading_match.group("heading"))
+            == normalized_source_heading
+        ]
+        selected: tuple[int, dict[str, Any]] | None = None
+        resolved_number = number
+        if number_candidates:
+            selected = number_candidates[0]
+        else:
+            title_candidates: list[tuple[int, dict[str, Any], str]] = []
+            for index, section in indexed_sections:
+                heading = section.get("heading")
+                if index in used_section_indexes or not isinstance(heading, str):
+                    continue
+                heading_match = NUMBERED_HEADING_PATTERN.fullmatch(heading)
+                if (
+                    heading_match
+                    and heading_match.group("number").replace(".", "")
+                    != number.replace(".", "")
+                ):
+                    continue
+                heading_title = (
+                    heading_match.group("heading") if heading_match else heading
+                )
+                if _normalize_visible_text(heading_title) == normalized_source_heading:
+                    title_candidates.append((
+                        index,
+                        section,
+                        heading_match.group("number") if heading_match else number,
+                    ))
+            if len(title_candidates) == 1:
+                section_index, section, resolved_number = title_candidates[0]
+                selected = (section_index, section)
+
+        if selected is None:
+            missing.append(f"section_inventory.source_headings[{number}]")
+            continue
+        section_index, section = selected
+        used_section_indexes.add(section_index)
+        matched[number] = section
+        resolved_numbers[number] = resolved_number
+        matched_indexes.append(section_index)
+        if section.get("level") != resolved_number.count("."):
+            missing.append(
+                f"section_inventory.source_headings[{number}].level"
+            )
+
+    if any(
+        current <= previous
+        for previous, current in zip(matched_indexes, matched_indexes[1:])
+    ):
+        missing.append("section_inventory.source_headings.order")
+
+    for number, _, _ in expected:
+        resolved_number = resolved_numbers.get(number)
+        if resolved_number is None or resolved_number.count(".") <= 1:
+            continue
+        resolved_parent = resolved_number.rsplit(".", 1)[0]
+        parent_number = next(
+            (
+                source_number
+                for source_number, candidate_number in resolved_numbers.items()
+                if candidate_number == resolved_parent
+            ),
+            None,
+        )
+        parent = matched.get(parent_number) if parent_number is not None else None
+        if parent is not None and matched[number].get("parent_id") != parent.get("id"):
+            missing.append(
+                f"section_inventory.source_headings[{number}].parent_id"
+            )
 
 
 def _validate_string_list(
@@ -243,7 +454,12 @@ def normalize_summary_quality_payload(data: Any) -> Any:
     return normalized
 
 
-def missing_summary_quality_fields(data: Any) -> list[str]:
+def missing_summary_quality_fields(
+    data: Any,
+    *,
+    chapter_text: str | None = None,
+    chapter_title: str | None = None,
+) -> list[str]:
     """Return invalid paths for section inventory and full-text review.
 
     No character-count rule is applied. Completion requires a structurally
@@ -326,18 +542,22 @@ def missing_summary_quality_fields(data: Any) -> list[str]:
         ):
             missing.append("section_inventory.sections")
 
+    if isinstance(chapter_text, str) and chapter_text.strip():
+        _validate_source_heading_coverage(
+            inventory, chapter_text, chapter_title, missing,
+        )
+
     summary = data.get("summary")
     if explicit_headings and _is_nonempty_str(summary):
-        markdown_headings = _markdown_heading_texts(summary)
+        markdown_headings = Counter(_markdown_heading_texts(summary))
         for section_index, heading in explicit_headings:
             normalized_heading = _normalize_visible_text(heading)
-            if not any(
-                normalized_heading in rendered_heading
-                for rendered_heading in markdown_headings
-            ):
+            if markdown_headings[normalized_heading] <= 0:
                 missing.append(
                     f"section_inventory.sections[{section_index}].heading"
                 )
+            else:
+                markdown_headings[normalized_heading] -= 1
 
     review = data.get("summary_review")
     if not isinstance(review, dict):

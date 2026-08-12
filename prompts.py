@@ -173,9 +173,6 @@ get_chapter_content가 제공한 챕터 text 전체를 읽고, 실제 서브 챕
 [책 정보]
 {book_info_block}
 
-[학습자 컨텍스트]
-{user_context_block}
-
 {input_mode_block}
 
 {section_inventory_guidelines_block}
@@ -192,13 +189,12 @@ _SUMMARY = """\
 함께 읽고 한국어 summary와 key_points의 초안을 생성하세요. 문제는 만들지 마세요.
 section_inventory는 원문 구조만 나타내며 요약 범위를 제한하지 않습니다. 각
 section의 원문 전체를 직접 읽어 학습용 설명을 작성하세요.
+학습자 정보와의 관련성으로 내용을 고르거나 버리지 마세요. 이 summary는 특정 관심사에
+맞춘 발췌가 아니라 PDF 내용을 최대한 보존해 복습하는 **학습용 요약**입니다.
 문제 생성기는 검토를 통과한 이 요약만 입력으로 받아 별도로 실행됩니다.
 
 [책 정보]
 {book_info_block}
-
-[학습자 컨텍스트]
-{user_context_block}
 
 {input_mode_block}
 
@@ -258,6 +254,9 @@ section_inventory는 구조만 안내하며 요약 범위를 제한하지 않습
 전체를 직접 읽으세요. 그 다음 원문과 section_inventory를 다시 참조하지 말고,
 방금 확정한 summary와 key_points만
 근거로 객관식/단답형/주관식 문제를 만드세요.
+학습자 컨텍스트는 요약의 내용 범위나 보존할 항목을 정하는 기준이 아닙니다. 먼저
+학습자 컨텍스트와 겹치는 내용만 고르지 않은 전체 학습용 요약을 확정한 뒤, 문제의
+난이도·표현·예시·관점에만 학습자 컨텍스트를 사용하세요.
 
 [책 정보]
 {book_info_block}
@@ -462,8 +461,8 @@ def _format_user_context(uc: str) -> str:
         return "(제공되지 않음)"
     return (
         uc
-        + "\n위 컨텍스트를 고려해 난이도, 표현 수준, 예시, 문제 관점을 맞추세요. "
-        "단, 요약 또는 원문 등 현재 단계의 근거 제한을 약화하지 마세요."
+        + "\n위 컨텍스트는 문제의 난이도, 표현 수준, 예시, 관점을 맞추는 데만 "
+        "사용하세요. 요약의 내용 범위나 보존할 원문을 제한하지 마세요."
     )
 
 
@@ -523,14 +522,12 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     )
     section_inventory_prompt = _SECTION_INVENTORY.format(
         book_info_block=book_info_block,
-        user_context_block=user_context_block,
         input_mode_block=input_mode_block,
         section_inventory_guidelines_block=SECTION_INVENTORY_GUIDELINES,
         section_inventory_json_example=section_inventory_json_example,
     )
     summary_prompt = _SUMMARY.format(
         book_info_block=book_info_block,
-        user_context_block=user_context_block,
         input_mode_block=input_mode_block,
         summary_format_block=SUMMARY_FORMAT,
         semantic_completeness_block=SEMANTIC_COMPLETENESS_GUIDELINES,

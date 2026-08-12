@@ -354,7 +354,7 @@ def _summary_section(summary: dict[str, Any]) -> str:
 
     body_html = _demote_headings(_MD.render(text))
 
-    parts = [f'<section id="summary"><h2>요약</h2>{body_html}</section>']
+    parts = [f'<section id="summary"><h2>학습용 요약</h2>{body_html}</section>']
 
     if key_points:
         parts.append('<section id="key-points"><h2>핵심 포인트</h2><ul>')

@@ -34,7 +34,9 @@ def test_markdown_labels_pdf_and_source_pages():
     }
 
     assert "PDF p.19–23 · 원문 p.1–5" in _book_md({}, [chapter], page_offset=18)
-    assert "PDF p.19–23 · 원문 p.1–5" in _summary_md(chapter, page_offset=18)
+    rendered = _summary_md(chapter, page_offset=18)
+    assert "PDF p.19–23 · 원문 p.1–5" in rendered
+    assert "학습용 요약" in rendered
 
 
 def test_markdown_distinguishes_unknown_and_absent_source_pages():

@@ -468,6 +468,7 @@ def create_workspace(
         "page_count": None,
         "text_quality": None,
         "ocr_language": None,
+        "chapter_setup_generation": 0,
         # current_phase 문자열만 소비된다(get_work_state 응답·에러 메시지). phases는
         # update_phase가 갱신하는 진행 텔레메트리이며 분기 로직엔 쓰지 않는다.
         "current_phase": "init",
@@ -659,6 +660,9 @@ def set_chapters_in_state(work_id: str, chapters: list[dict[str, Any]]) -> None:
     with _get_lock(work_id):
         state = load_state(work_id)
         state["chapters"] = _build_chapter_state(chapters)
+        state["chapter_setup_generation"] = (
+            state.get("chapter_setup_generation", 0) + 1
+        )
         state["phases"]["chapter_setup"] = "completed"
         save_state(work_id, state)
 
@@ -688,6 +692,9 @@ def commit_chapter_setup(
             if extraction_mode == "ocr":
                 state["ocr_language"] = ocr_language
             state["chapters"] = _build_chapter_state(chapters)
+            state["chapter_setup_generation"] = (
+                state.get("chapter_setup_generation", 0) + 1
+            )
             state["phases"]["chapter_setup"] = "completed"
             state["phases"]["chapter_processing"] = "in_progress"
             state["current_phase"] = "chapter_processing"
@@ -822,6 +829,8 @@ def save_chapter_result(
     work_id: str,
     chapter_id: str,
     data: dict[str, Any],
+    *,
+    expected_setup_generation: int | None = None,
 ) -> Path:
     """summarizer sub-agent의 챕터 결과를 분리 저장 + state 갱신.
 
@@ -848,6 +857,14 @@ def save_chapter_result(
 
     with _get_lock(work_id):
         state = load_state(work_id)
+        if (
+            expected_setup_generation is not None
+            and state.get("chapter_setup_generation", 0)
+            != expected_setup_generation
+        ):
+            raise RuntimeError(
+                "chapter setup changed while the result was being validated"
+            )
         entry = _require_result_target(state, chapter_id)
         duplicate_ids = question_contract.invalid_question_id_paths(
             data.get("questions"),

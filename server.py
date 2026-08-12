@@ -1889,12 +1889,47 @@ def save_chapter_result(
     except (KeyError, FileNotFoundError, ValueError) as e:
         return _save_target_error(e, chapter_id)
     options = state.get("question_options", {})
+    entry = state["chapters"][chapter_id]
+    setup_generation = state.get("chapter_setup_generation", 0)
+    try:
+        chapter_raw = workspace.get_chapter_raw(work_id, chapter_id)
+    except (FileNotFoundError, OSError, ValueError) as e:
+        return _err(
+            f"챕터 원문을 읽을 수 없어 요약 근거를 검증할 수 없습니다: {e}",
+            data={"missing": ["chapter_raw.text"], "chapter_id": chapter_id},
+        )
+    if not isinstance(chapter_raw, dict):
+        return _err(
+            "챕터 원문 형식이 올바르지 않아 요약 근거를 검증할 수 없습니다.",
+            data={"missing": ["chapter_raw.text"], "chapter_id": chapter_id},
+        )
+    chapter_text = chapter_raw.get("text")
+    if not isinstance(chapter_text, str) or not chapter_text.strip():
+        return _err(
+            "챕터 원문이 비어 있어 요약 근거를 검증할 수 없습니다.",
+            data={"missing": ["chapter_raw.text"], "chapter_id": chapter_id},
+        )
+    raw_char_count = chapter_raw.get("char_count")
+    if (
+        type(raw_char_count) is not int
+        or raw_char_count != len(chapter_text)
+        or raw_char_count != entry.get("char_count")
+    ):
+        return _err(
+            "챕터 원문의 글자 수 메타데이터가 실제 원문 또는 상태와 일치하지 않습니다.",
+            data={
+                "missing": ["chapter_raw.char_count"],
+                "chapter_id": chapter_id,
+            },
+        )
 
     # 에이전트가 예전 프롬프트나 환각으로 body_text를 보내더라도
     # 서버의 캐시(get_chapter_content에서 추출한 text)를 덮어쓰지 않도록 제거
     data_to_save = summary_contract.normalize_summary_quality_payload(data)
     if isinstance(data_to_save, dict):
         data_to_save.pop("body_text", None)
+        # 에이전트가 임의 분량을 보내도 문제 상한과 fingerprint는 canonical raw를 쓴다.
+        data_to_save["source_char_count"] = raw_char_count
 
     data_to_save, materialization_missing = (
         question_contract.materialize_multiple_choice_options(data_to_save)
@@ -1907,11 +1942,15 @@ def save_chapter_result(
             data={"missing": materialization_missing, "chapter_id": chapter_id},
         )
 
-    char_count = state["chapters"][chapter_id].get("char_count")
+    char_count = raw_char_count
     missing = question_contract.missing_summary_fields(
         data_to_save, options, chapter_id, char_count=char_count,
     )
-    missing.extend(summary_contract.missing_summary_quality_fields(data_to_save))
+    missing.extend(summary_contract.missing_summary_quality_fields(
+        data_to_save,
+        chapter_text=chapter_text,
+        chapter_title=entry.get("title"),
+    ))
     missing = list(dict.fromkeys(missing))
     if missing:
         return _err(
@@ -1925,7 +1964,12 @@ def save_chapter_result(
             data={"missing": missing, "chapter_id": chapter_id},
         )
     try:
-        path = workspace.save_chapter_result(work_id, chapter_id, data_to_save)
+        path = workspace.save_chapter_result(
+            work_id,
+            chapter_id,
+            data_to_save,
+            expected_setup_generation=setup_generation,
+        )
     except question_contract.QuestionContractError as e:
         return _err(
             f"챕터 결과의 문제 ID 또는 개수가 유효하지 않습니다: {e.missing}.",

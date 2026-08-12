@@ -274,8 +274,14 @@ def test_force_ignores_stale_results_for_pending_chapter(ko_short, tmp_path):
 def test_managed_output_removes_pages_for_removed_chapters(ko_with_toc, tmp_path):
     wid, out, _ = _build_multi(ko_with_toc, tmp_path)
     assert (out / "ch2.html").exists()
+    raw_count = server.workspace.get_chapter_raw(wid, "ch1")["char_count"]
     server.workspace.set_chapters_in_state(wid, [
-        {"chapter_id": "ch1", "title": "남은 챕터", "pdf_pages": [5, 12]},
+        {
+            "chapter_id": "ch1",
+            "title": "남은 챕터",
+            "pdf_pages": [5, 12],
+            "char_count": raw_count,
+        },
     ])
     saved = server.save_chapter_result(wid, "ch1", _fake_summary("ch1"))
     assert saved["ok"], saved
@@ -494,7 +500,7 @@ def test_summary_markdown_is_rendered_not_escaped():
 def test_summary_headings_demoted_under_section():
     """본문 ## 헤딩은 섹션 제목(h2) 아래 h3로 낮춰야 계층이 깔끔."""
     html = _summary_section({"summary": "## 개요\n내용", "key_points": []})
-    assert "<h2>요약</h2>" in html       # 섹션 제목은 h2 유지
+    assert "<h2>학습용 요약</h2>" in html  # 결과물의 용도를 명시
     assert "<h3>개요</h3>" in html       # 본문 ##(h2) → h3
     assert "<h2>개요</h2>" not in html
 

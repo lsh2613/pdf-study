@@ -198,6 +198,11 @@ def test_save_chapter_result_enforces_question_maximum_from_chapter_text(
     wid = _init(str(ko_short), str(tmp_path / "out_maximum"))["data"]["work_id"]
     _scan(wid)
     _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    workspace.save_chapter_raw(
+        wid,
+        "ch1",
+        {"text": "가" * 2_999, "char_count": 2_999},
+    )
     workspace.update_chapter_status(wid, "ch1", char_count=2_999)
 
     summary = _result()
@@ -1358,6 +1363,110 @@ def test_save_chapter_result_requires_section_inventory_and_review(
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
     assert not (workspace.summaries_dir(wid) / "ch1.json").exists()
     assert not (workspace.quiz_dir(wid) / "ch1.json").exists()
+
+
+def test_save_chapter_result_rejects_false_whole_chapter_inventory(
+    tmp_path, ko_short, monkeypatch,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_source_structure"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "02. 설치와 설정", "pdf_pages": [1, 12]}])
+    raw_text = (
+        "2.1 MySQL 서버 설치\n2.2 MySQL 서버의 시작과 종료\n"
+        "2.1 MySQL 서버 설치\n본문\n"
+        "2.1.1 버전과 에디션 선택\n본문\n"
+        "2.2 MySQL 서버의 시작과 종료\n본문"
+    )
+    workspace.update_chapter_status(wid, "ch1", char_count=len(raw_text))
+    monkeypatch.setattr(
+        workspace,
+        "get_chapter_raw",
+        lambda *_: {"text": raw_text, "char_count": len(raw_text)},
+    )
+
+    response = server.save_chapter_result(wid, "ch1", _result())
+
+    assert response["ok"] is False
+    assert "section_inventory.source_headings[2.1]" in response["data"]["missing"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+
+
+def test_save_chapter_result_rejects_blank_raw_text(
+    tmp_path, ko_short, monkeypatch,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_blank_raw"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    monkeypatch.setattr(workspace, "get_chapter_raw", lambda *_: {"text": "   "})
+
+    response = server.save_chapter_result(wid, "ch1", _result())
+
+    assert response["ok"] is False
+    assert response["data"]["missing"] == ["chapter_raw.text"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+
+
+def test_save_chapter_result_stores_canonical_source_char_count(tmp_path, ko_short):
+    wid = _init(str(ko_short), str(tmp_path / "out_canonical_count"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    data = _result()
+    data["source_char_count"] = 10_000
+
+    response = server.save_chapter_result(wid, "ch1", data)
+
+    assert response["ok"] is True
+    saved = workspace.get_chapter_summary(wid, "ch1")
+    state_count = workspace.load_state(wid)["chapters"]["ch1"]["char_count"]
+    assert saved["source_char_count"] == state_count
+
+
+@pytest.mark.parametrize("raw_count", [None, "12", 1])
+def test_save_chapter_result_rejects_invalid_raw_char_count(
+    tmp_path, ko_short, monkeypatch, raw_count,
+):
+    wid = _init(str(ko_short), str(tmp_path / f"out_bad_count_{raw_count}"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    monkeypatch.setattr(
+        workspace,
+        "get_chapter_raw",
+        lambda *_: {"text": "유효한 원문", "char_count": raw_count},
+    )
+
+    response = server.save_chapter_result(wid, "ch1", _result())
+
+    assert response["ok"] is False
+    assert response["data"]["missing"] == ["chapter_raw.char_count"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+    assert not (workspace.summaries_dir(wid) / "ch1.json").exists()
+    assert not (workspace.quiz_dir(wid) / "ch1.json").exists()
+
+
+def test_save_chapter_result_rejects_stale_chapter_setup(
+    tmp_path, ko_short, monkeypatch,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_stale_setup"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    original_save = workspace.save_chapter_result
+
+    def reconfigure_before_save(work_id, chapter_id, data, **kwargs):
+        state = workspace.load_state(work_id)
+        workspace.update_state(
+            work_id,
+            chapter_setup_generation=state.get("chapter_setup_generation", 0) + 1,
+        )
+        return original_save(work_id, chapter_id, data, **kwargs)
+
+    monkeypatch.setattr(workspace, "save_chapter_result", reconfigure_before_save)
+
+    response = server.save_chapter_result(wid, "ch1", _result())
+
+    assert response["ok"] is False
+    assert response["data"]["missing"] == ["state"]
+    assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] != "completed"
+    assert not (workspace.summaries_dir(wid) / "ch1.json").exists()
 
 
 def test_save_chapter_result_rejects_review_with_uncovered_meaning(
