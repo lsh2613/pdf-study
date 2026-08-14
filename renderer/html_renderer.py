@@ -369,7 +369,8 @@ def _mc_section(items: list[dict[str, Any]]) -> str:
     if not items:
         return ""
     parts = ['<section id="mc"><h2>객관식</h2>',
-             '<p class="mc-summary">객관식 정답 <strong>0</strong> / 0</p>']
+             '<p class="mc-summary">객관식: 푼 문제 <strong>0</strong> · '
+             f'정답 <strong>0</strong> · 전체 <strong>{len(items)}</strong></p>']
     for q in items:
         qid = _esc(q.get("id") or "")
         ans_idx = int(q.get("answer_index", 0))

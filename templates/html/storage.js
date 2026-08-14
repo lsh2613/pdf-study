@@ -62,7 +62,7 @@
       last_position: null,
       completed: false,
       answers: {},
-      mc_score: { correct: 0, total: 0 },
+      mc_score: { answered: 0, correct: 0, total: 0 },
     };
 
     const persisted = await getJSON(chapterId);
@@ -84,6 +84,9 @@
 
     // 답안 복원
     restoreAnswers(state.answers || {});
+    // HTML에 이미 포함된 객관식 수를 기준으로 첫 렌더부터 전체 문항 수를 표시한다.
+    // 저장된 이전 세대의 mc_score는 답안과 맞지 않을 수 있으므로 다시 계산한다.
+    recountMc(state);
     updateMcSummary(state.mc_score);
 
     // last_position scroll
@@ -281,20 +284,23 @@
   }
 
   function recountMc(state) {
-    let correct = 0, total = 0;
+    let answered = 0, correct = 0, total = 0;
     document.querySelectorAll(".question.mc").forEach((qel) => {
       const qid = qel.dataset.qid;
       total += 1;
       const a = state.answers[qid];
-      if (a && a.correct) correct += 1;
+      if (!a || typeof a.selected !== "number") return;
+      answered += 1;
+      if (a.selected === parseInt(qel.dataset.answer, 10)) correct += 1;
     });
-    state.mc_score = { correct, total };
+    state.mc_score = { answered, correct, total };
   }
 
   function updateMcSummary(score) {
     const el = document.querySelector(".mc-summary");
     if (!el || !score) return;
-    el.innerHTML = `객관식 정답 <strong>${score.correct}</strong> / ${score.total}`;
+    el.innerHTML = `객관식: 푼 문제 <strong>${score.answered || 0}</strong> · ` +
+      `정답 <strong>${score.correct || 0}</strong> · 전체 <strong>${score.total || 0}</strong>`;
   }
 
   // ---------------------- Index page ----------------------

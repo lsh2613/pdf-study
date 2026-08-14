@@ -168,6 +168,21 @@ def test_disabled_question_types_omit_sections(ko_with_toc, tmp_path):
     assert 'id="ex"' not in html
 
 
+def test_multiple_choice_summary_has_initial_total_and_all_three_counts(
+    ko_with_toc, tmp_path
+):
+    """문제를 풀기 전에도 렌더된 문항 전체 수를 즉시 보여 준다."""
+    _, out, _ = _build_multi(ko_with_toc, tmp_path)
+    html = (out / "ch1.html").read_text(encoding="utf-8")
+
+    assert 'class="mc-summary">객관식: 푼 문제 <strong>0</strong>' in html
+    assert '정답 <strong>0</strong> · 전체 <strong>1</strong>' in html
+
+    js = (out / "assets" / "storage.js").read_text(encoding="utf-8")
+    assert "recountMc(state);" in js
+    assert "answered, correct, total" in js
+
+
 def test_html_uses_fixed_korean_document_language(ko_with_toc, tmp_path):
     _, out, _ = _build_multi(ko_with_toc, tmp_path)
     html = (out / "ch1.html").read_text(encoding="utf-8")
