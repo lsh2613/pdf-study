@@ -160,3 +160,31 @@ def test_canonical_inventory_is_sanitized_without_points():
     normalized = summary_contract.normalize_summary_quality_payload(data)
 
     assert "important_points" not in normalized["section_inventory"]["sections"][0]
+
+
+def test_canonical_inventory_does_not_persist_copied_source_text():
+    data = summary_contract.quality_payload_example()
+    section = data["section_inventory"]["sections"][0]
+    section["source_text"] = "저장하면 canonical raw가 중복된다."
+    section["content"] = "구형 복사 필드"
+
+    normalized = summary_contract.normalize_summary_quality_payload(data)
+
+    saved_section = normalized["section_inventory"]["sections"][0]
+    assert "source_text" not in saved_section
+    assert "content" not in saved_section
+
+
+def test_canonical_inventory_does_not_persist_top_level_source_copies():
+    data = summary_contract.quality_payload_example()
+    inventory = data["section_inventory"]
+    inventory["source_text"] = "canonical raw 사본"
+    inventory["content"] = "canonical raw 사본"
+    inventory["structured_sections"] = [{"source_text": "canonical raw 사본"}]
+
+    normalized = summary_contract.normalize_summary_quality_payload(data)
+
+    saved_inventory = normalized["section_inventory"]
+    assert "source_text" not in saved_inventory
+    assert "content" not in saved_inventory
+    assert "structured_sections" not in saved_inventory

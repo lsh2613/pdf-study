@@ -20,6 +20,7 @@ from . import (
     processing_mode_contract,
     prompts,
     question_contract,
+    section_source,
     summary_contract,
     workspace,
 )
@@ -388,8 +389,10 @@ def _pending_guidance(
         actions: list[str] = []
         if "summary" in kinds:
             actions.append(
-                "section_inventory_prompt → summary_prompt → review_prompt → "
-                "basic_question_prompt 순서로 요약을 먼저 확정하고, 문제 단계에는 "
+                "section_inventory_prompt → 조건부 section_review_prompt → "
+                "get_section_content → summary_prompt → "
+                "review_prompt → basic_question_prompt 순서로 요약을 먼저 확정하고, "
+                "문제 단계에는 "
                 "요약·핵심 포인트만 전달한 뒤 "
                 f'save_chapter_result(work_id="{work_id}", '
                 f'chapter_id="{chapter_id}", data=...)로 저장하세요'
@@ -434,7 +437,8 @@ def _pending_guidance(
     if summary_pending:
         instructions.append(
             f"summary_pending={summary_pending}는 section_inventory_prompt → "
-            "summary_prompt → review_prompt로 요약을 확정한 뒤 "
+            "조건부 section_review_prompt → get_section_content → summary_prompt → "
+            "review_prompt로 요약을 확정한 뒤 "
             "basic_question_prompt에는 요약만 전달하고 save_chapter_result로 "
             "함께 저장하세요"
         )
@@ -1098,7 +1102,8 @@ async def init_work(
 
     기본 흐름:
     init_work → scan_pdf → set_chapters → get_subagent_prompts →
-    get_chapter_content/save_chapter_result(+ extension이면 save_extension_result) →
+    get_chapter_content → get_section_content → save_chapter_result
+    (+ extension이면 save_extension_result) →
     list_pending_chapters → finalize_study
 
     목차 OCR 분기:
@@ -1713,6 +1718,9 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
     문제 생성에는 get_chapter_summary의 저장 요약만 사용합니다.
     """
     raw = analysis.get_chapter_content_impl(work_id, chapter_id)
+    raw["section_candidates"] = section_source.detect_section_candidates(
+        raw.get("text", ""),
+    )
     # 본문을 받아간 시점 = 요약 처리 시작 → 진행 모니터링용 in_progress 마킹
     workspace.mark_chapter_in_progress(work_id, chapter_id, kind="summary")
     state = workspace.load_state(work_id)
@@ -1720,7 +1728,106 @@ def get_chapter_content(work_id: str, chapter_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 5. get_chapter_summary
+# 5. get_section_content
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+@_safe("get_section_content")
+def get_section_content(
+    work_id: str,
+    chapter_id: str,
+    section_inventory: dict[str, Any],
+    section_review: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Canonical 챕터 원문을 inventory의 section 경계로 무손실 분할합니다.
+
+    section 분석자는 본문을 복사하지 않고 각 제목의 exact source_anchor만 제공합니다.
+    서버가 번호형 제목 후보의 누락 여부를 먼저 감사하고, 위험한 inventory에는 독립
+    section_review를 요구한 뒤 canonical text에서 span과 source_text를 계산합니다.
+    """
+    raw = analysis.get_chapter_content_impl(work_id, chapter_id)
+    try:
+        audit = section_source.audit_section_inventory(
+            raw.get("text"), section_inventory,
+        )
+    except section_source.SectionSourceValidationError as exc:
+        return _err(
+            "section inventory가 원문의 번호형 제목 후보를 모두 설명하지 못했습니다. "
+            "누락 후보를 실제 section으로 추가하거나 제외 근거를 candidate_exclusions에 "
+            "기록한 뒤 다시 시도하세요.",
+            data={
+                "chapter_id": chapter_id,
+                "invalid_fields": exc.invalid_fields,
+                **exc.details,
+            },
+            next_action=(
+                "get_chapter_content의 text와 section_candidates를 "
+                "section_inventory_prompt로 다시 분석한 뒤 "
+                f'get_section_content(work_id="{work_id}", '
+                f'chapter_id="{chapter_id}", section_inventory=...)를 호출하세요.'
+            ),
+        )
+
+    review_invalid = section_source.invalid_section_review_fields(
+        section_review,
+        required=audit["review_required"],
+    )
+    if review_invalid:
+        return _err(
+            "전체 챕터 판정 또는 후보 제외가 포함된 section inventory는 독립적인 "
+            "구조 검토를 통과해야 합니다.",
+            data={
+                "chapter_id": chapter_id,
+                "invalid_fields": review_invalid,
+                "review_required": audit["review_required"],
+                "section_candidates": audit["section_candidates"],
+            },
+            next_action=(
+                "가능하면 inventory 작성자와 다른 sub-agent가 chapter text, "
+                "section_inventory, section_candidates를 section_review_prompt로 검토한 "
+                "뒤 passed 결과를 section_review에 넣어 "
+                f'get_section_content(work_id="{work_id}", '
+                f'chapter_id="{chapter_id}", section_inventory=..., '
+                "section_review=...)를 다시 호출하세요. needs_revision이면 inventory를 "
+                "고친 뒤 다시 검토하세요."
+            ),
+        )
+
+    try:
+        prepared = section_source.prepare_section_source(
+            raw.get("text"), section_inventory,
+        )
+    except section_source.SectionSourceValidationError as exc:
+        return _err(
+            "section inventory를 canonical 원문 범위에 결합할 수 없습니다. "
+            "invalid_fields의 anchor 또는 구조를 고친 뒤 다시 시도하세요.",
+            data={
+                "chapter_id": chapter_id,
+                "invalid_fields": exc.invalid_fields,
+            },
+            next_action=(
+                "get_chapter_content의 text를 section_inventory_prompt로 다시 분석한 뒤 "
+                f'get_section_content(work_id="{work_id}", '
+                f'chapter_id="{chapter_id}", section_inventory=...)를 호출하세요.'
+            ),
+        )
+    prepared["chapter_id"] = chapter_id
+    if isinstance(raw.get("title"), str):
+        prepared["title"] = raw["title"]
+    workspace.mark_chapter_in_progress(work_id, chapter_id, kind="summary")
+    return _ok(
+        prepared,
+        next_action=(
+            "이 응답의 structured_sections와 section_inventory를 summary_prompt에 "
+            "전달해 초안을 작성하세요. get_chapter_content의 전체 text는 요약 입력으로 "
+            "다시 전달하지 말고 review_prompt에서 최종 초안과 의미를 대조할 때만 "
+            "사용하세요. review가 passed면 문제에는 summary·key_points만 전달합니다."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. get_chapter_summary
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -1747,7 +1854,7 @@ def get_chapter_summary(work_id: str, chapter_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 6. get_subagent_prompts
+# 7. get_subagent_prompts
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -1842,7 +1949,8 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
     if summary_pending:
         pending_actions.append(
             f"summary_pending_chapter_ids({summary_pending})는 section_inventory_prompt → "
-            "summary_prompt → review_prompt로 요약을 확정한 뒤 "
+            "조건부 section_review_prompt → get_section_content → summary_prompt → "
+            "review_prompt로 요약을 확정한 뒤 "
             "basic_question_prompt에는 요약만 전달하고, 합친 결과를 "
             "save_chapter_result로 저장하세요"
         )
@@ -1863,7 +1971,7 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 6. save_chapter_result
+# 8. save_chapter_result
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -1876,7 +1984,8 @@ def save_chapter_result(
     """summarizer sub-agent의 챕터 결과 JSON을 저장합니다.
 
     스키마와 생성 순서는 get_subagent_prompts의 section_inventory_prompt,
-    summary_prompt, review_prompt, basic_question_prompt에 명시. 동시성 안전.
+    section_review_prompt, summary_prompt, review_prompt, basic_question_prompt에 명시.
+    동시성 안전.
 
     저장 전 의미 coverage 증거, prompts.py의 기본 결과 JSON 스키마와 활성 문제
     유형을 검증한다.
@@ -1949,6 +2058,10 @@ def save_chapter_result(
     missing.extend(summary_contract.missing_summary_quality_fields(
         data_to_save,
     ))
+    if isinstance(data_to_save, dict):
+        missing.extend(section_source.invalid_source_binding_fields(
+            data_to_save.get("section_inventory"), chapter_text,
+        ))
     missing = list(dict.fromkeys(missing))
     if missing:
         return _err(

@@ -16,4 +16,6 @@
 - `0014-required-user-context.md` - 새 작업은 문제 생성 조정에 사용할 비어 있지 않은 학습자 정보를 필수로 받는다.
 - `0015-section-first-summary.md` - 원문 구조 inventory 뒤 각 section 전체를 직접 요약한다. section별 검토 결정은 0017로 대체됐다.
 - `0016-source-structure-summary-gate.md` - 학습자 정보는 문제 조정에만 사용한다. raw 구조 저장 게이트는 0017로 대체됐다.
-- `0017-section-guided-summary.md` - inventory를 요약 생성에 강제하고 이후 section 구조 재검증을 제거한다.
+- `0017-section-guided-summary.md` - inventory를 요약 생성에 강제하고 이후 section 구조 재검증을 제거한다. source 입력 방식은 0018로 대체됐다.
+- `0018-lossless-section-source.md` - exact anchor를 canonical raw span에 결합해 section별 원문을 무손실로 제공한다.
+- `0019-section-candidate-audit.md` - 번호형 제목 후보를 전수 감사하고 위험한 inventory에 조건부 독립 검토를 요구한다.

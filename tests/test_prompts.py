@@ -158,7 +158,8 @@ def test_ocr_mode_uses_precomputed_text_and_no_image_input():
     prompt = out["summarizer_prompt"]
     assert out["extraction_mode"] == "ocr"
     assert "[입력 방식 — OCR 선계산 본문 텍스트]" in prompt
-    assert "get_chapter_content가 제공한 text" in prompt
+    assert "get_section_content가 반환한 structured_sections" in prompt
+    assert "canonical 원문" in prompt
     assert "page_images" not in prompt
     assert "body_text" not in prompt
     assert "비전" not in prompt
@@ -204,7 +205,9 @@ def test_summary_workflow_is_semantic_and_has_no_character_target():
     assert "짧은 초록이 아니라" in out["summarizer_prompt"]
     assert "특정 글자 수나 압축률을 목표로 삼지 마세요" in out["summarizer_prompt"]
     assert "내용 선별 목록" not in out["summary_prompt"]
-    assert "각 section의 원문 전체" in out["summary_prompt"]
+    assert "get_section_content" in out["summary_prompt"]
+    assert "source_text" in out["summary_prompt"]
+    assert "canonical" in out["summary_prompt"]
     assert "학습자 정보와의 관련성" in out["summary_prompt"]
     assert "학습용 요약" in out["summary_prompt"]
     assert "소제목으로 구획을 나눠" not in out["summary_prompt"]
@@ -214,8 +217,12 @@ def test_summary_workflow_is_semantic_and_has_no_character_target():
         out["review_prompt"]
     )
     workflow = out["workflow_instructions"]
-    assert workflow.index("section_inventory_prompt") < workflow.index("summary_prompt")
-    assert workflow.index("summary_prompt") < workflow.index("review_prompt")
+    assert workflow.index("section_inventory_prompt") < workflow.index(
+        "section_review_prompt"
+    )
+    assert workflow.index("section_review_prompt") < workflow.index("get_section_content")
+    assert workflow.index("get_section_content") < workflow.index("summary_prompt")
+    assert workflow.index("summary_prompt") < workflow.index("review_prompt로 전체")
 
 
 def test_section_inventory_prompt_handles_varied_hierarchy_and_false_mentions():
@@ -228,6 +235,25 @@ def test_section_inventory_prompt_handles_varied_hierarchy_and_false_mentions():
     assert "페이지 머리말" in prompt
     assert "has_explicit_subchapters=false" in prompt
     assert "챕터 전체" in prompt
+    assert "source_anchor" in prompt
+    assert "원문에서 그대로 복사" in prompt
+    assert "occurrence" in prompt
+    assert "section 본문을 복사" in prompt
+    assert "section_candidates" in prompt
+    assert "candidate_exclusions" in prompt
+    assert "모든 후보" in prompt
+
+
+def test_section_review_prompt_checks_inventory_only_when_risky():
+    out = prompts.build_prompts(_state())
+    prompt = out["section_review_prompt"]
+
+    assert "독립 검토자" in prompt
+    assert "missing_sections" in prompt
+    assert "false_sections" in prompt
+    assert "hierarchy_issues" in prompt
+    assert "unresolved_candidates" in prompt
+    assert "요약" not in prompt
 
 
 def test_review_prompt_skips_section_structure_validation():

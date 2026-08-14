@@ -153,17 +153,23 @@ cwd는 경로 계산에 참여하지 않는다. `list_study_results`는 같은 �
 요약 문자열과 핵심 포인트가 비어 있지 않은 것만으로는 의미 보존을 확인할 수 없다.
 요약 전에는 챕터 전체에서 실제 제목·순서·계층만 `section_inventory`로 만들고,
 명시적인 서브 챕터가 없으면 챕터 전체 section 하나만 둔다. inventory를 내용 필터로
-쓰지 않고 각 section의 원문 전체를 읽어 요약한다. 요약 프롬프트는 inventory의 모든
-명시적 서브 챕터를 순서·계층대로 Markdown에 반드시 반영하게 한다. 요약 후에는
+쓰지 않는다. inventory 분석자는 exact source anchor만 기록하고 본문을 복사하지 않으며,
+서버가 반환한 번호형 후보를 section 선택 또는 근거 있는 제외로 모두 감사한다. 챕터
+전체 판정이나 후보 제외는 요약 전에 별도 section 검토가 통과해야 한다. 설명되지 않은
+후보나 미해결 구조 검토는 단일 chapter fallback으로 숨기지 않는다.
+`get_section_content`가 canonical raw를 무손실 span으로 나눈다. 요약 프롬프트는
+structured section의 모든 source text를 읽고 명시적 서브 챕터를 순서·계층대로
+Markdown에 반드시 반영하게 한다. 요약 후에는
 원문·초안을 대조한 `summary_review`가 챕터 전체의 중요 누락·왜곡 부재를 확인한 뒤에만
 `passed`가 된다. section 구조는 검토와 저장 단계에서 다시 검증하지 않는다.
 글자 수나 원문 대비 압축률은 문서별 정보 밀도를 반영하지 못하므로 품질 게이트로
 사용하지 않는다.
 
 구조를 여러 단계에서 다시 추론하면 OCR과 긴 원문의 불규칙성 때문에 실제 요약 품질과
-무관한 false negative가 생길 수 있다. 따라서 저장 시 raw 번호형 제목을 inventory와
-대조하거나 Markdown heading 포함 여부를 검사하지 않는다. inventory 분석과 요약
-생성 지침이 구조 보존을 책임지고, 독립 검토와 서버는 전체 의미 누락·왜곡만 판정한다.
+무관한 false negative가 생길 수 있다. 따라서 저장 시 raw 제목의 의미를 다시 판단하거나
+Markdown heading 포함 여부를 검사하지 않는다. prepared binding이 있으면 raw hash와
+연속 span coverage만 검증한다. anchor가 반복되면 occurrence로 실제 본문 제목을 고르고,
+찾지 못하거나 순서가 뒤집히면 요약 전에 inventory를 다시 분석한다.
 
 분리 workflow의 학습자 정보는 문제의 난이도·표현·예시·관점에만 사용한다.
 inventory·요약·검토에 주입하면 관심 분야와 겹치는 내용만 남기는 잘못된 압축을

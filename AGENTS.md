@@ -41,17 +41,23 @@ pdf-learner는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다.
 - 요약 품질을 고정 글자 수나 원문 대비 압축률로 판단하지 않는다. 요약 전 챕터
   전체의 실제 제목·순서·계층만 `section_inventory`로 정리한다. 명시적인 서브 챕터가
   있으면 번호 유무와 계층 깊이에 관계없이 모두 보존하고, 없으면 챕터 전체 section
-  하나만 둔다. inventory는 내용 선별에 쓰지 않으며 요약자는 각 section의 원문 전체를
-  직접 읽는다. 요약자는 inventory의 모든 제목·순서·계층을 Markdown 구조로 반드시
-  반영한다. 요약 후 `summary_review`는 원문·초안의 전체 의미 누락·왜곡만 확인하며
-  section 구조를 다시 검증하지 않는다. 전체 의미 검토가 `passed`인 결과만 완료로
-  저장한다.
-- 분리 workflow에서는 학습자 정보를 section inventory·요약·의미 보존 검토에
+  하나만 둔다. 서버가 제공한 번호형 `section_candidates`는 실제 section 또는 근거
+  있는 `candidate_exclusions`로 모두 설명하고, 챕터 전체 판정이나 후보 제외가 있으면
+  요약 전에 별도 `section_review`를 통과해야 한다. 설명되지 않은 후보나 미해결 검토를
+  단일 chapter fallback으로 숨기면 안 된다. 명시적인 각 section에는 원문에서 그대로 복사한 `source_anchor`와
+  반복 occurrence를 기록하고 본문을 복사하지 않는다. `get_section_content`가 canonical
+  raw에서 anchor 사이를 무손실 span으로 잘라 `structured_sections`를 만들며, 요약자는
+  이 section별 `source_text`만 순서대로 읽는다. 요약자는 inventory의 모든 제목·순서·
+  계층을 Markdown 구조로 반드시 반영한다. 요약 후 `summary_review`는 원문·초안의 전체
+  의미 누락·왜곡만 확인하며 section 구조를 다시 검증하지 않는다. 전체 의미 검토가
+  `passed`인 결과만 완료로 저장한다.
+- 분리 workflow에서는 학습자 정보를 section inventory·section 검토·요약·의미 보존 검토에
   전달하지 않고 기본·확장 문제의 난이도·표현·예시·관점 조정에만 사용한다. 호환용
   결합 프롬프트는 전체 원문 요약을 먼저 확정한 뒤 문제 단계에만 적용한다. 학습자
-  정보와 겹치는 내용만 요약하면 안 된다. 저장 시 section inventory의 구조나 최종
-  Markdown 제목 포함 여부를 재검증하지 않는다. inventory는 요약 생성 지침으로만
-  사용하고, 완료 판정은 전체 원문의 중요 내용 누락·왜곡 검토를 기준으로 한다.
+  정보와 겹치는 내용만 요약하면 안 된다. 저장 시 준비된 inventory의 raw fingerprint와
+  span이 canonical 원문을 빠짐없이 한 번씩 덮는지는 기계적으로 검증하되, section
+  구조의 의미나 최종 Markdown 제목 포함 여부를 재검증하지 않는다. 완료 판정은 전체
+  원문의 중요 내용 누락·왜곡 검토를 기준으로 한다.
 - 새 `init_work`는 단답형·주관식·확장형 문제 선택을 MCP form elicitation으로 직접
   받은 뒤, 세 선택과 무관하게 필수 학습자 정보 form을 네 번째로 연다. 학습자 정보는
   비어 있지 않아야 하고 공백뿐인 값도 거부한다. 필요한 form을 모두 승인·검증하기

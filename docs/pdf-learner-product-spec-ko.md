@@ -876,14 +876,21 @@ section inventory, 요약, 의미 보존 검토에는 전달하지 않는다. �
 - PDF 이미지를 삽입하지 않는다.
 - 필요한 그림 내용은 본문에 근거가 있을 때 글이나 표로 설명한다.
 - 고정 글자 수나 원문 대비 압축률을 품질 기준으로 사용하지 않는다.
-- 요약 전에 챕터 전체에서 실제 제목·순서·계층만 `section_inventory`로 정리한다.
+- 요약 전에 챕터 전체에서 실제 제목·순서·계층과 exact source anchor만
+  `section_inventory`로 정리하며 section 본문을 복사하지 않는다.
+- 서버의 번호형 `section_candidates`는 실제 section 또는 근거 있는 제외로 모두
+  설명한다. 챕터 전체 판정이나 후보 제외가 있으면 별도 section 구조 검토를 통과하며,
+  설명되지 않은 후보는 요약 전에 실패한다.
 - 문장 속 다른 장의 단순 언급, 교차 참조, 목록·표·그림 번호, 페이지 머리말·꼬리말,
   반복된 목차 조각은 현재 챕터의 section으로 만들지 않는다.
-- inventory는 내용을 선별하지 않으며 각 section의 원문 전체를 직접 읽어 요약한다.
+- `get_section_content`가 source anchor를 canonical raw span에 결합하고 preamble을
+  포함한 원문 전체를 section별 `source_text`로 무손실 분할한다.
+- inventory는 내용을 선별하지 않으며 요약자는 structured section의 원문 전체를 읽는다.
 - 요약 생성기는 inventory의 모든 제목·순서·계층을 Markdown 구조로 반드시 반영한다.
 - 요약 뒤 원문과 초안을 대조해 챕터 전체의 중요한 누락이나 왜곡이 있으면 보완한다.
-- 독립 검토와 저장 단계에서는 section 구조, raw 번호형 제목과 inventory의 일치,
-  Markdown heading 포함 여부를 다시 검증하지 않는다.
+- 요약 후 의미 검토와 저장 단계에서는 section 구조의 의미나 Markdown heading 포함 여부를
+  다시 검증하지 않는다. prepared source binding이 있으면 raw fingerprint와 span의
+  빈틈·중복 없는 coverage만 기계적으로 확인한다.
 - HTML과 Markdown+TUI 결과에는 PDF 원문 복습을 위한 `학습용 요약`임을 표시한다.
 
 ### 14.3 핵심 포인트
@@ -1064,7 +1071,8 @@ URL 필드를 두지 않는다.
 
 - 비어 있지 않은 `summary`
 - 비어 있지 않은 `key_points`
-- 전체 챕터에서 만들고 요약 생성에 사용한 `section_inventory` 객체
+- 전체 챕터에서 만들고 `get_section_content`로 canonical raw에 결합한
+  `section_inventory` 객체(구형 binding 없는 payload는 호환 허용)
 - 챕터 전체에 중요 누락·왜곡이 없는 `passed` 상태의 `summary_review`
 - `questions` 객체
 - 모든 기본 문제 유형 배열
@@ -1163,6 +1171,7 @@ Raw 본문 검증은 원문이 필요한 요약 pending 챕터에만 적용한�
 | `set_chapters` | 작업 ID, 챕터 정의, 책 정보 | 세 form, 설정 원자 확정, Text/OCR Raw 준비 |
 | `get_generation_instructions` | 작업 ID | 프롬프트, 실행 방식, 결과별 pending 목록 제공 |
 | `get_chapter_content` | 작업 ID, 챕터 ID | 검증된 Raw 본문 반환, 요약 처리 시작 표시 |
+| `get_section_content` | 작업 ID, 챕터 ID, section inventory | Raw를 section 경계로 무손실 분할하고 transient source text와 저장용 binding 반환 |
 | `get_chapter_summary` | 작업 ID, 챕터 ID | 검증된 저장 요약과 문제 개수 상한 메타 반환, 확장 문제 처리 시작 표시 |
 | `save_chapter_result` | 작업 ID, 챕터 ID, 기본 결과 | 기본 결과 검증, 객관식 보기 배치, 원자 저장 |
 | `save_extension_result` | 작업 ID, 챕터 ID, 확장 결과 | 확장 결과 검증과 원자 저장 |

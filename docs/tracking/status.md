@@ -11,12 +11,16 @@
 - 텍스트 레이어 품질을 평가해 텍스트 없음과 모지바케를 구분하고, 신뢰할 수 없는 text 모드를 거부한다. OCR이 필요하면 한국어·영어 중 하나를 명시적으로 선택해 해당 모델을 작업 상태에 보존한다.
 - text 모드는 챕터 본문을 서버가 추출하고, OCR 모드는 `set_chapters` 시점에 PaddleOCR CPU로 본문을 선계산해 raw에 저장한다. raw `text`와 `char_count`가 누락되거나 불일치하면 sub-agent 프롬프트와 챕터 본문 반환을 거부한다.
 - 챕터별 요약, 기본 문제, 확장 문제를 분리 JSON으로 저장하고, 현재 프롬프트의 JSON 양식에 맞지 않는 결과는 완료 상태로 바꾸지 않는다.
-- 요약 전에 전체 본문의 실제 제목·순서·계층만 `section_inventory`로 만들고,
-  서브 챕터가 없으면 챕터 전체 section 하나만 둔다. inventory로 내용을 선별하지
-  않고 각 section의 원문 전체를 직접 요약한다. 요약 프롬프트는 inventory의 모든
-  제목·순서·계층을 Markdown 구조로 반드시 반영하게 한다. 이후 검토는 원문과 초안의
-  전체 의미 누락·왜곡만 확인하고 section 구조를 다시 검증하지 않으며, 저장 경계도
-  inventory나 Markdown heading을 재대조하지 않는다. 고정 글자 수 기준은 쓰지 않는다.
+- 요약 전에 전체 본문의 실제 제목·순서·계층과 exact source anchor만
+  `section_inventory`로 만들고 본문은 복사하지 않는다. `get_section_content`가 canonical
+  raw를 preamble과 section별 span으로 무손실 분할한다. 요약 프롬프트는 이 structured
+  source를 순서대로 읽고 모든 제목·계층을 Markdown에 반영한다. 이후 검토는 원문과
+  초안의 전체 의미 누락·왜곡만 확인한다. 저장 경계는 prepared source binding의 raw
+  fingerprint·span coverage만 검증하며 section 의미나 Markdown heading은 재검증하지 않는다.
+- 서버가 번호형 full-line 제목 후보를 감사 신호로 제공하고, inventory는 각 후보를
+  실제 section 또는 근거 있는 제외로 설명한다. 챕터 전체 판정이나 후보 제외가 있으면
+  독립 section 검토를 요구하며, 설명되지 않은 후보는 요약 전에 실패한다. 감사용 제외와
+  검토 payload는 저장 inventory에 남기지 않는다.
 - 분리 workflow의 학습자 정보는 inventory·요약·검토에서 분리하고 기본·확장 문제의
   난이도·표현·예시·관점 조정에만 사용한다. 출력에는 `학습용 요약`임을 명시한다.
 - 기본·확장 문제는 검토를 통과한 저장 요약만 근거로 생성한다. 확장 문제는 외부 검색을 사용하지 않으며 서버에는 외부 검색 도구나 검색용 HTTP 클라이언트가 없다.
@@ -76,9 +80,7 @@
 
 - 테스트 모음은 PDF 스캔, 챕터 경계 추천, OCR 선계산 입력, raw 본문 저장, 서버 응답 봉투, Elicitation 강제와 공개 스키마, 최종 렌더링, 진도 저장 서버, 설치 스크립트와 MCP 설정 보호를 다룬다.
 - 테스트 시작 시 fixture 생성기 fingerprint와 PDF 해시를 확인해 오래된 합성 PDF를 자동 재생성한다.
-- 최근 확인: 현재 checkout의 프로젝트 `.venv`에서
-  `.venv/bin/python -m pytest -q`로 387개 테스트가 모두 통과했다. 경고는
-  PyMuPDF/Paddle 하위 SWIG 타입의 DeprecationWarning 5개다.
+- 최근 확인: 현재 checkout의 프로젝트 `.venv`에서 전체 테스트 421개가 통과했다.
 
 ## 남은 일
 

@@ -126,17 +126,33 @@ elicitation에서 사용자의 생성 여부를 받아 작업 생성 전에 확�
 표와 그림 번호·머리말과 꼬리말·반복된 목차 조각은 현재 챕터의 section으로 만들지
 않는다. 명시적인 서브 챕터가 없으면 챕터 전체 section 하나만 둔다.
 
-inventory는 요약할 내용의 목록이나 상한이 아니다. 요약자는 각 section의 원문 전체를
-직접 읽고 핵심 주장·개념·관계·절차·조건·예외·비교·근거·사례·주의점 가운데 실제로
-중요한 요소를 학습 자료에 보존한다. 요약 생성기는 inventory의 `sections`를 순서대로
-순회하고 모든 명시적인 서브 챕터 제목과 `level`·`parent_id` 상대 계층을 최종
-Markdown에 반드시 반영한다. 제목을 합치거나 생략하거나 순서를 바꾸면 안 된다.
+`get_chapter_content`는 full-line 번호 형태를 넓게 탐지한 `section_candidates`를
+구조 감사 신호로 함께 반환한다. 이 목록은 section 확정 결과가 아니며 분석 agent는
+전체 text에서 번호 없는 제목과 OCR로 깨진 제목도 직접 찾아야 한다. 모든 후보 occurrence는
+실제 section의 `source_anchor`로 선택하거나 `candidate_exclusions`에 목차 조각·교차
+참조·목록·표나 그림·머리말이나 꼬리말·제목 아님 중 하나의 근거로 설명한다.
+설명되지 않은 후보가 있으면 요약으로 진행하지 않는다.
 
-요약 초안은 별도 검토 단계에서 챕터 본문 전체와 대조한다. 이 검토는 section 구조를
+inventory는 요약할 내용의 목록이나 상한이 아니다. 명시적인 각 section은 표시용
+`heading`과 함께 원문 줄 시작에서 시작해 줄 경계에서 끝나는 full-line exact
+`source_anchor.text`와 같은 anchor의 1-based `occurrence`를 가진다. 분석 agent는
+section 본문을 복사하지 않는다.
+챕터 전체 판정 또는 하나 이상의 후보 제외가 있는 inventory는 가능하면 작성자와 분리된
+검토자가 전체 text·inventory·후보를 대조한다. 실제 제목 누락, 가짜 제목, 계층 오류,
+미해결 후보가 모두 없을 때만 `section_review.status=passed`가 된다. 검토가 해결되지
+않으면 챕터 전체 section으로 조용히 대체하지 않고 해당 챕터 처리를 실패로 남긴다.
+`get_section_content`는 이 anchor를 canonical raw에 결합해 preamble을 포함한 원문
+전체를 빈틈·중복 없는 문자 span으로 나누고 section별 `source_text`를 반환한다.
+요약자는 `structured_sections`를 순서대로 읽어 핵심 주장·개념·관계·절차·조건·예외·
+비교·근거·사례·주의점을 보존한다. 모든 명시적인 서브 챕터 제목과 `level`·`parent_id`
+상대 계층을 최종 Markdown에 반영하며 제목을 합치거나 생략하거나 순서를 바꾸면 안 된다.
+
+요약 초안은 별도 의미 검토 단계에서 챕터 본문 전체와 대조한다. 이 검토는 앞선 section 구조를
 다시 확인하지 않고 챕터 전체의 중요한 내용 누락과 왜곡만 판단한다. 누락이나 왜곡이
 있으면 `needs_revision`으로 보완하며, 전체 의미 review가 `passed`인 결과만 저장할 수
-있다. 저장 경계도 inventory 내부 구조, raw 번호형 제목과의 일치, 최종 Markdown 제목
-포함 여부를 재검증하지 않는다. 특정 글자 수를 채우거나 원문 대비 비율을 맞추는 것은
+있다. 저장 경계는 준비된 `source_binding`이 있으면 raw fingerprint와 span의 무손실
+coverage만 기계적으로 검증한다. inventory 구조의 의미, raw 제목의 의미적 일치,
+최종 Markdown 제목 포함 여부는 재검증하지 않는다. 특정 글자 수나 원문 대비 비율은
 통과 기준이 아니다.
 
 최종 학습 자료에는 PDF 이미지가 포함되지 않는다. 따라서 그림, 도표, 이미지의 시각 정보에 의존하는 기본 문제는 만들면 안 된다. 그림 설명이나 캡션이 요약에 포함되더라도 그 요약 텍스트만으로 충분히 답할 수 있을 때만 문제화한다.
@@ -149,9 +165,10 @@ Markdown에 반드시 반영한다. 제목을 합치거나 생략하거나 순�
 
 챕터 요약 저장은 요약, 핵심 포인트, 활성 기본 문제 유형, 유효한
 `section_inventory`, `passed` 상태의 `summary_review`가 모두 준비됐을 때만 완료다.
-여기서 inventory는 요약 생성에 사용한 객체의 존재만 확인하며 구조를 다시 검증하지
-않는다. 검토는 원문과 초안을 대조하고 챕터 전체의 중요한 누락·왜곡 배열이 비어
-있어야 한다. 확장 문제 저장은
+현재 workflow의 inventory에는 `get_section_content`가 만든 `source_binding`과 section
+span이 포함된다. 서버는 이 binding이 canonical raw와 같고 모든 region이 원문을 정확히
+한 번 덮는지 확인한다. 구형 inventory는 입력 호환을 위해 계속 받을 수 있다. 검토는
+원문과 초안을 대조하고 챕터 전체의 중요한 누락·왜곡 배열이 비어 있어야 한다. 확장 문제 저장은
 `questions.extension`이 비어 있지 않을 때만 완료다.
 
 최종 렌더링은 완료된 결과만 자료에 넣는다. 미완료 결과가 있어도 완료분 자료를 만들되,

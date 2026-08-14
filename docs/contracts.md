@@ -127,7 +127,7 @@ text 품질이 신뢰 불가면 추출 form은 OCR만 허용하고 그 이유를
 `get_subagent_prompts(work_id)`는 챕터 설정이 완료된 작업에서만 구조 inventory
 프롬프트, 요약 프롬프트, 독립 검토 프롬프트, 기본 문제 프롬프트, 호환용 결합
 요약자 프롬프트, 확장 문제 프롬프트와 처리 순서를 함께 반환한다. 응답 키는
-`section_inventory_prompt`, `summary_prompt`, `review_prompt`,
+`section_inventory_prompt`, `section_review_prompt`, `summary_prompt`, `review_prompt`,
 `basic_question_prompt`, `summarizer_prompt`, `extension_prompt`다. 기존
 `content_map_prompt`는 같은 section inventory 프롬프트를 반환하는 호환 alias다.
 `summary_pending_chapter_ids`,
@@ -138,7 +138,9 @@ workflow와 `next_action`은 실제 pending 결과 유형만 안내한다. 두 �
 `list_pending_chapters`를 호출한 뒤 `finalize_study(work_id)`로 진행한다. 요약
 pending 챕터는 raw `text`와 `char_count`를 검증한다. 요약은 완료되고 확장 문제만
 pending인 챕터는 raw 대신 저장된 `summary`, `key_points`, `source_char_count`를
-검증한다.
+검증한다. summary pending의 정확한 순서는 `get_chapter_content →
+section_inventory_prompt → 조건부 section_review_prompt → get_section_content → summary_prompt → review_prompt →
+basic_question_prompt → save_chapter_result`다.
 
 pending 판정의 정확한 상태 매핑은 다음과 같다.
 
@@ -146,7 +148,26 @@ pending 판정의 정확한 상태 매핑은 다음과 같다.
 - `pending`, `failed`, `in_progress` → pending: 해당 결과의 pending 목록에 포함한다.
 - 확장 문제가 비활성인 작업 → `extension_pending_chapter_ids=[]`: 각 챕터의 `extension_status`와 무관하게 항상 빈 목록을 반환한다.
 
-`get_chapter_content(work_id, chapter_id)`는 챕터 입력을 반환한다. text 모드와 OCR 모드 모두 `text`가 들어간다. OCR 모드의 `text`는 `set_chapters` 시점에 PaddleOCR CPU로 선계산해 `chapters_raw/chN.json`에 저장한 본문이다. 등록되지 않은 `chapter_id`, skip 챕터, 아직 챕터가 설정되지 않은 작업은 실패한다.
+`get_chapter_content(work_id, chapter_id)`는 챕터 입력을 반환한다. text 모드와 OCR 모드 모두 `text`가 들어간다. OCR 모드의 `text`는 `set_chapters` 시점에 PaddleOCR CPU로 선계산해 `chapters_raw/chN.json`에 저장한 본문이다. 응답의 `section_candidates`는 서버가 full-line 번호 형태로 넓게 찾은 exact `text`와 1-based `occurrence` 목록이며 최종 section 판정이 아니다. 등록되지 않은 `chapter_id`, skip 챕터, 아직 챕터가 설정되지 않은 작업은 실패한다.
+
+`get_section_content(work_id, chapter_id, section_inventory, section_review?)`는 canonical raw text를
+inventory의 원문 anchor 경계로 무손실 분할한다. 명시적인 section의 `source_anchor`는
+원문 줄 시작에서 시작하고 줄 경계에서 끝나는 full-line exact match `text`와 1-based
+`occurrence`를 가진다. inventory의 모든 번호형 후보 occurrence는 section anchor 또는
+허용된 사유의 `candidate_exclusions`로 설명돼야 한다. 챕터 전체 판정이나 후보 제외가
+있으면 `section_review`가 `chapter_text`, `section_inventory`, `section_candidates`를
+대조한 `passed` 결과여야 하며 누락·오등록·계층·미해결 후보 배열이 모두 비어 있어야
+한다. 이 조건을 만족하지 않으면 `data.invalid_fields`, 후보와 재검토 안내를 반환하고
+상태를 완료로 바꾸지 않는다. 서버는 anchor offset을 오름차순으로 확정하고 preamble부터
+마지막 문자까지 빈틈·중복 없는 region을
+만든다. 성공 응답은 `structured_sections[].source_text`, `source_span`, 고정 heading·
+계층과, raw `source_sha256`·`source_char_count`·region span을 담은
+`section_inventory.source_binding`을 반환한다. inventory에는 원문 복사본을 넣지 않는다.
+후보 제외와 section review는 준비 단계의 감사 증거이며 성공 응답의 저장용 결합
+inventory에는 남기지 않는다.
+anchor가 없거나 찾을 수 없거나 순서가 뒤집히면 상태를 바꾸지 않고
+`data.invalid_fields`로 실패한다. 명시적인 서브 챕터가 없는 inventory는 anchor 없이
+canonical text 전체를 `kind=chapter` region 하나로 반환한다.
 
 `get_chapter_summary(work_id, chapter_id)`는 완료·저장된 `summary`,
 `key_points`, 원문 문제 개수 상한 계산용 `source_char_count`, `chapter_id`와
@@ -158,20 +179,23 @@ pending 판정의 정확한 상태 매핑은 다음과 같다.
 `save_chapter_result(work_id, chapter_id, data)`는 요약과 기본 문제를 저장한다.
 `summary`는 비어 있지 않은 문자열, `key_points`는 비어 있지 않은 문자열 배열이어야
 한다. 또한 전체 챕터에서 만든 `section_inventory`와 `summary_review`가 필수다.
-`section_inventory`는 요약 전에 분석한 구조를 요약 생성기에 전달했다는 증거로 객체
-형태만 요구한다. 생성 프롬프트는 `sections`의 모든 명시적 서브 챕터를 원래 제목·
-순서·상대 계층에 맞는 Markdown 제목으로 반드시 작성하게 한다. inventory에는 요약할
-내용이나 중요 point 목록을 넣지 않는다. 요약이 생성된 뒤 서버는 inventory 내부
-구조, canonical raw의 번호형 제목과의 일치, 최종 Markdown heading 포함 여부를
-재검증하지 않는다.
+현재 workflow의 `section_inventory`는 `get_section_content`가 raw에 결합한 객체를
+사용한다. 생성 프롬프트는 `structured_sections`의 모든 canonical `source_text`를 읽고
+명시적 서브 챕터를 원래 제목·순서·상대 계층에 맞는 Markdown 제목으로 작성하게 한다.
+inventory에는 원문 복사본이나 중요 point 목록을 넣지 않는다. 준비된
+`source_binding`이 있으면 저장 시 raw hash·글자 수·region의 연속 coverage와 section
+span 일치를 검증한다. 이 검사는 입력 원문 무손실성만 확인하며 inventory 구조의 의미,
+canonical raw 제목의 의미적 일치, 최종 Markdown heading 포함 여부는 재검증하지 않는다.
+구형 binding 없는 inventory는 입력 호환을 위해 계속 허용한다.
 
 `summary_review.status`는 `passed`여야 하고 `reviewed_against`는 `chapter_text`,
 `draft_summary`만 포함해야 한다. 최상위 `missing_significant_content`, `distortions`는
 모두 빈 배열이어야 한다. 검토 단계는 section 구조·제목·순서·계층을 다시 검증하지
 않는다. 구형 `section_reviews`와 coverage id는 입력 호환을 위해 허용하지만 저장 전에
 제거한다. 요약 품질에 고정 글자 수나 압축률 제한은 적용하지 않는다. 구형 클라이언트가
-`content_map`을 보내면 서버는 저장 전에 구조 정보만 `section_inventory`로 변환하고
-`important_points`도 저장하지 않는다.
+`content_map`을 보내면 서버는 저장 전에 구조 정보만 `section_inventory`로 변환한다.
+`important_points`, `content`, `source_text`처럼 원문을 중복 저장할 수 있는 section
+필드는 canonical 저장 전에 제거한다.
 Agent가 `source_char_count`를 보내도 서버는 저장 전에 raw `char_count`가 실제
 `text` 길이 및 상태 값과 같은지 검증하고 그 값으로 덮어쓴다. 분리 workflow에서는
 학습자 정보를 inventory·요약·전체 의미 검토 프롬프트에 주입하지 않고 기본·확장 문제의 난이도·

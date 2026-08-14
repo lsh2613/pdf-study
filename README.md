@@ -13,7 +13,9 @@
 
 ```text
 init_work → scan_pdf → set_chapters → get_subagent_prompts →
-get_chapter_content → 요약 생성·검토 → 요약 기반 기본 문제 → save_chapter_result →
+get_chapter_content → section 후보를 감사한 section_inventory 생성 →
+조건부 section_review → get_section_content →
+structured section 요약·전체 원문 검토 → 요약 기반 기본 문제 → save_chapter_result →
 (extension이면 get_chapter_summary → save_extension_result) →
 list_pending_chapters → finalize_study
 ```

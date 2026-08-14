@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from pdf_learner import question_contract, server, workspace
+from pdf_learner import question_contract, section_source, server, workspace
 from .conftest import (
     cleanup_test_work,
     ElicitationContext,
@@ -723,6 +723,283 @@ def test_get_chapter_content_marks_summary_in_progress(tmp_path, ko_short):
     server.get_chapter_content(wid, "ch1")
     assert workspace.load_state(wid)["chapters"]["ch1"]["summary_status"] == "completed"
 
+
+def test_get_chapter_content_includes_numbered_section_candidates(
+    tmp_path, ko_short, monkeypatch,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_candidates"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    text = "소개\n1. 설치\n본문\n2) 실행\n본문"
+    monkeypatch.setattr(
+        server.analysis,
+        "get_chapter_content_impl",
+        lambda *_: {"chapter_id": "ch1", "text": text, "char_count": len(text)},
+    )
+
+    response = server.get_chapter_content(wid, "ch1")
+
+    assert response["ok"] is True
+    assert response["data"]["section_candidates"] == [
+        {"text": "1. 설치", "occurrence": 1},
+        {"text": "2) 실행", "occurrence": 1},
+    ]
+
+
+def test_get_section_content_returns_canonical_partition(
+    tmp_path, ko_short, monkeypatch,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_sections"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    text = "도입\n1.1 설치\n설치 본문\n1.2 실행\n실행 본문"
+    monkeypatch.setattr(
+        server.analysis,
+        "get_chapter_content_impl",
+        lambda *_: {"chapter_id": "ch1", "text": text, "char_count": len(text)},
+    )
+    inventory = {
+        "has_explicit_subchapters": True,
+        "sections": [{
+            "id": "section_1",
+            "heading": "1.1 설치",
+            "level": 1,
+            "parent_id": None,
+            "explicit_subchapter": True,
+            "source_anchor": {"text": "1.1 설치", "occurrence": 1},
+        }, {
+            "id": "section_2",
+            "heading": "1.2 실행",
+            "level": 1,
+            "parent_id": None,
+            "explicit_subchapter": True,
+            "source_anchor": {"text": "1.2 실행", "occurrence": 1},
+        }],
+    }
+
+    response = server.get_section_content(wid, "ch1", inventory)
+
+    assert response["ok"] is True, response
+    assert "".join(
+        region["source_text"]
+        for region in response["data"]["structured_sections"]
+    ) == text
+    assert response["data"]["section_inventory"]["source_binding"]
+    assert "summary_prompt" in response["next_action"]
+    assert "review_prompt" in response["next_action"]
+
+
+def test_get_section_content_reports_invalid_anchor(
+    tmp_path, ko_short, monkeypatch,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_bad_sections"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    text = "1.1 설치\n본문"
+    monkeypatch.setattr(
+        server.analysis,
+        "get_chapter_content_impl",
+        lambda *_: {"chapter_id": "ch1", "text": text, "char_count": len(text)},
+    )
+    inventory = {
+        "has_explicit_subchapters": True,
+        "sections": [{
+            "id": "section_1",
+            "heading": "1.1 설치",
+            "level": 1,
+            "parent_id": None,
+            "explicit_subchapter": True,
+            "source_anchor": {"text": "없는 제목", "occurrence": 1},
+        }],
+    }
+
+    response = server.get_section_content(wid, "ch1", inventory)
+
+    assert response["ok"] is False
+    assert response["data"]["invalid_fields"] == [
+        "section_inventory.sections[0].source_anchor.match",
+    ]
+    assert "section_inventory_prompt" in response["next_action"]
+
+
+def test_get_section_content_rejects_unaccounted_heading_candidates(
+    tmp_path, ko_short, monkeypatch,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_candidate_gap"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    text = "소개\n1.1 설치\n본문\n1.2 실행\n본문"
+    monkeypatch.setattr(
+        server.analysis,
+        "get_chapter_content_impl",
+        lambda *_: {"chapter_id": "ch1", "text": text, "char_count": len(text)},
+    )
+    inventory = {
+        "has_explicit_subchapters": False,
+        "sections": [{
+            "id": "chapter_full",
+            "heading": "챕터 전체",
+            "level": 1,
+            "parent_id": None,
+            "explicit_subchapter": False,
+        }],
+        "candidate_exclusions": [],
+    }
+
+    response = server.get_section_content(wid, "ch1", inventory)
+
+    assert response["ok"] is False
+    assert "section_inventory.candidate_audit.unaccounted" in (
+        response["data"]["invalid_fields"]
+    )
+    assert response["data"]["unaccounted_candidates"] == [
+        {"text": "1.1 설치", "occurrence": 1},
+        {"text": "1.2 실행", "occurrence": 1},
+    ]
+
+
+def test_get_section_content_conditionally_requires_inventory_review(
+    tmp_path, ko_short, monkeypatch,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_section_review"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    text = "목차\n1.1 설치\n\n1.1 설치\n설치 본문"
+    monkeypatch.setattr(
+        server.analysis,
+        "get_chapter_content_impl",
+        lambda *_: {"chapter_id": "ch1", "text": text, "char_count": len(text)},
+    )
+    inventory = {
+        "has_explicit_subchapters": True,
+        "sections": [{
+            "id": "install",
+            "heading": "1.1 설치",
+            "level": 1,
+            "parent_id": None,
+            "explicit_subchapter": True,
+            "source_anchor": {"text": "1.1 설치", "occurrence": 2},
+        }],
+        "candidate_exclusions": [{
+            "source_anchor": {"text": "1.1 설치", "occurrence": 1},
+            "reason": "toc_fragment",
+        }],
+    }
+
+    missing_review = server.get_section_content(wid, "ch1", inventory)
+    passed_review = server.get_section_content(
+        wid,
+        "ch1",
+        inventory,
+        section_review=section_source.section_review_example(),
+    )
+
+    assert missing_review["ok"] is False
+    assert missing_review["data"]["review_required"] is True
+    assert missing_review["data"]["invalid_fields"] == ["section_review"]
+    assert "section_review_prompt" in missing_review["next_action"]
+    assert passed_review["ok"] is True, passed_review
+    assert "candidate_exclusions" not in passed_review["data"]["section_inventory"]
+
+
+def test_get_section_content_requires_review_for_whole_chapter_without_candidates(
+    tmp_path, ko_short, monkeypatch,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_whole_review"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    text = "도입\n번호 없는 본문과 결론"
+    monkeypatch.setattr(
+        server.analysis,
+        "get_chapter_content_impl",
+        lambda *_: {"chapter_id": "ch1", "text": text, "char_count": len(text)},
+    )
+    inventory = {
+        "has_explicit_subchapters": False,
+        "sections": [{
+            "id": "chapter_full",
+            "heading": "챕터 전체",
+            "level": 1,
+            "parent_id": None,
+            "explicit_subchapter": False,
+        }],
+        "candidate_exclusions": [],
+    }
+
+    missing_review = server.get_section_content(wid, "ch1", inventory)
+    passed_review = server.get_section_content(
+        wid,
+        "ch1",
+        inventory,
+        section_review=section_source.section_review_example(),
+    )
+
+    assert missing_review["ok"] is False
+    assert missing_review["data"]["review_required"] is True
+    assert missing_review["data"]["section_candidates"] == []
+    assert missing_review["data"]["invalid_fields"] == ["section_review"]
+    assert passed_review["ok"] is True, passed_review
+
+
+def test_prepared_section_inventory_saves_against_same_canonical_raw(
+    tmp_path, ko_short,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_bound_save"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    inventory = {
+        "has_explicit_subchapters": False,
+        "sections": [{
+            "id": "section_1",
+            "heading": "챕터 전체",
+            "level": 1,
+            "parent_id": None,
+            "explicit_subchapter": False,
+        }],
+    }
+    prepared = server.get_section_content(
+        wid,
+        "ch1",
+        inventory,
+        section_review=section_source.section_review_example(),
+    )
+    data = _result()
+    data["section_inventory"] = prepared["data"]["section_inventory"]
+
+    response = server.save_chapter_result(wid, "ch1", data)
+
+    assert prepared["ok"] is True
+    assert response["ok"] is True, response
+
+
+def test_save_chapter_result_rejects_stale_prepared_section_binding(
+    tmp_path, ko_short,
+):
+    wid = _init(str(ko_short), str(tmp_path / "out_stale_binding"))["data"]["work_id"]
+    _scan(wid)
+    _sc(wid, [{"chapter_id": "ch1", "title": "전체", "pdf_pages": [1, 12]}])
+    raw = workspace.get_chapter_raw(wid, "ch1")
+    inventory = {
+        "has_explicit_subchapters": False,
+        "sections": [{
+            "id": "section_1",
+            "heading": "챕터 전체",
+            "level": 1,
+            "parent_id": None,
+            "explicit_subchapter": False,
+        }],
+    }
+    prepared = section_source.prepare_section_source(raw["text"], inventory)
+    data = _result()
+    data["section_inventory"] = prepared["section_inventory"]
+    data["section_inventory"]["source_binding"]["source_sha256"] = "0" * 64
+
+    response = server.save_chapter_result(wid, "ch1", data)
+
+    assert response["ok"] is False
+    assert "section_inventory.source_binding.source_sha256" in (
+        response["data"]["missing"]
+    )
 
 def test_get_chapter_content_ocr_returns_precomputed_text_without_lazy_ocr(
     tmp_path, ko_short, monkeypatch
@@ -1584,7 +1861,7 @@ def test_save_chapter_result_rejects_unknown_review_inputs(
     )
 
 
-def test_save_chapter_result_strips_points_from_canonical_inventory(
+def test_save_chapter_result_strips_transient_section_inventory_fields(
     tmp_path, ko_short,
 ):
     work_id = _init(
@@ -1597,11 +1874,16 @@ def test_save_chapter_result_strips_points_from_canonical_inventory(
         "id": "point_1",
         "content": "저장되면 안 되는 선별 데이터",
     }]
+    data["section_inventory"]["candidate_exclusions"] = [{
+        "source_anchor": {"text": "1.1 임시 후보", "occurrence": 1},
+        "reason": "not_a_heading",
+    }]
 
     response = server.save_chapter_result(work_id, "ch1", data)
 
     assert response["ok"] is True
     saved = workspace.get_chapter_summary(work_id, "ch1")
+    assert "candidate_exclusions" not in saved["section_inventory"]
     assert "important_points" not in saved["section_inventory"]["sections"][0]
 
 

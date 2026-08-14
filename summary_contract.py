@@ -37,7 +37,31 @@ def quality_payload_example() -> dict[str, Any]:
 
 
 def section_inventory_example() -> dict[str, Any]:
-    return quality_payload_example()["section_inventory"]
+    return {
+        "has_explicit_subchapters": True,
+        "sections": [{
+            "id": "section_1",
+            "heading": "1.1 원문의 첫 절",
+            "level": 1,
+            "parent_id": None,
+            "explicit_subchapter": True,
+            "source_anchor": {
+                "text": "1.1 원문의 첫 절",
+                "occurrence": 1,
+            },
+        }, {
+            "id": "section_2",
+            "heading": "1.1.1 원문의 하위 절",
+            "level": 2,
+            "parent_id": "section_1",
+            "explicit_subchapter": True,
+            "source_anchor": {
+                "text": "1.1.1 원문의 하위 절",
+                "occurrence": 1,
+            },
+        }],
+        "candidate_exclusions": [],
+    }
 
 
 def content_map_example() -> dict[str, Any]:
@@ -122,14 +146,23 @@ def _legacy_section_inventory(content_map: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sanitize_section_inventory(inventory: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(inventory)
+    normalized = {
+        key: value
+        for key, value in inventory.items()
+        if key not in {
+            "content",
+            "source_text",
+            "structured_sections",
+            "candidate_exclusions",
+        }
+    }
     sections = inventory.get("sections")
     if isinstance(sections, list):
         normalized["sections"] = [
             {
                 key: value
                 for key, value in section.items()
-                if key != "important_points"
+                if key not in {"important_points", "source_text", "content"}
             }
             if isinstance(section, dict) else section
             for section in sections

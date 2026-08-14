@@ -45,6 +45,14 @@ def test_choice_tools_expose_only_non_choice_public_parameters():
     assert properties["get_chapter_summary"] == {"work_id", "chapter_id"}
 
 
+def test_section_content_tool_exposes_partition_and_conditional_review_inputs():
+    properties = _mcp_input_properties()
+
+    assert properties["get_section_content"] == {
+        "work_id", "chapter_id", "section_inventory", "section_review",
+    }
+
+
 def test_choice_workflows_have_only_elicitation_python_entrypoints():
     choice_workflows = {
         "init_work",
