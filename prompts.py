@@ -106,6 +106,25 @@ section_inventory로 정리하세요. 이 단계에서는 내용을 요약하지
 # 기본 문제 작성 기준
 #   기본 문제는 먼저 만든 요약으로 검증 가능한 학습 확인용 문제다.
 # ---------------------------------------------------------------------------
+QUESTION_SELF_CONTAINEDNESS_GUIDELINES = """\
+[문제 문장 독립성]
+- 학습자가 요약을 다시 열어 문제의 대상·의도·조건을 보충하지 않아도, `question`
+  한 문장만 읽고 무엇을 답하거나 판단해야 하는지 이해할 수 있게 쓰세요. 요약은
+  문제 문맥을 보충하는 자료가 아니라 정답·해설·model_answer의 근거입니다.
+- 모든 문제에는 묻는 실제 개념·대상·상황을 이름으로 넣고, 답의 범위를 정하는 데
+  필요한 조건을 question 안에 함께 제시하세요. 객관식은 보기만 읽어야 주제를
+  알 수 있게 만들지 마세요.
+- `챕터 핵심 내용으로 옳은 설명은?`, `핵심 원칙을 설명하시오.`, `위 내용에 따르면`,
+  `이 챕터에서`, `실무 적용 시 무엇을 우선 점검하겠는가?`처럼 제목·요약·앞선
+  문맥을 가리키기만 하는 일반 템플릿은 사용하지 마세요.
+- 단답형·주관식·확장형도 특정 개념 또는 구체적 상황을 question에 명시하세요.
+  예를 들어 "핵심 원칙" 대신 해당 원칙의 이름과 적용 조건을 물으세요.
+- 각 문제를 만든 뒤 summary와 key_points를 숨긴 상태에서도 학습자가 문제의
+  대상, 해야 할 판단 또는 답변, 필요한 조건을 알 수 있는지 점검하세요. 하나라도
+  빠졌으면 question을 다시 쓰세요.
+""".strip()
+
+
 BASIC_QUESTION_GUIDELINES = """\
 [기본 문제 작성 기준 — 요약만 사용]
 - 모든 객관식/단답형/주관식 문제는 먼저 확정한 summary와 key_points만으로 정답, 해설,
@@ -123,7 +142,9 @@ BASIC_QUESTION_GUIDELINES = """\
 - 학습자 컨텍스트는 난이도, 용어 수준, 예시의 친숙도, 문제 관점을 조정하는 데
   사용하되, 위의 요약 근거 제한보다 우선하지 않습니다.
 - 요약에 좋은 문제를 만들 근거가 부족하면 문제 수를 줄이세요. 원문에서 근거를
-  보충해 최대 개수를 채우면 안 됩니다.""".strip()
+  보충해 최대 개수를 채우면 안 됩니다.
+
+{question_self_containedness_block}""".strip()
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +165,9 @@ EXTENSION_GUIDELINES = """\
   key_points와 학습자 컨텍스트만으로 문제를 만드세요.
 - 원문 text를 받거나 다시 읽지 마세요. summary 또는 key_points에 없는 원문 세부
   사실을 문제나 model_answer의 근거로 사용하지 마세요.
-- 최신 사실이나 별도 출처를 알아야만 답할 수 있는 문제 대신, 필요한 상황과 조건을
-  question 안에 충분히 제시해 스스로 완결된 문제를 만드세요.""".strip()
+- 최신 사실이나 별도 출처를 알아야만 답할 수 있는 문제를 만들지 마세요.
+
+{question_self_containedness_block}""".strip()
 
 
 # ---------------------------------------------------------------------------
@@ -532,11 +554,14 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         semantic_completeness_block=SEMANTIC_COMPLETENESS_GUIDELINES,
         summary_only_json_example=summary_only_json_example,
     )
+    basic_question_guidelines = BASIC_QUESTION_GUIDELINES.format(
+        question_self_containedness_block=QUESTION_SELF_CONTAINEDNESS_GUIDELINES,
+    )
     basic_question_prompt = _BASIC_QUESTIONS.format(
         user_context_block=user_context_block,
         enabled_basic_types_block=enabled_basic_types_block,
         scales_table=QUESTION_SCALES_TABLE,
-        question_guidelines_block=BASIC_QUESTION_GUIDELINES,
+        question_guidelines_block=basic_question_guidelines,
         basic_questions_json_example=basic_questions_json_example,
     )
     summarizer_prompt = _SUMMARIZER_COMPAT.format(
@@ -547,7 +572,7 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         input_mode_block=input_mode_block,
         summary_format_block=SUMMARY_FORMAT,
         semantic_completeness_block=SEMANTIC_COMPLETENESS_GUIDELINES,
-        question_guidelines_block=BASIC_QUESTION_GUIDELINES,
+        question_guidelines_block=basic_question_guidelines,
         summary_json_example=summary_json_example,
     )
     review_prompt = _SUMMARY_REVIEW.format(
@@ -559,10 +584,13 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         extension_json_example = json.dumps(
             question_contract.extension_payload_example(), ensure_ascii=False, indent=2,
         )
+        extension_guidelines = EXTENSION_GUIDELINES.format(
+            question_self_containedness_block=QUESTION_SELF_CONTAINEDNESS_GUIDELINES,
+        )
         extension_prompt = _EXTENSION.format(
             user_context_block=user_context_block,
             scales_table=QUESTION_SCALES_TABLE,
-            extension_guidelines_block=EXTENSION_GUIDELINES,
+            extension_guidelines_block=extension_guidelines,
             extension_json_example=extension_json_example,
         )
 

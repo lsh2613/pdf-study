@@ -262,6 +262,21 @@ def test_basic_question_guidelines_ground_questions_in_reviewed_summary():
     assert "요약 근거 제한보다" in prompt
 
 
+def test_question_prompts_require_self_contained_question_stems():
+    out = prompts.build_prompts(_state())
+
+    for prompt in (
+        out["basic_question_prompt"],
+        out["summarizer_prompt"],
+        out["extension_prompt"],
+    ):
+        assert "[문제 문장 독립성]" in prompt
+        assert "요약을 다시 열어 문제의 대상·의도·조건을 보충하지 않아도" in prompt
+        assert "챕터 핵심 내용으로 옳은 설명은?" in prompt
+        assert "핵심 원칙을 설명하시오." in prompt
+        assert "summary와 key_points를 숨긴 상태에서도" in prompt
+
+
 def test_extension_guidelines_use_chapter_and_user_context_without_search():
     prompt = prompts.build_prompts(_state())["extension_prompt"]
     assert "[확장 문제 작성 기준 — 요약만 사용]" in prompt
