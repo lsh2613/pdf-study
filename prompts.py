@@ -94,6 +94,12 @@ section_inventory로 정리하세요. 이 단계에서는 내용을 요약하지
 - `3장을 참고`, `앞 장에서 설명했듯이`, `2.1에서 살펴본`처럼 문장 안의 단순 언급,
   인용·교차 참조, 목록 번호, 표·그림 번호, 페이지 머리말·꼬리말, 목차 조각의 반복은
   현재 챕터의 서브 챕터로 등록하지 마세요.
+- 챕터 첫머리에서 본문 없이 제목만 연속되고 같은 제목들이 뒤에서 본문과 함께 다시
+  나타나면, 앞의 연속 블록은 미니 목차입니다. 앞 occurrence는 `toc_fragment`로
+  제외하고 실제 설명이 시작되는 뒤 occurrence를 section anchor로 선택하세요.
+- 번호형 제목은 번호 구성요소의 깊이를 계층의 강한 단서로 사용하세요. 예를 들어
+  `2.1`, `2.1.1`, `2.1.1.1`은 특별히 반대되는 원문 구조가 없는 한 각각 상대 level
+  1, 2, 3입니다. 제목을 많이 찾았다는 이유로 모두 level=1로 평탄화하지 마세요.
 - 명시적인 서브 챕터가 하나라도 있으면 `has_explicit_subchapters=true`로 두고 모든
   실제 서브 챕터를 원래 순서대로 기록하세요. `level`은 현재 챕터 안의 상대 깊이를
   1부터 시작하고, `parent_id`로 가장 가까운 상위 section을 연결하세요.
@@ -255,6 +261,99 @@ chapter_text 전체, 작성된 section_inventory, 서버가 제공한 section_ca
 {section_review_json_example}
 """
 
+
+# section source를 작은 생성 단위로 읽고 실제 설명 초안을 만드는 새 기본 프롬프트다.
+# 최종 Markdown 조립은 _CHAPTER_SYNTHESIS가 담당한다.
+_SECTION_SUMMARY = """\
+당신은 PDF 학습 자료의 section별 설명 초안을 작성하는 어시스턴트입니다.
+입력으로 get_section_content가 반환한 structured_sections의 **한 개 또는 서로
+인접한 작은 생성 단위 묶음**만 받습니다. 보통은 region 경계를 그대로
+사용하지만, `kind=chapter`인 챕터 전체 region을 포함해 단일 region 하나가
+한 번의 안전한 생성 문맥을 넘어서는 크기라면 그 region을 안정적인 문단
+경계 또는 full-line 경계에서 순서대로 분할한 fragment를 입력 단위로 사용할
+수 있습니다. 임의의 글자 위치에서 자르지 마세요. 챕터 전체 structured_sections를
+한 번에 처리하지 마세요. 각 입력 region 또는 fragment의 source_text 전체를
+직접 읽고, 그 범위에서 학습해야 할 실제 내용을
+한국어 설명으로 작성하세요. 문제와 챕터 전체 key_points는 아직 만들지 마세요.
+
+[책 정보]
+{book_info_block}
+
+{input_mode_block}
+
+[section 초안 작성 기준]
+- 입력 region 또는 fragment의 순서를 유지하고 각 입력 단위마다 정확히 하나의
+  section_drafts 항목을 작성하세요. kind, section_id, source_span,
+  fragment_index, fragment_count는 입력 값을 그대로 복사하세요. 분할하지 않은
+  region은 `fragment_index=1`, `fragment_count=1`입니다.
+- 큰 단일 region을 분할할 때는 모든 fragment에 원래 kind과 section_id를
+  그대로 유지하세요. 각 source_span은 원래 region 내의 실제 부분 span으로
+  조정하고, fragment_index는 1부터 fragment_count까지 증가해야 합니다.
+  fragment의 source_text를 순서대로 연결한 결과가 원래 region의 source_text와
+  문자 단위로 같아야 하며, source_span도 원래 source_span 전체를 빈틈과
+  중복 없이 정확한 순서로 한 번씩 덮어야 합니다. 경계의 개행 문자도
+  빼거나 두 번 넣지 마세요.
+- `kind=section`은 해당 section의 실제 개념·절차·조건·예외·비교·주의사항과 중요한
+  근거·사례를 source_text에 근거해 직접 설명하세요.
+- `kind=preamble`은 챕터 도입과 전체 흐름에 필요한 내용만 설명하고 새 section 제목을
+  만들지 마세요. `kind=chapter`는 명시적 하위 절이 없는 전체 본문으로 읽으세요.
+- 원문에 있는 서로 다른 의미·전제·단계·예외를 짧게 만들기 위해 버리지 마세요.
+  반복과 장식적 표현은 줄일 수 있으며 특정 글자 수나 압축률은 목표가 아닙니다.
+- 제목이나 주제만 다시 말하는 메타 설명은 내용 요약이 아닙니다. 특히
+  `이 절은 무엇을 다룬다`, `원문 구조에 따라 복습한다`, `위 제목 아래의 내용을 설명한다`처럼 실제
+  지식을 전달하지 않는 문장을 쓰지 마세요.
+- 최종 Markdown 제목은 다음 chapter_synthesis_prompt가 section_inventory로 조립합니다.
+  여기서는 초안 내용 안에 제목을 반복하지 마세요.
+
+[출력 형식 — JSON]
+반드시 다음 스키마의 JSON 객체 하나만 반환하세요. 코드펜스는 사용하지 마세요.
+
+{section_drafts_json_example}
+"""
+
+
+_CHAPTER_SYNTHESIS = """\
+당신은 section별로 근거를 확인해 작성한 초안을 하나의 PDF 학습용 요약으로 통합하는
+어시스턴트입니다. 입력은 section_inventory와 순서대로 완성된 section_drafts입니다.
+원문 본문을 다시 받거나 읽지 말고, section draft에 없는 사실을 새로 추가하지 마세요.
+문제는 만들지 마세요.
+
+[책 정보]
+{book_info_block}
+
+[통합 기준]
+- section_drafts를 원래 region 순서와 fragment_index 순서대로 유지하고 모든 section draft의
+  실제 설명을 최종 summary에 반영하세요. 내용을 빈 문구나
+  주제 소개로 바꾸거나 draft를 합쳐서 없애지 마세요.
+- 같은 section_id를 가진 여러 fragment draft는 fragment_index 순서대로 하나의
+  section 설명으로 이어 붙이세요. inventory 표제는 한 번만 Markdown 제목으로
+  쓰고 fragment마다 같은 제목을 반복하지 마세요. `kind=chapter`의 여러 draft도
+  순서대로 하나의 챕터 설명으로 통합하고 원문에 없던 하위 제목을 만들지
+  마세요.
+- `kind=preamble`의 설명은 첫 Markdown 제목 전에 챕터 도입으로 반영합니다.
+- 명시적인 section은 inventory의 heading을 그대로 Markdown 제목으로 쓰고 level과
+  parent_id의 상대 계층을 제목 단계로 보존하세요. 제목을 합치거나 생략하거나 다른
+  제목으로 바꾸지 마세요.
+- 명시적인 하위 절이 없는 `kind=chapter` 초안에는 원문에 없던 하위 제목을 만들지
+  마세요. 가독성은 문단·목록·표로 개선하세요.
+- section 사이의 중복 표현은 정리할 수 있지만 서로 다른 개념·절차·조건·예외·근거는
+  유지하세요. 특정 글자 수나 원문 대비 압축률을 목표로 삼지 마세요.
+- key_points는 모든 draft를 통합한 뒤 챕터 전체에서 복습 가치가 큰 내용으로 만드세요.
+- 이미지는 넣지 말고 필요한 시각 정보는 draft에 있는 설명 범위에서 글이나 표로
+  표현하세요.
+
+[출력 형식 — JSON]
+반드시 다음 스키마의 JSON 객체 하나만 반환하세요. 객체 전체 코드펜스는 금지하지만
+summary 값 안에서는 Markdown을 사용할 수 있습니다.
+
+{summary_only_json_example}
+
+아직 save_chapter_result를 호출하지 마세요. review_prompt가 전체 원문과 이
+초안의 의미 보존을 대조해 passed를 반환한 뒤에만 basic_question_prompt로 넘어갑니다.
+"""
+
+
+# 전체 structured_sections를 한 번에 처리하는 구형 클라이언트용 호환 프롬프트다.
 _SUMMARY = """\
 당신은 PDF 학습 자료를 만드는 어시스턴트입니다.
 원문 언어와 무관하게 get_section_content가 반환한 structured_sections와
@@ -326,7 +425,8 @@ _BASIC_QUESTIONS = """\
 
 
 # 기존 클라이언트가 summarizer_prompt만 읽어도 요약 기반 문제를 만들도록 유지하는
-# 결합 프롬프트다. 새 workflow는 summary_prompt와 basic_question_prompt를 분리한다.
+# 결합 프롬프트다. 새 workflow는 section_summary_prompt,
+# chapter_synthesis_prompt와 basic_question_prompt를 분리한다.
 _SUMMARIZER_COMPAT = """\
 당신은 PDF 학습 자료를 만드는 어시스턴트입니다.
 get_section_content가 반환한 structured_sections와 section_inventory로 먼저 summary와
@@ -368,8 +468,8 @@ section 본문입니다. 정해진 순서·제목·계층을 유지하고 모든
 {summary_json_example}
 
 비활성화된 유형은 해당 키를 빈 배열([])로 두세요. 키 자체는 유지합니다.
-새 workflow에서는 이 호환 프롬프트 대신 summary_prompt와 basic_question_prompt를
-분리해 사용합니다.
+새 workflow에서는 이 호환 프롬프트 대신 section_summary_prompt,
+chapter_synthesis_prompt와 basic_question_prompt를 분리해 사용합니다.
 """
 
 
@@ -447,14 +547,21 @@ WORKFLOW_INSTRUCTIONS_SEQUENTIAL = """\
       inventory를 고쳐 한 번 더 검토하고, passed 결과를 section_review로 준비
    d. get_section_content(work_id, chapter_id, section_inventory, 필요 시 section_review)를 호출해 canonical
       원문에서 무손실 structured_sections와 span이 결합된 section_inventory 받기
-   e. structured_sections와 결합된 section_inventory만 summary_prompt에 전달해
-      정해진 section 순서·제목·계층을 유지한 summary·key_points 초안 작성
-   f. 가능하면 작성자와 분리된 검토자가 review_prompt로 전체 text와 초안의 의미를 대조
-   g. needs_revision이면 요약 누락·왜곡 피드백을 반영해 고치고
+   e. structured_sections를 한 개 또는 서로 인접한 작은 생성 단위 묶음으로
+      나누고, 큰 단일 region(`kind=chapter` 포함)은 안정적인 문단 또는 full-line
+      경계에서 순서대로 무손실 fragment로 분할. kind와 section_id를 유지하고
+      fragment_index·fragment_count를 붙인 뒤, 원래 region의 text와 span 전체를
+      빈틈·중복 없이 덮는지 확인. 챕터 전체를 한 번에 넘기지 말고 각
+      묶음을 section_summary_prompt로 처리해 모든 단위의 section_drafts 작성
+   f. get_section_content가 반환한 section_inventory와 순서대로 모은 모든
+      section_drafts만 chapter_synthesis_prompt에 전달해 Markdown summary·key_points 작성.
+      이 통합 단계에는 source_text나 전체 text를 전달하지 않기
+   g. 가능하면 작성자와 분리된 검토자가 review_prompt로 전체 text와 초안의 의미를 대조
+   h. needs_revision이면 요약 누락·왜곡 피드백을 반영해 고치고
       다시 검토(최대 2회)
-   h. passed이면 별도 문제 생성 단계에 원문 text와 section_inventory를 전달하지 말고,
+   i. passed이면 별도 문제 생성 단계에 원문 text와 section_inventory를 전달하지 말고,
       summary·key_points·source_char_count만 basic_question_prompt에 전달
-   i. 요약, 문제, get_section_content가 결합한 section_inventory, summary_review를 하나의 payload로 합쳐
+   j. 요약, 문제, get_section_content가 결합한 section_inventory, summary_review를 하나의 payload로 합쳐
       save_chapter_result(work_id, chapter_id, data)로 저장
    검토가 통과하지 않으면 불완전한 초안을 저장하지 않기
 3) extension_pending_chapter_ids에 있으면 요약 저장이 끝난 뒤
@@ -471,10 +578,20 @@ WORKFLOW_INSTRUCTIONS_PARALLEL = """\
 - 각 sub-agent는 chapter_id가 summary_pending_chapter_ids와
   extension_pending_chapter_ids에 각각 포함되는지 먼저 확인합니다.
 - summary pending이면 챕터별로 get_chapter_content → section_inventory_prompt →
-  조건부 section_review_prompt → get_section_content → summary_prompt → review_prompt 순서를 지킵니다.
+  조건부 section_review_prompt → get_section_content → section_summary_prompt 반복 →
+  chapter_synthesis_prompt → review_prompt 순서를 지킵니다.
   챕터 전체 판정 또는 candidate_exclusions가 있으면 section 검토를 통과해야 합니다. summary에는
-  structured_sections와 결합된 section_inventory만 전달합니다. review가 needs_revision이면
-  요약 누락·왜곡 피드백을 반영해 최대 2회 다시 검토합니다.
+  structured_sections 전체를 한 번에 전달하지 않습니다. 보통은 region 경계를
+  유지한 한 개 또는 인접한 작은 묶음을 쓰되, 큰 단일 region(`kind=chapter`
+  포함)은 안정적인 문단 또는 full-line 경계의 순서대로 무손실 fragment로
+  분할하세요. 모든 fragment는 kind·section_id를 유지하고
+  fragment_index·fragment_count를 갖으며 원래 region을 빈틈·중복 없이 덮어야
+  합니다. 각 묶음은 section_summary_prompt로 실제 설명 draft를 만드세요. 서로 독립적인
+  묶음은 제한된 수로 동시에 처리할 수 있지만, 결과는 원래 region 순서와
+  fragment_index 순서로 다시 모아야 합니다.
+  모든 draft와 결합된 section_inventory만 chapter_synthesis_prompt에 전달하고, 통합 단계에는
+  source_text를 전달하지 않습니다. review가 needs_revision이면 요약 누락·왜곡 피드백을
+  반영해 최대 2회 다시 검토합니다.
   passed이면 원문과 section_inventory를 제외한 summary·key_points·
   source_char_count만 별도 basic_question_prompt에 전달합니다.
   요약·문제·검증 근거를 합쳐 save_chapter_result로 저장하고, 검토가 통과하지 않으면
@@ -482,8 +599,9 @@ WORKFLOW_INSTRUCTIONS_PARALLEL = """\
 - extension pending이면 같은 챕터의 요약 저장이 끝난 뒤 get_chapter_summary를
   호출합니다. 반환된 summary·key_points·source_char_count만 extension_prompt에
   전달해 save_extension_result로 저장합니다. 외부 검색은 사용하지 않습니다.
-- 한 챕터 안의 요약 → 기본 문제 → 요약 저장 → 확장 문제 의존 순서를 지키고,
-  서로 다른 챕터만 최대 5개까지 병렬 처리합니다.
+- 한 챕터 안에서는 독립적인 section draft만 위 기준으로 제한적으로 병렬 처리하고,
+  chapter_synthesis → 기본 문제 → 요약 저장 → 확장 문제 의존 순서를 지킵니다.
+  서로 다른 챕터는 최대 5개까지 병렬 처리합니다.
 - 두 목록 중 실제로 포함된 요청된 결과 유형만 저장하세요.
 - save_*는 서버가 동시성을 보장하므로 결과 도착 순서대로 호출 가능합니다.
 - 5개 배치 완료 후 다음 5개 시작.
@@ -558,7 +676,9 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
             "section_inventory_prompt": str,
             "section_review_prompt": str,
             "content_map_prompt": str,      # 기존 키 존재 호환 alias
-            "summary_prompt": str,
+            "section_summary_prompt": str,
+            "chapter_synthesis_prompt": str,
+            "summary_prompt": str,          # 기존 단일 단계 호환 프롬프트
             "basic_question_prompt": str,
             "summarizer_prompt": str,        # 기존 클라이언트 호환용 결합 프롬프트
             "review_prompt": str,
@@ -591,6 +711,20 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         ensure_ascii=False,
         indent=2,
     )
+    section_drafts_json_example = json.dumps(
+        {
+            "section_drafts": [{
+                "kind": "section",
+                "section_id": "section_1",
+                "source_span": [120, 540],
+                "fragment_index": 1,
+                "fragment_count": 1,
+                "summary": "원문의 실제 개념과 관계를 설명하는 한국어 학습 초안",
+            }],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
     basic_questions_json_example = json.dumps(
         {
             "questions": question_contract.agent_summary_payload_example()["questions"],
@@ -615,6 +749,15 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
     )
     section_review_prompt = _SECTION_INVENTORY_REVIEW.format(
         section_review_json_example=section_review_json_example,
+    )
+    section_summary_prompt = _SECTION_SUMMARY.format(
+        book_info_block=book_info_block,
+        input_mode_block=input_mode_block,
+        section_drafts_json_example=section_drafts_json_example,
+    )
+    chapter_synthesis_prompt = _CHAPTER_SYNTHESIS.format(
+        book_info_block=book_info_block,
+        summary_only_json_example=summary_only_json_example,
     )
     summary_prompt = _SUMMARY.format(
         book_info_block=book_info_block,
@@ -694,6 +837,9 @@ def build_prompts(state: dict[str, Any], book_info: dict[str, Any] | None = None
         "section_review_prompt": section_review_prompt,
         # 기존 키를 바로 제거하지 않고 새 inventory 프롬프트의 alias로 제공한다.
         "content_map_prompt": section_inventory_prompt,
+        "section_summary_prompt": section_summary_prompt,
+        "chapter_synthesis_prompt": chapter_synthesis_prompt,
+        # 전체 structured_sections를 한 번에 처리하는 구형 클라이언트 호환용이다.
         "summary_prompt": summary_prompt,
         "basic_question_prompt": basic_question_prompt,
         "summarizer_prompt": summarizer_prompt,

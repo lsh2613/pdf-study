@@ -54,7 +54,13 @@ Elicitation으로 순서대로 요청한다. 직접 입력은 페이지 번호 �
 `source_pages`는 표시 메타로만 보존한다. text 모드는 본문 텍스트를 추출하고 OCR
 모드는 PaddleOCR CPU로 읽어 `chapters_raw`의 `text`와 `char_count`를 만든다.
 
-`get_subagent_prompts`는 처리 모드에 맞는 한국어 프롬프트와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 돌려준다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이다. 요약 pending 챕터는 `get_chapter_content`의 전체 text와 서버가 넓게 찾은 번호형 `section_candidates`를 함께 읽어 실제 제목·순서·계층과 exact source anchor만 `section_inventory`로 만든다. 분석 agent는 모든 후보를 실제 section 또는 근거 있는 제외로 감사하고 본문을 복사하지 않는다. 챕터 전체 판정이나 후보 제외가 있으면 별도 `section_review_prompt`가 원문 구조를 검토한다. `get_section_content`는 설명되지 않은 후보를 거부하고 필요한 section review가 통과한 뒤 anchor를 canonical raw offset으로 바꿔 preamble을 포함한 전체 text를 빈틈·중복 없는 `structured_sections`로 분할한다. 요약자는 이 section별 source text만 순서대로 읽고 inventory의 제목·계층을 Markdown 구조로 사용한다. 분리 workflow의 학습자 정보는 inventory·section 검토·요약·의미 검토에는 전달하지 않고 문제 조정에만 사용한다. 요약 후 별도 검토는 전체 원문과 초안만 대조해 중요 누락·왜곡을 확인하며 section 구조는 다시 검증하지 않는다. 기본 문제 생성기에는 원문과 inventory를 전달하지 않는다. 저장 경계는 prepared source binding의 raw fingerprint·연속 span만 기계적으로 검증하고 Markdown heading은 재검증하지 않는다. raw `char_count`가 실제 text 및 상태와 일치할 때만 문제 상한의 `source_char_count`로 사용한다. 챕터 재설정 세대가 검증 중 바뀌면 오래된 저장도 거부한다. 이 품질 판정에는 고정 글자 수를 사용하지 않는다.
+`get_subagent_prompts`는 처리 모드에 맞는 한국어 프롬프트와 함께 `summary_pending_chapter_ids`, `extension_pending_chapter_ids`를 돌려준다. 호환용 `chapter_ids`는 두 목록의 자연 정렬 합집합이다. 요약 pending 챕터는 `get_chapter_content`의 전체 text와 서버가 넓게 찾은 번호형 `section_candidates`를 함께 읽어 실제 제목·순서·계층과 exact source anchor만 `section_inventory`로 만든다. 분석 agent는 챕터 앞의 본문 없는 연속 제목 블록과 뒤에서 본문이 따르는 반복 occurrence를 구분하고, 번호 깊이를 계층의 강한 단서로 사용한다. 모든 후보는 실제 section 또는 근거 있는 제외로 감사하며 본문을 복사하지 않는다. 챕터 전체 판정이나 후보 제외가 있으면 별도 `section_review_prompt`가 원문 구조를 검토한다. `get_section_content`는 설명되지 않은 후보를 거부하고 필요한 section review가 통과한 뒤 anchor를 canonical raw offset으로 바꿔 preamble을 포함한 전체 text를 빈틈·중복 없는 `structured_sections`로 분할한다. 새 기본 생성 흐름은 전체 section을 한 번에 요약하지 않는다. region 경계를 유지한 작은 묶음마다 `section_summary_prompt`가 section source text를 읽고 실제 설명 draft를 만들며, `chapter_synthesis_prompt`는 모든 draft와 inventory만 받아 원래 제목·계층의 Markdown과 key points를 조립한다. 분리 workflow의 학습자 정보는 inventory·section 검토·section draft·챕터 통합·의미 검토에는 전달하지 않고 문제 조정에만 사용한다. 요약 후 별도 검토는 전체 원문과 초안만 대조해 중요 누락·왜곡을 확인하며 section 구조는 다시 검증하지 않는다. 기본 문제 생성기에는 원문과 inventory를 전달하지 않는다. 저장 경계는 prepared source binding의 raw fingerprint·연속 span만 기계적으로 검증하고 Markdown heading은 재검증하지 않는다. raw `char_count`가 실제 text 및 상태와 일치할 때만 문제 상한의 `source_char_count`로 사용한다. 챕터 재설정 세대가 검증 중 바뀌면 오래된 저장도 거부한다. 이 품질 판정에는 고정 글자 수를 사용하지 않는다.
+
+위의 region 경계 유지 원칙은 큰 단일 region을 한 호출에 그대로 넘기라는 뜻이 아니다.
+`kind=chapter`를 포함해 단일 region이 안전한 생성 문맥을 넘으면 안정적인 문단
+또는 full-line 경계의 순서대로 무손실 fragment로 분할한다. fragment는 원래
+kind·section_id를 유지하고 원래 span을 빈틈·중복 없이 덮으며, 통합은 같은
+section_id의 draft를 fragment_index 순서대로 하나의 inventory 제목 아래 재결합한다.
 
 확장 pending 챕터는 완료된 요약을 `get_chapter_summary`로 받아 외부 검색 없이 응용 문제를 만들고 `save_extension_result`가 저장한다. 두 저장 도구는 공통 문제 계약으로 ID 문자·챕터 내 유일성·본문 길이별 최대 개수를 검증하고, 저장 잠금 안에서도 다른 결과 유형과의 ID 충돌을 다시 확인한다. workflow와 `next_action`도 실제로 남은 결과 유형만 안내한다.
 
@@ -85,7 +91,8 @@ flowchart TD
     S -->|예| R["get_chapter_content: 원문"]
     R --> RA["section inventory: 제목·계층·exact anchor"]
     RA --> RB["get_section_content: canonical raw 무손실 분할"]
-    RB --> R0["structured section 요약 → 전체 원문 대조 검토"]
+    RB --> RC["작은 region/fragment 묶음 → section 설명 draft"]
+    RC --> R0["모든 draft → 챕터 통합 → 전체 원문 대조 검토"]
     R0 --> R1["요약만 → 기본 문제"]
     R1 --> S0["save_chapter_result"]
     S -->|아니오| S1{"확장 pending?"}

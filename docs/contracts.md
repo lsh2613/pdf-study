@@ -125,10 +125,13 @@ text 품질이 신뢰 불가면 추출 form은 OCR만 허용하고 그 이유를
 `prepare_ocr(work_id)`를 안내한다. 본문 실패는 새 설정과 챕터별 오류를 유지한다.
 
 `get_subagent_prompts(work_id)`는 챕터 설정이 완료된 작업에서만 구조 inventory
-프롬프트, 요약 프롬프트, 독립 검토 프롬프트, 기본 문제 프롬프트, 호환용 결합
+프롬프트, section 설명 초안 프롬프트, 챕터 통합 프롬프트, 독립 검토 프롬프트,
+기본 문제 프롬프트, 호환용 단일 단계·결합
 요약자 프롬프트, 확장 문제 프롬프트와 처리 순서를 함께 반환한다. 응답 키는
-`section_inventory_prompt`, `section_review_prompt`, `summary_prompt`, `review_prompt`,
-`basic_question_prompt`, `summarizer_prompt`, `extension_prompt`다. 기존
+`section_inventory_prompt`, `section_review_prompt`, `section_summary_prompt`,
+`chapter_synthesis_prompt`, `summary_prompt`, `review_prompt`, `basic_question_prompt`,
+`summarizer_prompt`, `extension_prompt`다. 기존 `summary_prompt`는 전체 structured
+sections를 한 번에 요약하는 호환 경로이고 새 기본 workflow에서는 사용하지 않는다. 기존
 `content_map_prompt`는 같은 section inventory 프롬프트를 반환하는 호환 alias다.
 `summary_pending_chapter_ids`,
 `extension_pending_chapter_ids`를 반환한다. 두 pending 목록은 각각 아직 저장할
@@ -139,8 +142,18 @@ workflow와 `next_action`은 실제 pending 결과 유형만 안내한다. 두 �
 pending 챕터는 raw `text`와 `char_count`를 검증한다. 요약은 완료되고 확장 문제만
 pending인 챕터는 raw 대신 저장된 `summary`, `key_points`, `source_char_count`를
 검증한다. summary pending의 정확한 순서는 `get_chapter_content →
-section_inventory_prompt → 조건부 section_review_prompt → get_section_content → summary_prompt → review_prompt →
-basic_question_prompt → save_chapter_result`다.
+section_inventory_prompt → 조건부 section_review_prompt → get_section_content →
+section_summary_prompt 반복 → chapter_synthesis_prompt → review_prompt →
+basic_question_prompt → save_chapter_result`다. section 초안은 보통 region 경계를
+유지한 한 개 또는 인접한 작은 묶음으로 만든다. 단, `kind=chapter`를
+포함한 큰 단일 region은 안정적인 문단 또는 full-line 경계에서 순서대로
+무손실 fragment로 분할할 수 있다. fragment는 원래 kind·section_id를 유지하고
+1-based `fragment_index`·`fragment_count`와 조정된 `source_span`을 갖으며,
+순서대로 연결했을 때 원래 text와 span 전체를 빈틈·중복 없이 한 번씩
+덮어야 한다. 전체 structured sections를 한 호출에 전달하지 않는다. 챕터 통합
+입력은 결합된 inventory와 순서대로 완성된 section drafts뿐이며 원문 text와
+source text를 다시 전달하지 않는다. 같은 section_id의 여러 fragment draft는
+fragment_index 순서대로 하나의 inventory 제목 아래 통합한다.
 
 pending 판정의 정확한 상태 매핑은 다음과 같다.
 
@@ -180,8 +193,12 @@ canonical text 전체를 `kind=chapter` region 하나로 반환한다.
 `summary`는 비어 있지 않은 문자열, `key_points`는 비어 있지 않은 문자열 배열이어야
 한다. 또한 전체 챕터에서 만든 `section_inventory`와 `summary_review`가 필수다.
 현재 workflow의 `section_inventory`는 `get_section_content`가 raw에 결합한 객체를
-사용한다. 생성 프롬프트는 `structured_sections`의 모든 canonical `source_text`를 읽고
-명시적 서브 챕터를 원래 제목·순서·상대 계층에 맞는 Markdown 제목으로 작성하게 한다.
+사용한다. `section_summary_prompt`는 작은 region 묶음 또는 큰 단일 region을
+안정 경계로 분할한 fragment의 canonical `source_text`를 읽고 입력 단위마다 실제
+학습 설명 draft를 만든다. `chapter_synthesis_prompt`는 원문 없이 모든 draft와
+inventory를 받아 같은 section_id의 fragment를 하나의 제목 아래 재결합하고,
+명시적 서브 챕터를 원래 제목·순서·상대 계층에 맞는 Markdown 제목으로 조립해
+챕터 전체 key points를 만든다.
 inventory에는 원문 복사본이나 중요 point 목록을 넣지 않는다. 준비된
 `source_binding`이 있으면 저장 시 raw hash·글자 수·region의 연속 coverage와 section
 span 일치를 검증한다. 이 검사는 입력 원문 무손실성만 확인하며 inventory 구조의 의미,

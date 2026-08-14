@@ -157,9 +157,17 @@ cwd는 경로 계산에 참여하지 않는다. `list_study_results`는 같은 �
 서버가 반환한 번호형 후보를 section 선택 또는 근거 있는 제외로 모두 감사한다. 챕터
 전체 판정이나 후보 제외는 요약 전에 별도 section 검토가 통과해야 한다. 설명되지 않은
 후보나 미해결 구조 검토는 단일 chapter fallback으로 숨기지 않는다.
-`get_section_content`가 canonical raw를 무손실 span으로 나눈다. 요약 프롬프트는
-structured section의 모든 source text를 읽고 명시적 서브 챕터를 순서·계층대로
-Markdown에 반드시 반영하게 한다. 요약 후에는
+`get_section_content`가 canonical raw를 무손실 span으로 나눈다. 긴 챕터의 모든 region과
+최종 Markdown을 한 호출에 요구하면 모델이 실제 설명 대신 동일한 메타 문구를 반복할
+수 있다. 반대로 명시적 하위 절이 없으면 `kind=chapter` region 하나가 전체 원문이므로
+region을 절대 자르지 말라는 안내는 작은 생성 단위 원칙과 모순된다. 새 기본
+흐름은 보통 region 경계를 유지하되, 큰 단일 region은 안정적인 문단 또는
+full-line 경계의 순서대로 무손실 분할한다. fragment는 kind·section_id·
+fragment_index·fragment_count를 유지하고 원래 span을 빈틈·중복 없이 덮는다.
+`section_summary_prompt`로 각 생성 단위의 실제 설명 draft를 먼저 만들고,
+`chapter_synthesis_prompt`에는 모든 draft와 inventory만 전달해 같은 section_id의 fragment를
+하나의 제목 아래 재결합하고 순서·계층대로 Markdown을 조립한다. 통합 단계에 원문을 다시 전달하지 않으며
+구형 `summary_prompt`는 호환용으로만 둔다. 요약 후에는
 원문·초안을 대조한 `summary_review`가 챕터 전체의 중요 누락·왜곡 부재를 확인한 뒤에만
 `passed`가 된다. section 구조는 검토와 저장 단계에서 다시 검증하지 않는다.
 글자 수나 원문 대비 압축률은 문서별 정보 밀도를 반영하지 못하므로 품질 게이트로

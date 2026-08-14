@@ -44,6 +44,12 @@ mcp = FastMCP("pdf-learner-builder", instructions=MCP_INSTRUCTIONS)
 SERVER_ROOT = Path(__file__).resolve().parent
 RESULT_ROOT = SERVER_ROOT / "result"
 
+_SUMMARY_PROMPT_CHAIN = (
+    "section_inventory_prompt → 조건부 section_review_prompt → "
+    "get_section_content → section_summary_prompt 반복 → "
+    "chapter_synthesis_prompt → review_prompt"
+)
+
 
 _OUTPUT_FORMAT_CHOICES = (
     {
@@ -389,9 +395,8 @@ def _pending_guidance(
         actions: list[str] = []
         if "summary" in kinds:
             actions.append(
-                "section_inventory_prompt → 조건부 section_review_prompt → "
-                "get_section_content → summary_prompt → "
-                "review_prompt → basic_question_prompt 순서로 요약을 먼저 확정하고, "
+                f"{_SUMMARY_PROMPT_CHAIN} → basic_question_prompt 순서로 "
+                "요약을 먼저 확정하고, "
                 "문제 단계에는 "
                 "요약·핵심 포인트만 전달한 뒤 "
                 f'save_chapter_result(work_id="{work_id}", '
@@ -436,9 +441,8 @@ def _pending_guidance(
     instructions: list[str] = []
     if summary_pending:
         instructions.append(
-            f"summary_pending={summary_pending}는 section_inventory_prompt → "
-            "조건부 section_review_prompt → get_section_content → summary_prompt → "
-            "review_prompt로 요약을 확정한 뒤 "
+            f"summary_pending={summary_pending}는 {_SUMMARY_PROMPT_CHAIN}로 "
+            "요약을 확정한 뒤 "
             "basic_question_prompt에는 요약만 전달하고 save_chapter_result로 "
             "함께 저장하세요"
         )
@@ -1818,10 +1822,15 @@ def get_section_content(
     return _ok(
         prepared,
         next_action=(
-            "이 응답의 structured_sections와 section_inventory를 summary_prompt에 "
-            "전달해 초안을 작성하세요. get_chapter_content의 전체 text는 요약 입력으로 "
-            "다시 전달하지 말고 review_prompt에서 최종 초안과 의미를 대조할 때만 "
-            "사용하세요. review가 passed면 문제에는 summary·key_points만 전달합니다."
+            "이 응답의 structured_sections를 한 개 또는 인접한 작은 생성 단위 묶음으로 "
+            "나누세요. 큰 단일 region은 안정적인 문단 또는 full-line 경계에서 순서대로 "
+            "무손실 분할하고 kind·section_id를 유지하며 fragment_index·fragment_count를 "
+            "부여한 뒤 "
+            "section_summary_prompt로 각각 실제 설명 초안을 만들고, "
+            "모든 section_drafts와 section_inventory만 chapter_synthesis_prompt에 전달해 "
+            "최종 summary·key_points를 작성하세요. get_chapter_content의 전체 text는 "
+            "review_prompt에서 최종 초안과 의미를 대조할 때만 사용하세요. review가 "
+            "passed면 문제에는 summary·key_points만 전달합니다."
         ),
     )
 
@@ -1948,9 +1957,8 @@ def get_subagent_prompts(work_id: str) -> dict[str, Any]:
     pending_actions: list[str] = []
     if summary_pending:
         pending_actions.append(
-            f"summary_pending_chapter_ids({summary_pending})는 section_inventory_prompt → "
-            "조건부 section_review_prompt → get_section_content → summary_prompt → "
-            "review_prompt로 요약을 확정한 뒤 "
+            f"summary_pending_chapter_ids({summary_pending})는 {_SUMMARY_PROMPT_CHAIN}로 "
+            "요약을 확정한 뒤 "
             "basic_question_prompt에는 요약만 전달하고, 합친 결과를 "
             "save_chapter_result로 저장하세요"
         )
@@ -1983,8 +1991,11 @@ def save_chapter_result(
 ) -> dict[str, Any]:
     """summarizer sub-agent의 챕터 결과 JSON을 저장합니다.
 
-    스키마와 생성 순서는 get_subagent_prompts의 section_inventory_prompt,
-    section_review_prompt, summary_prompt, review_prompt, basic_question_prompt에 명시.
+    기본 생성 순서는 get_subagent_prompts의 section_inventory_prompt →
+    조건부 section_review_prompt → get_section_content → section_summary_prompt 반복 →
+    chapter_synthesis_prompt → review_prompt → basic_question_prompt이다.
+    summary_prompt는 구형 클라이언트를 위한 호환 전용이며 기본 workflow에서
+    사용하지 않는다.
     동시성 안전.
 
     저장 전 의미 coverage 증거, prompts.py의 기본 결과 JSON 스키마와 활성 문제

@@ -13,8 +13,12 @@
 - 챕터별 요약, 기본 문제, 확장 문제를 분리 JSON으로 저장하고, 현재 프롬프트의 JSON 양식에 맞지 않는 결과는 완료 상태로 바꾸지 않는다.
 - 요약 전에 전체 본문의 실제 제목·순서·계층과 exact source anchor만
   `section_inventory`로 만들고 본문은 복사하지 않는다. `get_section_content`가 canonical
-  raw를 preamble과 section별 span으로 무손실 분할한다. 요약 프롬프트는 이 structured
-  source를 순서대로 읽고 모든 제목·계층을 Markdown에 반영한다. 이후 검토는 원문과
+  raw를 preamble과 section별 span으로 무손실 분할한다. 새 기본 workflow는 작은 region
+  묶음별 `section_summary_prompt`로 실제 설명 draft를 만든다. `kind=chapter`를 포함한
+  큰 단일 region은 안정적인 문단·full-line 경계의 순서대로 무손실 분할하고,
+  원래 kind·section_id를 유지한 draft를 모은다. 모든 draft와 inventory만
+  `chapter_synthesis_prompt`로 통합하며 같은 section_id의 fragment는 한 제목 아래
+  재결합해 모든 제목·계층을 Markdown에 반영한다. 이후 검토는 원문과
   초안의 전체 의미 누락·왜곡만 확인한다. 저장 경계는 prepared source binding의 raw
   fingerprint·span coverage만 검증하며 section 의미나 Markdown heading은 재검증하지 않는다.
 - 서버가 번호형 full-line 제목 후보를 감사 신호로 제공하고, inventory는 각 후보를

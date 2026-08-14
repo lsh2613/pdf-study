@@ -46,9 +46,15 @@ pdf-learner는 로컬 PDF를 챕터별 학습 자료로 바꾸는 MCP 서버다.
   요약 전에 별도 `section_review`를 통과해야 한다. 설명되지 않은 후보나 미해결 검토를
   단일 chapter fallback으로 숨기면 안 된다. 명시적인 각 section에는 원문에서 그대로 복사한 `source_anchor`와
   반복 occurrence를 기록하고 본문을 복사하지 않는다. `get_section_content`가 canonical
-  raw에서 anchor 사이를 무손실 span으로 잘라 `structured_sections`를 만들며, 요약자는
-  이 section별 `source_text`만 순서대로 읽는다. 요약자는 inventory의 모든 제목·순서·
-  계층을 Markdown 구조로 반드시 반영한다. 요약 후 `summary_review`는 원문·초안의 전체
+  raw에서 anchor 사이를 무손실 span으로 잘라 `structured_sections`를 만든다. 새 기본
+  workflow는 전체 챕터를 한 번에 요약하지 않고 작은 생성 단위마다
+  `section_summary_prompt`로 `source_text`를 읽어 실제 설명 draft를 만든 뒤, 모든 draft와
+  inventory만 `chapter_synthesis_prompt`에 전달한다. 통합자는 inventory의 모든 제목·순서·
+  계층을 Markdown 구조로 반드시 반영하며 source text를 다시 받지 않는다. 큰
+  단일 region은 안정적인 문단 또는 full-line 경계에서 순서대로 무손실 분할하고,
+  kind·section_id를 유지한 fragment가 원래 span을 빈틈·중복 없이 덮어야 한다.
+  통합자는 같은 section_id의 fragment draft를 하나의 inventory 제목 아래 재결합한다. 구형
+  `summary_prompt`와 `summarizer_prompt`는 호환용으로만 유지한다. 요약 후 `summary_review`는 원문·초안의 전체
   의미 누락·왜곡만 확인하며 section 구조를 다시 검증하지 않는다. 전체 의미 검토가
   `passed`인 결과만 완료로 저장한다.
 - 분리 workflow에서는 학습자 정보를 section inventory·section 검토·요약·의미 보존 검토에

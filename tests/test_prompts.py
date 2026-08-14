@@ -71,6 +71,51 @@ def test_prompts_embed_separate_section_inventory_and_review_examples(monkeypatc
     assert "review_probe" not in out["summarizer_prompt"]
 
 
+def test_default_summary_prompts_draft_sections_before_chapter_synthesis():
+    out = prompts.build_prompts(_state())
+
+    section_prompt = out["section_summary_prompt"]
+    synthesis_prompt = out["chapter_synthesis_prompt"]
+
+    assert '"section_drafts"' in section_prompt
+    assert '"section_id"' in section_prompt
+    assert '"source_span"' in section_prompt
+    assert "실제 개념·절차·조건·예외·비교·주의사항" in section_prompt
+    assert "이 절은 무엇을 다룬다" in section_prompt
+    assert "원문 구조에 따라 복습한다" in section_prompt
+    assert "메타 설명" in section_prompt
+    assert "section_inventory와 순서대로 완성된 section_drafts" in synthesis_prompt
+    assert "source_text" not in synthesis_prompt
+    assert "chapter text" not in synthesis_prompt
+    assert "모든 section draft" in synthesis_prompt
+    assert "Markdown 제목" in synthesis_prompt
+
+
+def test_oversized_single_region_is_losslessly_fragmented_and_coalesced():
+    out = prompts.build_prompts(_state())
+
+    section_prompt = out["section_summary_prompt"]
+    synthesis_prompt = out["chapter_synthesis_prompt"]
+
+    assert "`kind=chapter`인 챕터 전체 region" in section_prompt
+    assert "안정적인 문단" in section_prompt
+    assert "full-line 경계" in section_prompt
+    assert "임의의 글자 위치에서 자르지 마세요" in section_prompt
+    assert '"fragment_index": 1' in section_prompt
+    assert '"fragment_count": 1' in section_prompt
+    assert "원래 kind과 section_id" in section_prompt
+    assert "빈틈과\n  중복 없이" in section_prompt
+    assert "같은 section_id를 가진 여러 fragment draft" in synthesis_prompt
+    assert "fragment_index 순서대로 하나의" in synthesis_prompt
+    assert "표제는 한 번만 Markdown 제목" in synthesis_prompt
+    assert "`kind=chapter`의 여러 draft" in synthesis_prompt
+
+    workflow = out["workflow_instructions"]
+    assert "큰 단일 region(`kind=chapter` 포함)" in workflow
+    assert "안정적인 문단 또는 full-line" in workflow
+    assert "fragment_index·fragment_count" in workflow
+
+
 def test_summarizer_prompt_assigns_answer_placement_to_server():
     prompt = prompts.build_prompts(_state())["basic_question_prompt"]
 
@@ -121,6 +166,8 @@ def test_user_context_and_book_info_are_injected():
     assert "학부생 대상" not in out["review_prompt"]
     assert "학부생 대상" not in out["section_inventory_prompt"]
     assert "학부생 대상" not in out["summary_prompt"]
+    assert "학부생 대상" not in out["section_summary_prompt"]
+    assert "학부생 대상" not in out["chapter_synthesis_prompt"]
     assert "요약의 내용 범위" in out["summarizer_prompt"]
     assert "학습자 컨텍스트와 겹치는 내용만" in out["summarizer_prompt"]
     for value in ("테스트 책", "샘플 저자", "샘플 출판", "데이터베이스 개론서"):
@@ -221,8 +268,20 @@ def test_summary_workflow_is_semantic_and_has_no_character_target():
         "section_review_prompt"
     )
     assert workflow.index("section_review_prompt") < workflow.index("get_section_content")
-    assert workflow.index("get_section_content") < workflow.index("summary_prompt")
-    assert workflow.index("summary_prompt") < workflow.index("review_prompt로 전체")
+    assert workflow.index("get_section_content") < workflow.index("section_summary_prompt")
+    assert workflow.index("section_summary_prompt") < workflow.index(
+        "chapter_synthesis_prompt"
+    )
+    assert workflow.index("chapter_synthesis_prompt") < workflow.index(
+        "review_prompt로 전체"
+    )
+    parallel_workflow = prompts.build_prompts(
+        _state(execution_mode="parallel")
+    )["workflow_instructions"]
+    assert "서로 독립적인" in parallel_workflow
+    assert "제한된 수로 동시에" in parallel_workflow
+    assert "원래 region 순서" in parallel_workflow
+    assert "서로 다른 챕터만" not in parallel_workflow
 
 
 def test_section_inventory_prompt_handles_varied_hierarchy_and_false_mentions():
@@ -242,6 +301,11 @@ def test_section_inventory_prompt_handles_varied_hierarchy_and_false_mentions():
     assert "section_candidates" in prompt
     assert "candidate_exclusions" in prompt
     assert "모든 후보" in prompt
+    assert "본문 없이 제목만 연속" in prompt
+    assert "뒤에서 본문과 함께 다시" in prompt
+    assert "toc_fragment" in prompt
+    assert "번호 구성요소의 깊이" in prompt
+    assert "모두 level=1" in prompt
 
 
 def test_section_review_prompt_checks_inventory_only_when_risky():

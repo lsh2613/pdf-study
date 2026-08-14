@@ -19,3 +19,4 @@
 - `0017-section-guided-summary.md` - inventory를 요약 생성에 강제하고 이후 section 구조 재검증을 제거한다. source 입력 방식은 0018로 대체됐다.
 - `0018-lossless-section-source.md` - exact anchor를 canonical raw span에 결합해 section별 원문을 무손실로 제공한다.
 - `0019-section-candidate-audit.md` - 번호형 제목 후보를 전수 감사하고 위험한 inventory에 조건부 독립 검토를 요구한다.
+- `0020-section-draft-synthesis.md` - 긴 챕터는 작은 section 묶음별 설명 draft를 먼저 만들고 원문 없는 챕터 통합 단계에서 조립한다.

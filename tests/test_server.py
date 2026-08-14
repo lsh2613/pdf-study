@@ -92,6 +92,30 @@ def _ext():
     return result
 
 
+def test_save_chapter_result_tool_description_uses_default_summary_chain():
+    tools = {
+        tool.name: tool
+        for tool in asyncio.run(server.mcp.list_tools())
+    }
+    description = tools["save_chapter_result"].description
+    default_chain = [
+        "section_inventory_prompt",
+        "section_review_prompt",
+        "get_section_content",
+        "section_summary_prompt",
+        "chapter_synthesis_prompt",
+        "review_prompt",
+        "basic_question_prompt",
+    ]
+
+    assert description is not None
+    cursor = 0
+    for step in default_chain:
+        cursor = description.index(step, cursor) + len(step)
+    assert "summary_prompt는 구형 클라이언트를 위한 호환 전용" in description
+    assert "summary_prompt, review_prompt" not in description
+
+
 def test_save_chapter_result_uses_question_contract(monkeypatch, ko_short, tmp_path):
     wid = _init(str(ko_short), str(tmp_path / "out"))["data"]["work_id"]
     _scan(wid)
@@ -785,7 +809,8 @@ def test_get_section_content_returns_canonical_partition(
         for region in response["data"]["structured_sections"]
     ) == text
     assert response["data"]["section_inventory"]["source_binding"]
-    assert "summary_prompt" in response["next_action"]
+    assert "section_summary_prompt" in response["next_action"]
+    assert "chapter_synthesis_prompt" in response["next_action"]
     assert "review_prompt" in response["next_action"]
 
 
@@ -1472,6 +1497,10 @@ def test_get_subagent_prompts_next_action_mentions_only_summary_when_pending(
     assert response["ok"] is True, response
     assert response["data"]["summary_pending_chapter_ids"] == ["ch1"]
     assert response["data"]["extension_pending_chapter_ids"] == []
+    assert "section_summary_prompt" in response["data"]
+    assert "chapter_synthesis_prompt" in response["data"]
+    assert "section_summary_prompt" in response["next_action"]
+    assert "chapter_synthesis_prompt" in response["next_action"]
     assert "save_chapter_result" in response["next_action"]
     assert "save_extension_result" not in response["next_action"]
 
@@ -2327,6 +2356,8 @@ def test_pending_guidance_lists_summary_and_extension_separately_on_resume(
     assert pending["data"]["extension_pending"] == ["ch1"]
     assert "summary_pending=['ch2']" in pending["next_action"]
     assert "extension_pending=['ch1']" in pending["next_action"]
+    assert "section_summary_prompt" in pending["next_action"]
+    assert "chapter_synthesis_prompt" in pending["next_action"]
 
     workspace._registry.clear()
     resumed = resume_test_work(ko_short, tmp_path)
@@ -2334,6 +2365,8 @@ def test_pending_guidance_lists_summary_and_extension_separately_on_resume(
     assert resumed["data"]["extension_pending"] == ["ch1"]
     assert "summary_pending=['ch2']" in resumed["next_action"]
     assert "extension_pending=['ch1']" in resumed["next_action"]
+    assert "section_summary_prompt" in resumed["next_action"]
+    assert "chapter_synthesis_prompt" in resumed["next_action"]
 
 
 def test_choice_next_steps_require_only_non_choice_parameters(tmp_path, ko_short):

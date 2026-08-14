@@ -143,9 +143,21 @@ section 본문을 복사하지 않는다.
 않으면 챕터 전체 section으로 조용히 대체하지 않고 해당 챕터 처리를 실패로 남긴다.
 `get_section_content`는 이 anchor를 canonical raw에 결합해 preamble을 포함한 원문
 전체를 빈틈·중복 없는 문자 span으로 나누고 section별 `source_text`를 반환한다.
-요약자는 `structured_sections`를 순서대로 읽어 핵심 주장·개념·관계·절차·조건·예외·
-비교·근거·사례·주의점을 보존한다. 모든 명시적인 서브 챕터 제목과 `level`·`parent_id`
-상대 계층을 최종 Markdown에 반영하며 제목을 합치거나 생략하거나 순서를 바꾸면 안 된다.
+새 기본 workflow는 전체 `structured_sections`를 한 번에 생성 입력으로 쓰지 않는다.
+보통은 region 경계를 유지한 한 개 또는 인접한 작은 묶음마다
+`section_summary_prompt`를 적용한다. `kind=chapter`를 포함해 큰 단일 region은
+안정적인 문단 또는 full-line 경계에서 순서대로 무손실 fragment로 분할할 수
+있다. fragment는 원래 kind·section_id를 유지하고, `fragment_index`·
+`fragment_count`·조정된 `source_span`으로 원래 region 전체를 빈틈·중복 없이
+한 번씩 덮는다. 이 단계는 핵심 주장·개념·관계·절차·조건·예외·비교·근거·사례·주의점을
+담은 실제 설명 draft를 만든다. 제목이나 주제만 반복하는 메타 설명으로 draft를
+대신하면 안 된다.
+그 뒤 `chapter_synthesis_prompt`가 원문 없이 모든 draft와 inventory만 받아 모든 명시적
+서브 챕터 제목과 `level`·`parent_id` 상대 계층을 최종 Markdown에 반영한다. 제목이나
+draft를 생략하거나 순서를 바꾸면 안 된다. 같은 section_id의 여러 fragment draft는
+fragment_index 순서대로 하나의 inventory 제목 아래 재결합하고, 제목을 fragment마다
+반복하지 않는다. 전체 section을 한 번에 처리하는
+`summary_prompt`와 요약·문제를 합친 `summarizer_prompt`는 구형 호환용으로만 유지한다.
 
 요약 초안은 별도 의미 검토 단계에서 챕터 본문 전체와 대조한다. 이 검토는 앞선 section 구조를
 다시 확인하지 않고 챕터 전체의 중요한 내용 누락과 왜곡만 판단한다. 누락이나 왜곡이
